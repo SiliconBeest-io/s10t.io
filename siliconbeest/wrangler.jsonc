@@ -9,9 +9,21 @@
 		"binding": "ASSETS"
 	},
 	"observability": {
-		"enabled": true
+	  "enabled": false,
+	  "head_sampling_rate": 1,
+	  "logs": {
+	    "enabled": true,
+	    "head_sampling_rate": 1,
+	    "persist": true,
+	    "invocation_logs": true
+	  },
+	  "traces": {
+	    "enabled": true,
+	    "persist": true,
+	    "head_sampling_rate": 1
+	  }
 	},
-	"compatibility_flags": ["nodejs_compat"],
+  	"compatibility_flags": ["nodejs_compat"],
 	"placement": {
 		"mode": "smart"
 	},
@@ -20,7 +32,8 @@
 	"vars": {
 		"INSTANCE_DOMAIN": "social.example.com",
 		"INSTANCE_TITLE": "My SiliconBeest Instance",
-		"REGISTRATION_MODE": "open"
+		"REGISTRATION_MODE": "open",
+		"SKIP_SIGNATURE_VERIFICATION": true
 	},
 
 	// D1 Database

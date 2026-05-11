@@ -28,7 +28,7 @@ export function createFed(): Federation<FedifyContextData> {
       software: 'SiliconBeest/1.0',
       url: new URL(`https://${env.INSTANCE_DOMAIN}/`),
     },
-    skipSignatureVerification: env.SKIP_SIGNATURE_VERIFICATION === 'true',
+    skipSignatureVerification: env.SKIP_SIGNATURE_VERIFICATION === true,
   });
 
   return cachedFed;

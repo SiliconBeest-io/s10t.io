@@ -19,7 +19,8 @@
 		"mode": "smart"
 	},
 	"vars": {
-		"INSTANCE_DOMAIN": "social.example.com"
+		"INSTANCE_DOMAIN": "social.example.com",
+		"SKIP_SIGNATURE_VERIFICATION": true,
 	},
 	// D1 Database
 	"d1_databases": [
