@@ -289,7 +289,8 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"INSTANCE_TITLE": "${CURRENT_TITLE}",
-		"REGISTRATION_MODE": "${CURRENT_REG}"
+		"REGISTRATION_MODE": "${CURRENT_REG}",
+		"SKIP_SIGNATURE_VERIFICATION": true
 	},
 
 	// D1 Database
@@ -387,7 +388,8 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 		"mode": "smart"
 	},
 	"vars": {
-		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}"
+		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
+		"SKIP_SIGNATURE_VERIFICATION": true
 	},
 
 	// D1 Database (same as main worker)
