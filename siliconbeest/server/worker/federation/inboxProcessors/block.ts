@@ -88,7 +88,7 @@ class BlockProcessor extends BaseProcessor {
 
 export async function processBlock(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new BlockProcessor().process(activity);
+	await new BlockProcessor(localAccountId).process(activity);
 }

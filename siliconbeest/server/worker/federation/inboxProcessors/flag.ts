@@ -79,7 +79,7 @@ class FlagProcessor extends BaseProcessor {
 
 export async function processFlag(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new FlagProcessor().process(activity);
+	await new FlagProcessor(localAccountId).process(activity);
 }

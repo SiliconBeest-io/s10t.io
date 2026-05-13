@@ -54,7 +54,7 @@ class LikeProcessor extends BaseProcessor {
 
 export async function processLike(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new LikeProcessor().process(activity);
+	await new LikeProcessor(localAccountId).process(activity);
 }

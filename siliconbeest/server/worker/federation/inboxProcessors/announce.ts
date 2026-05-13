@@ -24,6 +24,7 @@ class AnnounceProcessor extends BaseProcessor {
 				await env.QUEUE_FEDERATION.send({
 					type: 'fetch_remote_status',
 					statusUri: objectUri,
+					...(this.recipientAccountId ? { signerAccountId: this.recipientAccountId } : {}),
 				});
 			}
 			return;
@@ -81,7 +82,7 @@ class AnnounceProcessor extends BaseProcessor {
 
 export async function processAnnounce(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new AnnounceProcessor().process(activity);
+	await new AnnounceProcessor(localAccountId).process(activity);
 }

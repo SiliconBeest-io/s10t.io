@@ -117,7 +117,7 @@ class MoveProcessor extends BaseProcessor {
 
 export async function processMove(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new MoveProcessor().process(activity);
+	await new MoveProcessor(localAccountId).process(activity);
 }

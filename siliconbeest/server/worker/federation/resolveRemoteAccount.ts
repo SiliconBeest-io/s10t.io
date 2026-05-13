@@ -16,9 +16,19 @@ import { isDomainBlocked } from './helpers/domainBlock';
 import { sanitizeHtml } from '../utils/sanitize';
 import { createFed } from './fedify';
 import { getFedifyContext } from './helpers/send';
+import { pickSignerUsername } from '../../../../packages/shared/services/signer';
 
+/**
+ * Resolve or upsert a remote ActivityPub account.
+ *
+ * @param actorUri        ActivityPub actor URI to resolve.
+ * @param signerAccountId Account ID providing the contextual signer
+ *                        (inbox recipient or authenticated user). When
+ *                        omitted, falls back to the oldest local user.
+ */
 export async function resolveRemoteAccount(
 	actorUri: string,
+	signerAccountId: string | null = null,
 ): Promise<string | null> {
 	const existing = await env.DB.prepare(
 		`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
@@ -57,12 +67,12 @@ export async function resolveRemoteAccount(
 	try {
 		const fed = createFed();
 		const ctx = getFedifyContext(fed);
-		const localAcct = await env.DB.prepare(
-			"SELECT username FROM accounts WHERE domain IS NULL LIMIT 1",
-		).first<{ username: string }>();
-		const docLoader = await ctx.getDocumentLoader({
-			identifier: localAcct?.username || 'admin',
-		});
+		const signerUsername = await pickSignerUsername(env.DB, signerAccountId);
+		if (!signerUsername) {
+			console.warn(`[resolveRemoteAccount] No local signer available for ${actorUri}, skipping`);
+			return null;
+		}
+		const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
 		const actorObj = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
 		if (actorObj && isActor(actorObj)) {
 			resolved = true;
@@ -73,9 +83,9 @@ export async function resolveRemoteAccount(
 			inboxUrl = actorObj.inboxId?.href ?? null;
 			sharedInboxUrl = actorObj.endpoints?.sharedInbox?.href ?? null;
 
-			const icon = await actorObj.getIcon();
+			const icon = await actorObj.getIcon({ documentLoader: docLoader });
 			if (icon?.url) avatarUrl = String(icon.url);
-			const image = await actorObj.getImage();
+			const image = await actorObj.getImage({ documentLoader: docLoader });
 			if (image?.url) headerUrl = String(image.url);
 		} else {
 			console.warn(`[resolveRemoteAccount] Could not resolve actor via Fedify: ${actorUri}`);
@@ -126,6 +136,7 @@ export async function resolveRemoteAccount(
 	await env.QUEUE_FEDERATION.send({
 		type: 'fetch_remote_account',
 		actorUri,
+		...(signerAccountId ? { signerAccountId } : {}),
 	});
 
 	return id;

@@ -7,14 +7,14 @@
  */
 
 import { env } from 'cloudflare:workers';
+import { createFed } from '../fedify';
 import type { FetchRemoteStatusMessage } from '../shared/types/queue';
-
-const AP_ACCEPT = 'application/activity+json, application/ld+json; profile="https://www.w3.org/ns/activitystreams"';
+import { pickSignerUsername } from '../../../packages/shared/services/signer';
 
 export async function handleFetchRemoteStatus(
   msg: FetchRemoteStatusMessage,
 ): Promise<void> {
-  const { statusUri } = msg;
+  const { statusUri, signerAccountId } = msg;
 
   // Check if we already have this status
   const existing = await env.DB.prepare(
@@ -28,31 +28,29 @@ export async function handleFetchRemoteStatus(
     return;
   }
 
-  // Fetch the object with AP Accept header
+  // Fetch the object via Fedify's authenticated document loader
+  // (signed with a real local user's key — not `__instance__` because of
+  // its keyId/publicKey.id mismatch — so authorized-fetch / secure-mode
+  // remote servers respond instead of returning 401).
   let objectDoc: Record<string, unknown>;
   try {
-    const response = await fetch(statusUri, {
-      headers: {
-        Accept: AP_ACCEPT,
-        'User-Agent': 'SiliconBeest/1.0 (ActivityPub; +https://github.com/SJang1/siliconbeest)',
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status >= 500) {
-        throw new Error(`Status fetch failed with ${response.status}`);
-      }
-      console.warn(`Status fetch for ${statusUri} returned ${response.status}, dropping`);
+    const signerUsername = await pickSignerUsername(env.DB, signerAccountId ?? null);
+    if (!signerUsername) {
+      console.warn(`No local signer available to fetch ${statusUri}, dropping`);
       return;
     }
-
-    objectDoc = (await response.json()) as Record<string, unknown>;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('Status fetch failed')) {
-      throw err; // Retry on 5xx
+    const fed = createFed();
+    const ctx = fed.createContext(new URL(`https://${env.INSTANCE_DOMAIN}`), { env });
+    const documentLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
+    const obj = await ctx.lookupObject(statusUri, { documentLoader });
+    if (!obj) {
+      console.warn(`Status lookup for ${statusUri} returned null, dropping`);
+      return;
     }
+    objectDoc = (await obj.toJsonLd()) as Record<string, unknown>;
+  } catch (err) {
     console.error(`Failed to fetch status ${statusUri}:`, err);
-    throw err; // Retry on network errors
+    throw err; // Retry on transient/auth errors
   }
 
   // Validate type
@@ -88,6 +86,7 @@ export async function handleFetchRemoteStatus(
     await env.QUEUE_INTERNAL.send({
       type: 'fetch_remote_account',
       actorUri: authorUri,
+      ...(signerAccountId ? { signerAccountId } : {}),
     });
     // We still need an account_id — create a placeholder
     authorAccountId = crypto.randomUUID();

@@ -516,7 +516,7 @@ class CreateProcessor extends BaseProcessor {
 
 export async function processCreate(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new CreateProcessor().process(activity);
+	await new CreateProcessor(localAccountId).process(activity);
 }

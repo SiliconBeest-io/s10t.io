@@ -42,12 +42,20 @@ export interface FetchRemoteAccountMessage {
   actorUri: string;
   /** Force refresh even if recently fetched */
   forceRefresh?: boolean;
+  /**
+   * Local account ID whose key should sign the outbound fetch.
+   * Omit when no per-request user context exists (handler will fall back
+   * to the oldest active local account via pickSignerUsername).
+   */
+  signerAccountId?: string;
 }
 
 export interface FetchRemoteStatusMessage {
   type: 'fetch_remote_status';
   /** AP object URI of the status to fetch */
   statusUri: string;
+  /** Local account ID whose key should sign the outbound fetch. */
+  signerAccountId?: string;
 }
 
 export interface UpdateInstanceInfoMessage {

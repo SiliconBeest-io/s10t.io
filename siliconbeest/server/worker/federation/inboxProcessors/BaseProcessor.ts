@@ -81,7 +81,16 @@ export abstract class BaseProcessor {
 	protected readonly accountRepo = boundAccountRepo;
 	protected readonly favouriteRepo = boundFavouriteRepo;
 
-	constructor() {}
+	/**
+	 * Inbox recipient (local account) handling this activity, when available.
+	 * Personal inbox listener: the inbox owner's account ID.
+	 * Shared inbox listener (`/inbox`): `null` — no per-request user.
+	 *
+	 * Propagated into resolveActor() so signed outbound fetches use the
+	 * recipient's key (matching the keyId Fedify generates from
+	 * `/users/{username}#main-key`).
+	 */
+	constructor(protected readonly recipientAccountId: string | null = null) {}
 
 	// ============================================================
 	// ENTITY RESOLUTION
@@ -104,7 +113,7 @@ export abstract class BaseProcessor {
 	}
 
 	protected async resolveActor(actorUri: string): Promise<string | null> {
-		return resolveRemoteAccount(actorUri);
+		return resolveRemoteAccount(actorUri, this.recipientAccountId);
 	}
 
 	protected async isLocal(accountId: string): Promise<boolean> {

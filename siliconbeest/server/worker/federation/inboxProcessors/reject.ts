@@ -60,7 +60,7 @@ class RejectProcessor extends BaseProcessor {
 
 export async function processReject(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new RejectProcessor().process(activity);
+	await new RejectProcessor(localAccountId).process(activity);
 }

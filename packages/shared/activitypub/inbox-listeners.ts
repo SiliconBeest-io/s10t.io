@@ -19,6 +19,7 @@
 
 import { isDomainBlocked, extractDomain } from '../domain-blocks';
 import { buildActivityFromJsonLd } from './normalize';
+import { pickSignerUsername } from '../services/signer';
 import { env } from 'cloudflare:workers';
 
 // ============================================================
@@ -35,6 +36,9 @@ interface InboxContextLike<TData> {
 interface InboxListenerBuilder<TData> {
 	on(type: any, handler: (ctx: InboxContextLike<TData>, activity: any) => Promise<void>): InboxListenerBuilder<TData>;
 	onError(handler: (ctx: any, error: Error) => void): void;
+	setSharedKeyDispatcher(
+		dispatcher: (ctx: any) => { identifier: string } | { username: string } | null | Promise<{ identifier: string } | { username: string } | null>,
+	): InboxListenerBuilder<TData>;
 }
 
 /** Matches Fedify's Federation shape (only the inbox listener API). */
@@ -203,6 +207,17 @@ export function setupInboxListeners<TData>(
 
 	federation
 		.setInboxListeners('/users/{identifier}/inbox', '/inbox')
+		// Sign shared-inbox key-fetches with a real local account's key.
+		// The shared `/inbox` has no per-request recipient, so we fall back
+		// to `pickSignerUsername(db, null)` (oldest active local account).
+		// We cannot use the `__instance__` identifier here because its actor
+		// doc declares `id: /actor` while Fedify's route is
+		// `/users/__instance__`, producing a keyId/publicKey.id mismatch
+		// that authorized-fetch servers reject during verification.
+		.setSharedKeyDispatcher(async () => {
+			const username = await pickSignerUsername(env.DB, null);
+			return username ? { identifier: username } : null;
+		})
 
 		.on(
 			vocab.Follow,

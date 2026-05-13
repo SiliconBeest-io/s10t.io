@@ -178,7 +178,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
             );
             if (selfLink?.href) {
               // resolveRemoteAccount will fetch the actor doc and upsert
-              const accountId = await resolveRemoteAccount(selfLink.href);
+              const accountId = await resolveRemoteAccount(selfLink.href, currentAccount.id);
               if (accountId) {
                 accountRow = await env.DB.prepare(
                   'SELECT id, uri, url, inbox_url, domain FROM accounts WHERE id = ?1',

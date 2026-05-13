@@ -5,6 +5,7 @@ import { AppError } from '../../../../middleware/errorHandler';
 import { getFedifyContext } from '../../../../federation/helpers/send';
 import { isActor } from '@fedify/fedify/vocab';
 import { getAccountByUsername } from '../../../../services/account';
+import { pickSignerUsername } from '../../../../../../../packages/shared/services/signer';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -61,8 +62,14 @@ app.get('/lookup', async (c) => {
       console.log(`[lookup] selfLink:`, selfLink?.href || 'not found');
       if (selfLink?.href) {
         console.log(`[lookup] Looking up actor object: ${selfLink.href}`);
-        const localAcct = await env.DB.prepare("SELECT username FROM accounts WHERE domain IS NULL LIMIT 1").first<{ username: string }>();
-        const docLoader = await ctx.getDocumentLoader({ identifier: localAcct?.username || 'admin' });
+        // /api/v1/accounts/lookup is an unauthenticated public endpoint;
+        // sign with the oldest local account (no per-request user available).
+        const signerUsername = await pickSignerUsername(env.DB, null);
+        if (!signerUsername) {
+          console.warn('[lookup] No local signer available, skipping remote fetch');
+          return c.json({ error: 'No local signer available' }, 503);
+        }
+        const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
         const actorObject = await ctx.lookupObject(selfLink.href, { documentLoader: docLoader });
         console.log(`[lookup] lookupObject result:`, actorObject ? `${actorObject.constructor.name} id=${actorObject.id}` : 'null');
         if (actorObject && isActor(actorObject) && actorObject.id) {
@@ -70,8 +77,8 @@ app.get('/lookup', async (c) => {
           const id = crypto.randomUUID();
           const now = new Date().toISOString();
           const preferredUsername = actorObject.preferredUsername || username;
-          const iconObj = await actorObject.getIcon();
-          const imageObj = await actorObject.getImage();
+          const iconObj = await actorObject.getIcon({ documentLoader: docLoader });
+          const imageObj = await actorObject.getImage({ documentLoader: docLoader });
           const iconUrl = iconObj?.url instanceof URL ? iconObj.url.href : '';
           const imageUrl = imageObj?.url instanceof URL ? imageObj.url.href : '';
           const actorUrl = actorObject.url instanceof URL ? actorObject.url.href : `https://${acctDomain}/@${preferredUsername}`;

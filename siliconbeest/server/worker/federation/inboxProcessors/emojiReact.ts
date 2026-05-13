@@ -111,7 +111,7 @@ class EmojiReactProcessor extends BaseProcessor {
 
 export async function processEmojiReact(
 	activity: APActivity & Record<string, unknown>,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new EmojiReactProcessor().process(activity);
+	await new EmojiReactProcessor(localAccountId).process(activity);
 }

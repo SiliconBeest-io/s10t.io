@@ -167,7 +167,7 @@ class UpdateProcessor extends BaseProcessor {
 
 export async function processUpdate(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new UpdateProcessor().process(activity);
+	await new UpdateProcessor(localAccountId).process(activity);
 }

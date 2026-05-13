@@ -7,6 +7,7 @@ import { enrichStatuses } from '../../../utils/statusEnrichment';
 import { generateUlid } from '../../../utils/ulid';
 import { getFedifyContext } from '../../../federation/helpers/send';
 import { isActor } from '@fedify/fedify/vocab';
+import { pickSignerUsername } from '../../../../../../packages/shared/services/signer';
 import type { AccountRow, StatusRow, TagRow } from '../../../types/db';
 
 const app = new Hono<{ Variables: AppVariables }>();
@@ -87,15 +88,24 @@ app.get('/', authOptional, async (c) => {
             accounts.unshift(serializeAccount(existingActor, { instanceDomain: env.INSTANCE_DOMAIN }));
           }
         } else {
-          // Fetch remote actor via Fedify lookupObject
+          // Fetch remote actor via Fedify lookupObject.
+          // Sign with the authenticated user's key when available, falling
+          // back to the oldest local account otherwise.
           let actorObject: any = null;
-          try {
-            // Use a real local account for authenticated fetch (not __instance__ which has mismatched keyId)
-            const localAcct = await env.DB.prepare("SELECT username FROM accounts WHERE domain IS NULL LIMIT 1").first<{ username: string }>();
-            const docLoader = await ctx.getDocumentLoader({ identifier: localAcct?.username || 'admin' });
-            actorObject = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
-          } catch (fetchErr) {
-            console.error('[search] lookupObject error:', fetchErr);
+          let docLoader: Awaited<ReturnType<typeof ctx.getDocumentLoader>> | null = null;
+          const signerUsername = await pickSignerUsername(
+            env.DB,
+            c.get('currentAccount')?.id ?? null,
+          );
+          if (signerUsername) {
+            docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
+            try {
+              actorObject = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
+            } catch (fetchErr) {
+              console.error('[search] lookupObject error:', fetchErr);
+            }
+          } else {
+            console.warn('[search] No local signer available, skipping remote fetch');
           }
           console.log('[search] actorObject:', actorObject ? `id=${actorObject.id?.href}, isActor=${isActor(actorObject)}` : 'null');
           if (actorObject && isActor(actorObject) && actorObject.id) {
@@ -103,8 +113,12 @@ app.get('/', authOptional, async (c) => {
             const now = new Date().toISOString();
             const username = actorObject.preferredUsername || actorObject.name?.toString() || '';
             const actorDomain = actorObject.id.hostname;
-            const iconObj = await actorObject.getIcon();
-            const imageObj = await actorObject.getImage();
+            const iconObj = docLoader
+              ? await actorObject.getIcon({ documentLoader: docLoader })
+              : await actorObject.getIcon();
+            const imageObj = docLoader
+              ? await actorObject.getImage({ documentLoader: docLoader })
+              : await actorObject.getImage();
             const iconUrl = iconObj?.url instanceof URL ? iconObj.url.href : '';
             const imageUrl = imageObj?.url instanceof URL ? imageObj.url.href : '';
             const actorUrl = actorObject.url instanceof URL ? actorObject.url.href : actorObject.id.href;

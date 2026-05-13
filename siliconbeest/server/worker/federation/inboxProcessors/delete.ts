@@ -105,7 +105,7 @@ class DeleteProcessor extends BaseProcessor {
 
 export async function processDelete(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new DeleteProcessor().process(activity);
+	await new DeleteProcessor(localAccountId).process(activity);
 }

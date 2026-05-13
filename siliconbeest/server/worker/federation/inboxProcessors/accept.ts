@@ -107,7 +107,7 @@ class AcceptProcessor extends BaseProcessor {
 
 export async function processAccept(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new AcceptProcessor().process(activity);
+	await new AcceptProcessor(localAccountId).process(activity);
 }

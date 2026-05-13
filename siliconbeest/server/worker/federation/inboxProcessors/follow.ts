@@ -109,7 +109,7 @@ class FollowProcessor extends BaseProcessor {
 
 export async function processFollow(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new FollowProcessor().process(activity);
+	await new FollowProcessor(localAccountId).process(activity);
 }

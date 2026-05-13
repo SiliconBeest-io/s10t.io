@@ -9,8 +9,11 @@
  */
 
 import { env } from 'cloudflare:workers';
+import { isActor } from '@fedify/vocab';
+import { createFed } from '../fedify';
 import type { FetchRemoteAccountMessage } from '../shared/types/queue';
 import { ensureInstanceRecord } from '../../../packages/shared/services/instance';
+import { pickSignerUsername } from '../../../packages/shared/services/signer';
 
 /** Cache TTL for remote actor documents (5 minutes). */
 const ACTOR_CACHE_TTL = 300;
@@ -18,12 +21,10 @@ const ACTOR_CACHE_TTL = 300;
 /** Minimum seconds between re-fetches unless forceRefresh is set. */
 const MIN_REFETCH_INTERVAL = 300; // 5 minutes
 
-const AP_ACCEPT = 'application/activity+json, application/ld+json; profile="https://www.w3.org/ns/activitystreams"';
-
 export async function handleFetchRemoteAccount(
   msg: FetchRemoteAccountMessage,
 ): Promise<void> {
-  const { actorUri, forceRefresh } = msg;
+  const { actorUri, forceRefresh, signerAccountId } = msg;
 
   // Check KV cache first (skip if forceRefresh)
   const cacheKey = `actor:${actorUri}`;
@@ -62,31 +63,33 @@ export async function handleFetchRemoteAccount(
     return;
   }
 
-  // Step 1: Fetch the actor document directly (most AP implementations support this)
+  // Step 1: Fetch the actor document via Fedify's authenticated document loader
+  // (signed with a real local user's key) so authorized-fetch / secure-mode
+  // remote servers respond instead of returning 401.
+  //
+  // We sign as a regular user — NOT as `__instance__` — because the instance
+  // actor's `id`/`publicKey.id` (/actor#main-key) does not match Fedify's
+  // signature keyId (/users/__instance__#main-key), and authorized-fetch
+  // verifiers reject the mismatch.
   let actorDoc: Record<string, unknown>;
   try {
-    const response = await fetch(actorUri, {
-      headers: {
-        Accept: AP_ACCEPT,
-        'User-Agent': 'SiliconBeest/1.0 (ActivityPub; +https://github.com/SJang1/siliconbeest)',
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status >= 500) {
-        throw new Error(`Actor fetch failed with ${response.status}`);
-      }
-      console.warn(`Actor fetch for ${actorUri} returned ${response.status}, dropping`);
+    const signerUsername = await pickSignerUsername(env.DB, signerAccountId ?? null);
+    if (!signerUsername) {
+      console.warn(`No local signer available to fetch ${actorUri}, dropping`);
       return;
     }
-
-    actorDoc = (await response.json()) as Record<string, unknown>;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('Actor fetch failed')) {
-      throw err; // Retry on 5xx
+    const fed = createFed();
+    const ctx = fed.createContext(new URL(`https://${env.INSTANCE_DOMAIN}`), { env });
+    const documentLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
+    const actorObj = await ctx.lookupObject(actorUri, { documentLoader });
+    if (!actorObj || !isActor(actorObj)) {
+      console.warn(`Actor lookup for ${actorUri} did not return an actor, dropping`);
+      return;
     }
+    actorDoc = (await actorObj.toJsonLd()) as Record<string, unknown>;
+  } catch (err) {
     console.error(`Failed to fetch actor ${actorUri}:`, err);
-    throw err; // Retry on network errors
+    throw err; // Retry on transient/auth errors
   }
 
   // Validate minimal required fields

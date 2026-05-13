@@ -109,6 +109,12 @@ export default {
       try {
         const body = msg.body as Record<string, unknown>;
 
+        // Ensure federation dispatchers are registered before any handler runs.
+        // Legacy handlers (fetch_remote_account, fetch_remote_status) need
+        // ctx.getDocumentLoader({ identifier: '__instance__' }) for signed fetches,
+        // which requires the actor + key-pairs dispatcher to be set up.
+        ensureFedInitialized();
+
         // ---- Fedify queued tasks (from WorkersMessageQueue / sendActivity) ----
         if (isFedifyMessage(body)) {
           try {

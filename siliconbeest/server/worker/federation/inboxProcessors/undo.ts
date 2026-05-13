@@ -242,7 +242,7 @@ class UndoProcessor extends BaseProcessor {
 
 export async function processUndo(
 	activity: APActivity,
-	_localAccountId: string,
+	localAccountId: string,
 ): Promise<void> {
-	await new UndoProcessor().process(activity);
+	await new UndoProcessor(localAccountId).process(activity);
 }

@@ -87,7 +87,7 @@ app.post('/migration', authRequired, async (c) => {
 	}
 
 	// 4. Resolve or create the target account in our DB
-	const targetAccountId = await resolveRemoteAccount(targetActorUri);
+	const targetAccountId = await resolveRemoteAccount(targetActorUri, accountId);
 	if (!targetAccountId) {
 		return c.json({ error: 'Could not resolve target account' }, 422);
 	}
