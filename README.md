@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="siliconbeest/public/siliconbeest.jpg" alt="SiliconBeest logo" width="200" />
+</p>
+
 # SiliconBeest
 
 **Serverless Fediverse platform on Cloudflare Workers.**

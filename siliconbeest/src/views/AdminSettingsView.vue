@@ -172,7 +172,7 @@ const labelClass = 'block text-sm font-medium mb-1'
                 {{ faviconUploading ? '...' : t('common.upload') }}
                 <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'site_favicon_url')" />
               </label>
-              <img v-if="settings.site_favicon_url" :src="settings.site_favicon_url" class="w-8 h-8 rounded object-contain border border-gray-200 dark:border-gray-700" alt="favicon" />
+              <img :src="settings.site_favicon_url || '/siliconbeest.jpg'" class="w-8 h-8 rounded object-contain border border-gray-200 dark:border-gray-700" alt="favicon" />
             </div>
           </div>
           <div>
@@ -183,7 +183,7 @@ const labelClass = 'block text-sm font-medium mb-1'
                 {{ logoUploading ? '...' : t('common.upload') }}
                 <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'site_logo_url')" />
               </label>
-              <img v-if="settings.site_logo_url" :src="settings.site_logo_url" class="w-8 h-8 rounded object-contain border border-gray-200 dark:border-gray-700" alt="logo" />
+              <img :src="settings.site_logo_url || '/siliconbeest.jpg'" class="w-8 h-8 rounded object-contain border border-gray-200 dark:border-gray-700" alt="logo" />
             </div>
           </div>
           <div>

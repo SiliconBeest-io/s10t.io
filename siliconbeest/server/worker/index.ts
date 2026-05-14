@@ -365,6 +365,26 @@ app.route('/proxy', proxyEndpoint);
 // Thumbnail / favicon
 // ---------------------------------------------------------------------------
 
+// Default brand image bundled at /siliconbeest.jpg in the SPA assets.
+// Used as the fallback when an admin hasn't uploaded a favicon/thumbnail.
+async function fetchBundledDefaultLogo(reqUrl: string): Promise<Response | null> {
+  try {
+    const assetReq = new Request(new URL('/siliconbeest.jpg', reqUrl));
+    const res = await env.ASSETS.fetch(assetReq);
+    if (res.ok) {
+      return new Response(res.body, {
+        headers: {
+          'Content-Type': res.headers.get('Content-Type') || 'image/jpeg',
+          'Cache-Control': 'public, max-age=3600',
+        },
+      });
+    }
+  } catch {
+    // ignore — caller falls through to the next fallback
+  }
+  return null;
+}
+
 // Default avatar SVG (person silhouette on indigo bg)
 app.get('/default-avatar.svg', (c) => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#6366f1"/><circle cx="50" cy="38" r="18" fill="#e0e7ff"/><ellipse cx="50" cy="80" rx="28" ry="22" fill="#e0e7ff"/></svg>`;
@@ -392,7 +412,10 @@ app.get('/thumbnail.png', async (c) => {
       },
     });
   }
-  // Fallback: generate a 1x1 transparent PNG
+  // Fallback: bundled default brand image
+  const bundled = await fetchBundledDefaultLogo(c.req.url);
+  if (bundled) return bundled;
+  // Final fallback: 1x1 transparent PNG
   const pixel = new Uint8Array([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
     0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
@@ -428,6 +451,9 @@ app.get('/pwa-icon/:size', async (c) => {
       },
     });
   }
+  // Fallback: bundled default brand image
+  const bundled = await fetchBundledDefaultLogo(c.req.url);
+  if (bundled) return bundled;
   return c.notFound();
 });
 
@@ -451,7 +477,10 @@ app.get('/favicon.ico', async (c) => {
       },
     });
   }
-  // Generate a simple SVG favicon
+  // Fallback: bundled default brand image
+  const bundled = await fetchBundledDefaultLogo(c.req.url);
+  if (bundled) return bundled;
+  // Final fallback: a simple inline SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#6366f1"/><text x="16" y="22" font-size="18" fill="white" text-anchor="middle" font-family="sans-serif" font-weight="bold">S</text></svg>`;
   return new Response(svg, {
     headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' },
