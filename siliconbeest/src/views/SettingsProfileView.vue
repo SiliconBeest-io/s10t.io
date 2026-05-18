@@ -33,12 +33,9 @@ onMounted(() => {
     discoverable.value = authStore.currentUser.discoverable ?? false
     avatarPreview.value = authStore.currentUser.avatar
     headerPreview.value = authStore.currentUser.header
-    fields.value = (authStore.currentUser.source?.fields ?? authStore.currentUser.fields ?? []).map(
-      (f) => ({ name: f.name, value: f.value })
-    )
-    if (fields.value.length === 0) {
-      fields.value.push({ name: '', value: '' })
-    }
+    fields.value = (authStore.currentUser.source?.fields ?? authStore.currentUser.fields ?? [])
+      .filter((f) => f.name.trim() || f.value.trim())
+      .map((f) => ({ name: f.name, value: f.value }))
   }
 })
 
@@ -86,7 +83,12 @@ async function saveProfile() {
       formData.append('header', headerFile.value)
     }
 
-    fields.value.forEach((field, i) => {
+    const populatedFields = fields.value.filter((field) => field.name.trim() || field.value.trim())
+    if (populatedFields.length === 0) {
+      formData.append('fields_attributes', '[]')
+    }
+
+    populatedFields.forEach((field, i) => {
       formData.append(`fields_attributes[${i}][name]`, field.name)
       formData.append(`fields_attributes[${i}][value]`, field.value)
     })

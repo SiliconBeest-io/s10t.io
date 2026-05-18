@@ -22,6 +22,7 @@ import { setupNodeInfoDispatcher } from './federation/dispatchers/nodeinfo';
 import { setupCollectionDispatchers } from './federation/dispatchers/collections';
 import { setupObjectDispatchers, handleActivityRequest } from './federation/dispatchers/objects';
 import { setupWorkerInboxListeners } from './federation/listeners/inbox';
+import { getSettings } from './services/instance';
 
 // ---------------------------------------------------------------------------
 // Fedify Federation — singleton per isolate
@@ -385,6 +386,42 @@ async function fetchBundledDefaultLogo(reqUrl: string): Promise<Response | null>
   return null;
 }
 
+function configuredAssetUrl(
+  rawUrl: string | undefined,
+  reqUrl: string,
+  currentPath: string,
+): string | null {
+  const value = rawUrl?.trim();
+  if (!value) return null;
+
+  try {
+    const requestUrl = new URL(reqUrl);
+    const assetUrl = new URL(value, requestUrl);
+    if (assetUrl.protocol !== 'http:' && assetUrl.protocol !== 'https:') {
+      return null;
+    }
+    if (assetUrl.origin === requestUrl.origin && assetUrl.pathname === currentPath) {
+      return null;
+    }
+    return assetUrl.href;
+  } catch {
+    return null;
+  }
+}
+
+async function getConfiguredFaviconUrl(reqUrl: string): Promise<string | null> {
+  try {
+    const settings = await getSettings(['site_favicon_url', 'favicon_url']);
+    return configuredAssetUrl(
+      settings.site_favicon_url || settings.favicon_url,
+      reqUrl,
+      '/favicon.ico',
+    );
+  } catch {
+    return null;
+  }
+}
+
 // Default avatar SVG (person silhouette on indigo bg)
 app.get('/default-avatar.svg', (c) => {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#6366f1"/><circle cx="50" cy="38" r="18" fill="#e0e7ff"/><ellipse cx="50" cy="80" rx="28" ry="22" fill="#e0e7ff"/></svg>`;
@@ -458,11 +495,16 @@ app.get('/pwa-icon/:size', async (c) => {
 });
 
 app.get('/favicon.ico', async (c) => {
+  const configuredUrl = await getConfiguredFaviconUrl(c.req.url);
+  if (configuredUrl) {
+    return c.redirect(configuredUrl, 302);
+  }
+
   const obj = await env.MEDIA_BUCKET.get('instance/favicon.ico');
   if (obj) {
     return new Response(obj.body, {
       headers: {
-        'Content-Type': 'image/x-icon',
+        'Content-Type': obj.httpMetadata?.contentType || 'image/x-icon',
         'Cache-Control': 'public, max-age=3600',
       },
     });

@@ -194,5 +194,54 @@ describe('Accounts API', () => {
       const body = await res.json<Record<string, any>>();
       expect(body.display_name).toBe('Alice Wonderland');
     });
+
+    it('clears profile metadata when multipart fields_attributes is empty', async () => {
+      const setFields = new FormData();
+      setFields.append('fields_attributes[0][name]', 'Website');
+      setFields.append('fields_attributes[0][value]', 'https://example.com');
+
+      const setRes = await SELF.fetch(`${BASE}/api/v1/accounts/update_credentials`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${alice.token}` },
+        body: setFields,
+      });
+      expect(setRes.status).toBe(200);
+      const setBody = await setRes.json<Record<string, any>>();
+      expect(setBody.fields).toEqual([
+        { name: 'Website', value: 'https://example.com', verified_at: null },
+      ]);
+
+      const clearFields = new FormData();
+      clearFields.append('fields_attributes', '[]');
+
+      const clearRes = await SELF.fetch(`${BASE}/api/v1/accounts/update_credentials`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${alice.token}` },
+        body: clearFields,
+      });
+      expect(clearRes.status).toBe(200);
+      const clearBody = await clearRes.json<Record<string, any>>();
+      expect(clearBody.fields).toEqual([]);
+      expect(clearBody.source.fields).toEqual([]);
+    });
+
+    it('ignores blank profile metadata rows', async () => {
+      const fields = new FormData();
+      fields.append('fields_attributes[0][name]', '');
+      fields.append('fields_attributes[0][value]', '');
+      fields.append('fields_attributes[1][name]', 'Website');
+      fields.append('fields_attributes[1][value]', 'https://example.com');
+
+      const res = await SELF.fetch(`${BASE}/api/v1/accounts/update_credentials`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${alice.token}` },
+        body: fields,
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json<Record<string, any>>();
+      expect(body.fields).toEqual([
+        { name: 'Website', value: 'https://example.com', verified_at: null },
+      ]);
+    });
   });
 });

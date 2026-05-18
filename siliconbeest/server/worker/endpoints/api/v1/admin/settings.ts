@@ -2,7 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
-import { getAllSettings, setSettings, setSetting } from '../../../../services/instance';
+import { getAllSettings, setSettings } from '../../../../services/instance';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -46,8 +46,12 @@ app.post('/thumbnail', async (c) => {
 	const domain = env.INSTANCE_DOMAIN;
 	const url = `https://${domain}/thumbnail.png`;
 
-	// Also save in settings
-	await setSetting('thumbnail_url', url);
+	// Save both keys: site_logo_url is what the admin UI edits, while
+	// thumbnail_url is kept for older deployments that may already read it.
+	await setSettings({
+		site_logo_url: url,
+		thumbnail_url: url,
+	});
 
 	return c.json({ url });
 });
@@ -69,7 +73,12 @@ app.post('/favicon', async (c) => {
 	const domain = env.INSTANCE_DOMAIN;
 	const url = `https://${domain}/favicon.ico`;
 
-	await setSetting('favicon_url', url);
+	// Save both keys: site_favicon_url is what the admin UI edits, while
+	// favicon_url is kept for older deployments that may already read it.
+	await setSettings({
+		site_favicon_url: url,
+		favicon_url: url,
+	});
 
 	return c.json({ url });
 });

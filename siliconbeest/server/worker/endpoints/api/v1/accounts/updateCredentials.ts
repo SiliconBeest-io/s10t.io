@@ -13,6 +13,16 @@ function parseFields(raw: string | null): Array<{ name: string; value: string; v
   return JSON.parse(raw);
 }
 
+function addProfileField(
+  fields: Array<{ name: string; value: string; verified_at: string | null }>,
+  field: { name?: unknown; value?: unknown },
+) {
+  const name = String(field.name ?? '');
+  const value = String(field.value ?? '');
+  if (!name.trim() && !value.trim()) return;
+  fields.push({ name, value, verified_at: null });
+}
+
 const app = new Hono<HonoEnv>();
 
 app.patch('/update_credentials', authRequired, requireScope('write:accounts'), async (c) => {
@@ -108,17 +118,13 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     const attrs = body.fields_attributes as Array<{ name?: unknown; value?: unknown }> | Record<string, { name?: unknown; value?: unknown }>;
     if (Array.isArray(attrs)) {
       for (const f of attrs) {
-        if (f && f.name !== undefined) {
-          fields.push({ name: String(f.name), value: String(f.value || ''), verified_at: null });
-        }
+        if (f) addProfileField(fields, f);
       }
     } else if (typeof attrs === 'object') {
       // Indexed object: { "0": { name, value }, "1": { name, value } }
       for (const key of Object.keys(attrs).sort()) {
         const f = attrs[key];
-        if (f && f.name !== undefined) {
-          fields.push({ name: String(f.name), value: String(f.value || ''), verified_at: null });
-        }
+        if (f) addProfileField(fields, f);
       }
     }
     updates.push(`fields = ?${paramIdx++}`);
@@ -140,7 +146,7 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     if (fieldMap.size > 0) {
       const sorted = [...fieldMap.entries()].sort((a, b) => Number(a[0]) - Number(b[0]));
       for (const [, f] of sorted) {
-        fields.push({ name: f.name, value: f.value, verified_at: null });
+        addProfileField(fields, f);
       }
       updates.push(`fields = ?${paramIdx++}`);
       params.push(JSON.stringify(fields));
