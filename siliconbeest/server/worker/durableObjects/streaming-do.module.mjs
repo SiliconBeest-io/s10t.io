@@ -24,7 +24,7 @@ export class StreamingDO extends DurableObject {
       return new Response("ok", { status: 200 });
     }
 
-    if (request.headers.get("Upgrade") === "websocket") {
+    if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       const stream = url.searchParams.get("stream") || "user";
       const pair = new WebSocketPair();
       const [client, server] = [pair[0], pair[1]];
@@ -67,8 +67,7 @@ export class StreamingDO extends DurableObject {
     }
   }
 
-  async webSocketClose(ws, code, reason) {
-    ws.close(code, reason);
+  async webSocketClose(ws) {
     this.sessions.delete(ws);
   }
 

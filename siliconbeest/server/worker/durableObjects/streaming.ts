@@ -56,7 +56,7 @@ export class StreamingDO extends DurableObject {
     }
 
     // WebSocket upgrade for streaming
-    if (request.headers.get('Upgrade') === 'websocket') {
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       const stream = url.searchParams.get('stream') || 'user';
 
       const pair = new WebSocketPair();
@@ -107,7 +107,8 @@ export class StreamingDO extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
-    ws.close(code, reason);
+    // The socket is already closed when this callback runs. Do not echo the
+    // observed close code back into close(); 1006 is reserved and invalid here.
     this.sessions.delete(ws);
   }
 
