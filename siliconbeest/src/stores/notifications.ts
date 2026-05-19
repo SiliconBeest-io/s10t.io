@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, markRaw } from 'vue';
 import type { Notification } from '@/types/mastodon';
 import {
   getNotifications as fetchNotifications,
@@ -56,9 +56,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
       await fetchUnreadCount(token);
 
       // Auto-connect streaming for notifications
-      if (!streamingClient.value) {
-        connectStream(token);
-      }
+      connectStream(token);
     } catch (e) {
       error.value = (e as Error).message;
     } finally {
@@ -142,9 +140,14 @@ export const useNotificationsStore = defineStore('notifications', () => {
   }
 
   function connectStream(token: string) {
-    if (streamingClient.value) return;
+    if (typeof window === 'undefined') return;
+    if (streamingClient.value?.isActive()) return;
+    if (streamingClient.value) {
+      streamingClient.value.disconnect();
+      streamingClient.value = null;
+    }
 
-    streamingClient.value = new StreamingClient(token, 'user:notification', {
+    streamingClient.value = markRaw(new StreamingClient(token, 'user:notification', {
       onNotification(notification: Notification) {
         try {
           cacheFromNotifications([notification]);
@@ -169,7 +172,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
           items.value.forEach((n: any) => { n.read = 1; });
         }
       },
-    });
+    }));
 
     streamingClient.value.connect();
   }

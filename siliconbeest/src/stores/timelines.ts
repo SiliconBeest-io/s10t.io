@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { markRaw, ref } from 'vue';
 import type { Status } from '@/types/mastodon';
 import { parseLinkHeader } from '@/api/client';
 import {
@@ -109,7 +109,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
           local: 'public:local',
         };
         const streamName = streamMap[type];
-        if (streamName && !streamingClients.value.has(streamName)) {
+        if (streamName) {
           connectStream(opts.token, streamName, type);
         }
       }
@@ -186,8 +186,14 @@ export const useTimelinesStore = defineStore('timelines', () => {
   }
 
   function connectStream(token: string, stream: string = 'user', timelineType: TimelineType = 'home') {
-    // Already connected to this stream
-    if (streamingClients.value.has(stream)) return;
+    if (typeof window === 'undefined') return;
+
+    const existingClient = streamingClients.value.get(stream);
+    if (existingClient?.isActive()) return;
+    if (existingClient) {
+      existingClient.disconnect();
+      streamingClients.value.delete(stream);
+    }
 
     const statusStore = useStatusesStore();
     const accountStore = useAccountsStore();
@@ -222,7 +228,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
       },
     });
 
-    streamingClients.value.set(stream, client);
+    streamingClients.value.set(stream, markRaw(client));
     client.connect();
   }
 

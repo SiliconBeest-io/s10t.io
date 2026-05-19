@@ -1,13 +1,23 @@
 import * as Sentry from '@sentry/vue';
+import { watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useInstanceStore } from '@/stores/instance';
 import { useNotificationsStore } from '@/stores/notifications';
+import { useTimelinesStore } from '@/stores/timelines';
 
 export default defineNuxtPlugin((nuxtApp) => {
   const auth = useAuthStore();
   const instance = useInstanceStore();
   const notifications = useNotificationsStore();
+  const timelines = useTimelinesStore();
   const config = useRuntimeConfig();
+
+  function connectDefaultStreams() {
+    if (!auth.token) return;
+
+    timelines.connectStream(auth.token, 'user', 'home');
+    notifications.connectStream(auth.token);
+  }
 
   const sentryDsn = config.public.sentryDsn;
   if (sentryDsn) {
@@ -34,6 +44,24 @@ export default defineNuxtPlugin((nuxtApp) => {
     );
   }
   void Promise.allSettled(backgroundTasks);
+
+  nuxtApp.hook('app:mounted', () => {
+    connectDefaultStreams();
+
+    watch(
+      () => auth.token,
+      (token) => {
+        if (token) {
+          connectDefaultStreams();
+          return;
+        }
+
+        timelines.disconnectStream();
+        notifications.disconnectStream();
+      },
+      { flush: 'post' },
+    );
+  });
 
   const title = instance.instance?.title || config.public.instanceTitle;
   useHead({

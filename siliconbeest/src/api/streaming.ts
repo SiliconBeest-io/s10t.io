@@ -45,8 +45,10 @@ export interface StreamCallbacks {
 export class StreamingClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private maxReconnectDelay = 30000;
+  private connectTimeoutMs = 30000;
   private intentionalClose = false;
 
   private token: string;
@@ -60,21 +62,45 @@ export class StreamingClient {
   }
 
   connect(): void {
+    if (typeof window === 'undefined') return;
+
     this.intentionalClose = false;
     this.cleanup();
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const url = `${protocol}//${host}/api/v1/streaming?stream=${encodeURIComponent(this.stream)}&access_token=${encodeURIComponent(this.token)}`;
+    const url = new URL(`${protocol}//${host}/api/v1/streaming`);
+    url.searchParams.set('stream', this.stream);
+    if (!this.hasAuthCookie()) {
+      url.searchParams.set('access_token', this.token);
+    }
+    const urlString = url.toString();
+
+    this.log('connecting', {
+      url: this.redactAccessToken(urlString),
+      readyState: this.ws?.readyState ?? null,
+    });
 
     try {
-      this.ws = new WebSocket(url);
-    } catch {
+      this.ws = new WebSocket(urlString);
+    } catch (error) {
+      this.log('connect constructor failed', { error });
       this.scheduleReconnect();
       return;
     }
 
+    this.connectTimer = setTimeout(() => {
+      if (this.ws?.readyState === WebSocket.CONNECTING) {
+        this.log('connect timeout', {
+          timeoutMs: this.connectTimeoutMs,
+          readyState: this.ws.readyState,
+        });
+        this.ws.close();
+      }
+    }, this.connectTimeoutMs);
+
     this.ws.onopen = () => {
+      this.clearConnectTimer();
       this.reconnectAttempts = 0;
       this.callbacks.onConnect?.();
     };
@@ -83,14 +109,25 @@ export class StreamingClient {
       this.handleMessage(event);
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event: CloseEvent) => {
+      this.clearConnectTimer();
+      this.log('closed', {
+        code: event.code,
+        reason: event.reason || null,
+        wasClean: event.wasClean,
+        readyState: this.ws?.readyState,
+      });
       this.callbacks.onDisconnect?.();
       if (!this.intentionalClose) {
         this.scheduleReconnect();
       }
     };
 
-    this.ws.onerror = () => {
+    this.ws.onerror = (event: Event) => {
+      this.log('error', {
+        readyState: this.ws?.readyState,
+        eventType: event.type,
+      });
       // onclose will fire after onerror, so reconnect is handled there
     };
   }
@@ -100,11 +137,17 @@ export class StreamingClient {
     this.cleanup();
   }
 
+  isActive(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING;
+  }
+
   private cleanup(): void {
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearConnectTimer();
 
     if (this.ws) {
       this.ws.onopen = null;
@@ -119,6 +162,13 @@ export class StreamingClient {
         this.ws.close();
       }
       this.ws = null;
+    }
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
     }
   }
 
@@ -198,10 +248,37 @@ export class StreamingClient {
       this.maxReconnectDelay,
     );
     this.reconnectAttempts++;
+    this.log('reconnect scheduled', { delayMs: delay, attempt: this.reconnectAttempts });
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
     }, delay);
+  }
+
+  private log(message: string, data?: Record<string, unknown>): void {
+    if (
+      typeof window === 'undefined' ||
+      (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+    ) return;
+    console.warn(`[streaming:${this.stream}] ${message}`, data ?? {});
+  }
+
+  private redactAccessToken(url: string): string {
+    try {
+      const parsed = new URL(url);
+      if (parsed.searchParams.has('access_token')) {
+        parsed.searchParams.set('access_token', 'REDACTED');
+      }
+      return parsed.toString();
+    } catch {
+      return url.replace(/access_token=[^&]+/, 'access_token=REDACTED');
+    }
+  }
+
+  private hasAuthCookie(): boolean {
+    return document.cookie
+      .split(';')
+      .some((part) => part.trim().startsWith('siliconbeest_token='));
   }
 }

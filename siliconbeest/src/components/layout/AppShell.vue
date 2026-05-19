@@ -8,12 +8,6 @@ import MobileNav from './MobileNav.vue'
 const { t } = useI18n()
 const ui = useUiStore()
 
-withDefaults(defineProps<{
-  mainScrollable?: boolean
-}>(), {
-  mainScrollable: true,
-})
-
 const gridClass = computed(() =>
   ui.showTrending
     ? 'grid-cols-1 md:grid-cols-[16rem_1fr] lg:grid-cols-[16rem_1fr_20rem] xl:grid-cols-[18rem_1fr_20rem]'
@@ -22,23 +16,22 @@ const gridClass = computed(() =>
 </script>
 
 <template>
-  <div class="fixed inset-0 overflow-hidden bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-    <div class="grid h-screen min-h-0" :class="gridClass">
+  <div class="min-h-dvh bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+    <div class="grid min-h-dvh" :class="gridClass">
       <!-- Desktop Sidebar — pinned to left edge -->
-      <aside class="hidden md:flex md:flex-col h-screen sticky top-0 border-r border-gray-200 dark:border-gray-700">
+      <aside class="hidden md:flex md:flex-col md:sticky md:top-0 md:h-dvh overflow-y-auto border-r border-gray-200 dark:border-gray-700">
         <Sidebar />
       </aside>
 
       <!-- Main Content -->
       <main
-        class="h-screen min-h-0 overflow-x-hidden border-r border-gray-200 dark:border-gray-700 w-full pb-16 md:pb-0"
-        :class="mainScrollable ? 'overflow-y-auto' : 'overflow-y-hidden'"
+        class="min-h-dvh overflow-x-hidden border-r border-gray-200 dark:border-gray-700 w-full pb-16 md:pb-0"
       >
         <slot />
       </main>
 
       <!-- Right Panel (trending) — pinned to right edge -->
-      <aside v-if="ui.showTrending" class="hidden lg:block h-screen overflow-y-auto p-4">
+      <aside v-if="ui.showTrending" class="hidden lg:block lg:sticky lg:top-0 lg:h-dvh overflow-y-auto p-4">
         <slot name="right-panel">
           <div class="rounded-xl bg-gray-50 dark:bg-gray-800 p-4">
             <h2 class="font-bold text-lg mb-3">{{ t('explore.trending') }}</h2>
@@ -49,6 +42,6 @@ const gridClass = computed(() =>
     </div>
 
     <!-- Mobile Bottom Nav -->
-    <MobileNav class="md:hidden" />
+    <MobileNav />
   </div>
 </template>

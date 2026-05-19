@@ -65,12 +65,12 @@ onBeforeRouteLeave(() => {
   <Teleport to="body">
     <div
       v-if="menuOpen"
-      class="fixed inset-0 bg-black/40 z-[60]"
+      class="fixed inset-0 bg-black/40 z-[60] md:hidden"
       @click="menuOpen = false"
     />
     <div
       v-if="menuOpen"
-      class="fixed bottom-14 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 rounded-t-2xl z-[61] shadow-2xl"
+      class="fixed bottom-14 left-0 right-0 max-h-[calc(100dvh-3.5rem)] overflow-y-auto overscroll-contain bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 rounded-t-2xl z-[61] shadow-2xl md:hidden"
     >
       <div class="p-2 space-y-0.5">
         <!-- User info -->
@@ -132,7 +132,7 @@ onBeforeRouteLeave(() => {
 
   <!-- Bottom tab bar -->
   <nav
-    class="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50 lg:hidden"
+    class="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50 md:hidden"
     aria-label="Mobile navigation"
   >
     <ul class="flex justify-around items-center h-14">
