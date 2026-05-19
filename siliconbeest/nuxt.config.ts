@@ -10,6 +10,7 @@ const INSTANCE_TITLE = process.env.INSTANCE_TITLE;
 const STREAMING_DO_SOURCE = fileURLToPath(
   new URL('./server/worker/durableObjects/streaming-do.module.mjs', import.meta.url),
 );
+const CLOUDFLARE_ENTRY = fileURLToPath(new URL('./server/cloudflare-entry.ts', import.meta.url));
 
 function getGitHash(): string {
   try {
@@ -67,6 +68,7 @@ export default defineNuxtConfig({
   },
   nitro: {
     preset: 'cloudflare_module',
+    entry: CLOUDFLARE_ENTRY,
     prerender: {
       autoSubfolderIndex: false,
     },
@@ -81,9 +83,12 @@ export default defineNuxtConfig({
         await copyFile(STREAMING_DO_SOURCE, chunkPath);
 
         const entry = await readFile(entryPath, 'utf-8');
-        const exportLine = 'export { StreamingDO } from "./chunks/_/streaming-do.mjs";';
-        if (!entry.includes(exportLine)) {
-          await writeFile(entryPath, `${entry}\n${exportLine}\n`);
+        const actorExport = [
+          'import { StreamingDO as StreamingDOBase } from "./chunks/_/streaming-do.mjs";',
+          'export class StreamingDO extends StreamingDOBase {}',
+        ].join('\n');
+        if (!entry.includes('export class StreamingDO')) {
+          await writeFile(entryPath, `${entry}\n${actorExport}\n`);
         }
       },
     },

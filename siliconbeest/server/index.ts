@@ -12,9 +12,10 @@ import {
   resolveActivityPubAlternate,
   type ActivityPubAlternate,
 } from './activitypub-alternate';
+import { StreamingDO as StreamingDOBase } from './worker/durableObjects/streaming';
 
-// Re-export Durable Object class so the runtime can find it
-export { StreamingDO } from './worker/durableObjects/streaming';
+// Export a top-level Durable Object class so workerd can register the actor.
+export class StreamingDO extends StreamingDOBase {}
 
 // Prefixes / paths handled by the Hono worker app
 const WORKER_PREFIXES = [
