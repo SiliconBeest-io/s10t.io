@@ -142,7 +142,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
   }
 
   function connectStream(token: string) {
-    disconnectStream();
+    if (streamingClient.value) return;
 
     streamingClient.value = new StreamingClient(token, 'user:notification', {
       onNotification(notification: Notification) {

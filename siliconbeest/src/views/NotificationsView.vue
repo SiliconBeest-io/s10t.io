@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
@@ -57,7 +57,13 @@ async function handleMarkRead(id: string) {
   if (notif) notif.read = 1
 }
 
-onMounted(loadNotifications)
+watch(
+  () => auth.token,
+  (token) => {
+    if (token) void loadNotifications()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

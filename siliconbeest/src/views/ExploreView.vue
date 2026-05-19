@@ -79,11 +79,13 @@ function switchTab(tab: ExploreTab) {
   router.push(`/explore/${urlTab}`)
 }
 
-watch(() => route.params.tab, () => {
-  loadTimeline()
-})
-
-onMounted(loadTimeline)
+watch(
+  [() => route.params.tab, () => auth.token],
+  () => {
+    void loadTimeline()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

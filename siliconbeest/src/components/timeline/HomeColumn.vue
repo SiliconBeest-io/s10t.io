@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTimelinesStore } from '@/stores/timelines'
 import { useStatusesStore } from '@/stores/statuses'
@@ -68,7 +68,13 @@ function showNew() {
   timelinesStore.showNewStatuses('home')
 }
 
-onMounted(loadTimeline)
+watch(
+  () => auth.token,
+  (token) => {
+    if (token) void loadTimeline()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

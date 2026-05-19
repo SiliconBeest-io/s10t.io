@@ -93,6 +93,15 @@ export const useAuthStore = defineStore('auth', () => {
     clearTokenCookie();
   }
 
+  function connectAuthenticatedStreams() {
+    if (typeof window === 'undefined' || !token.value) return;
+
+    const timelinesStore = useTimelinesStore();
+    const notificationsStore = useNotificationsStore();
+    timelinesStore.connectStream(token.value, 'user', 'home');
+    notificationsStore.connectStream(token.value);
+  }
+
   async function fetchCurrentUser() {
     syncTokenFromCookie();
     if (!token.value) return;
@@ -104,6 +113,7 @@ export const useAuthStore = defineStore('auth', () => {
       // Load server-synced UI preferences
       const uiStore = useUiStore();
       uiStore.loadFromServer(token.value);
+      connectAuthenticatedStreams();
     } catch (e) {
       error.value = (e as Error).message;
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {

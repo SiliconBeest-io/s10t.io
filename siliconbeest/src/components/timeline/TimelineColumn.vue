@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status } from '@/types/mastodon'
 import { useTimelinesStore } from '@/stores/timelines'
@@ -68,7 +68,13 @@ async function loadMore() {
   await timelinesStore.fetchMore(props.timelineType, { token: auth.token ?? undefined })
 }
 
-onMounted(loadTimeline)
+watch(
+  () => auth.token,
+  () => {
+    void loadTimeline()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
