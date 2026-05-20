@@ -35,6 +35,11 @@ export default defineNuxtPlugin((nuxtApp) => {
 
     if ((isAuthOnly(path) || isAdminOnly(path)) && !auth.isAuthenticated) {
       router.replace({ path: '/login', query: { redirect: currentRoute.fullPath } });
+      return;
+    }
+
+    if (auth.isAuthenticated && GUEST_ONLY_PATHS.has(path)) {
+      router.replace('/home');
     }
   }
 
@@ -50,7 +55,7 @@ export default defineNuxtPlugin((nuxtApp) => {
       void auth.fetchCurrentUser();
     }
 
-    if (auth.isAuthenticated && auth.currentUser && GUEST_ONLY_PATHS.has(to.path)) {
+    if (auth.isAuthenticated && GUEST_ONLY_PATHS.has(to.path)) {
       return '/home';
     }
 

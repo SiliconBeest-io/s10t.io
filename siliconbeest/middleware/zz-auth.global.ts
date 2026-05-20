@@ -15,6 +15,8 @@ const AUTH_ONLY_PREFIXES = [
   '/admin',
 ];
 
+const GUEST_ONLY_PATHS = new Set(['/', '/login', '/register']);
+
 function isAuthOnly(path: string): boolean {
   return AUTH_ONLY_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
@@ -29,6 +31,10 @@ export default defineNuxtRouteMiddleware((to) => {
   });
   const auth = useAuthStore();
   auth.syncTokenFromCookie(token.value ?? null);
+
+  if (GUEST_ONLY_PATHS.has(to.path) && token.value) {
+    return navigateTo('/home');
+  }
 
   if (isAuthOnly(to.path) && !token.value) {
     return navigateTo({ path: '/login', query: { redirect: to.fullPath } });
