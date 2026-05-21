@@ -22,9 +22,14 @@ export async function handleSendWebPush(
   const notification = await env.DB.prepare(
     `SELECT n.id, n.type AS notification_type, n.status_id,
             sender.username AS sender_username,
-            sender.display_name AS sender_display_name
+            sender.domain AS sender_domain,
+            sender.display_name AS sender_display_name,
+            status_account.username AS status_username,
+            status_account.domain AS status_domain
      FROM notifications n
      JOIN accounts sender ON sender.id = n.from_account_id
+     LEFT JOIN statuses s ON s.id = n.status_id
+     LEFT JOIN accounts status_account ON status_account.id = s.account_id
      WHERE n.id = ?`,
   )
     .bind(notificationId)
@@ -33,7 +38,10 @@ export async function handleSendWebPush(
       notification_type: string;
       status_id: string | null;
       sender_username: string;
+      sender_domain: string | null;
       sender_display_name: string;
+      status_username: string | null;
+      status_domain: string | null;
     }>();
 
   if (!notification) {
@@ -67,6 +75,7 @@ export async function handleSendWebPush(
     title: buildNotificationTitle(notification),
     body: buildNotificationBody(notification),
     status_id: notification.status_id,
+    url: buildNotificationUrl(notification),
   });
 
   // Load VAPID keys from DB settings
@@ -176,4 +185,24 @@ function buildNotificationBody(notification: {
   sender_username: string;
 }): string {
   return `@${notification.sender_username}`;
+}
+
+function buildNotificationUrl(notification: {
+  status_id: string | null;
+  sender_username: string;
+  sender_domain: string | null;
+  status_username: string | null;
+  status_domain: string | null;
+}): string {
+  if (notification.status_id && notification.status_username) {
+    const acct = notification.status_domain
+      ? `${notification.status_username}@${notification.status_domain}`
+      : notification.status_username;
+    return `https://${env.INSTANCE_DOMAIN}/@${acct}/${notification.status_id}`;
+  }
+
+  const senderAcct = notification.sender_domain
+    ? `${notification.sender_username}@${notification.sender_domain}`
+    : notification.sender_username;
+  return `https://${env.INSTANCE_DOMAIN}/@${senderAcct}`;
 }
