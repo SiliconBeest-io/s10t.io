@@ -115,8 +115,8 @@ export function generateOgHtml(opts: OgOptions): string {
   <meta name="description" content="${descEsc}" />
   <meta property="og:title" content="${titleEsc}" />
   <meta property="og:description" content="${descEsc}" />
-  <meta property="og:url" content="${url}" />
-  <meta property="og:type" content="${type}" />
+  <meta property="og:url" content="${escapeAttr(url)}" />
+  <meta property="og:type" content="${escapeAttr(type)}" />
   <meta property="og:site_name" content="${escapeAttr(siteName)}" />
   ${image ? `<meta property="og:image" content="${escapeAttr(image)}" />` : ''}
   <meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />

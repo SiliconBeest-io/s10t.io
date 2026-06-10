@@ -26,6 +26,9 @@ export async function getAccountByUsername(
 			.bind(username, domain.toLowerCase())
 			.first()) as AccountRow | null;
 	}
+	// Local account lookups are case-sensitive (exact match), consistent with
+	// ActivityPub identity. Case-insensitive matching is reserved for auth flows
+	// (login / password reset); see services/auth.ts.
 	return (await env.DB
 		.prepare('SELECT * FROM accounts WHERE username = ? AND domain IS NULL LIMIT 1')
 		.bind(username)

@@ -242,6 +242,11 @@ app.get('/', async (c) => {
 			return c.json({ error: 'Unknown application' }, 400);
 		}
 
+		// Reject an unregistered redirect_uri before the consent UI is shown.
+		if (!isAllowedRedirectUri(oauthApp.redirect_uri as string, redirectUri)) {
+			return c.json({ error: 'invalid_request', error_description: 'redirect_uri does not match the registered value' }, 400);
+		}
+
 		// Check if user is authenticated via bearer token
 		const userId = await resolveBearer(c);
 
@@ -274,11 +279,16 @@ app.get('/', async (c) => {
 
 	// User is authenticated — validate the app and auto-approve
 	const oauthApp = await env.DB.prepare(
-		'SELECT id FROM oauth_applications WHERE client_id = ?1 LIMIT 1',
+		'SELECT id, redirect_uri FROM oauth_applications WHERE client_id = ?1 LIMIT 1',
 	).bind(clientId).first();
 
 	if (!oauthApp) {
 		return c.redirect(`/login?error=${encodeURIComponent('Unknown application')}`);
+	}
+
+	// Validate redirect_uri against the registered value before issuing a code.
+	if (!isAllowedRedirectUri(oauthApp.redirect_uri as string, redirectUri)) {
+		return c.redirect(`/login?error=${encodeURIComponent('Invalid redirect_uri')}`);
 	}
 
 	// For server-side HTML requests from authenticated users, issue code directly
@@ -336,6 +346,25 @@ app.post('/', async (c) => {
 				state,
 				responseType,
 				error: 'Unknown application',
+				instanceTitle: await getInstanceTitle(),
+			}),
+			400,
+		);
+	}
+
+	// Validate redirect_uri against the registered value BEFORE issuing any code
+	// or performing any redirect. Rejecting here (without redirecting) prevents
+	// authorization-code leakage and open redirects via an attacker-chosen URI.
+	if (!isAllowedRedirectUri(oauthApp.redirect_uri as string, redirectUri)) {
+		if (isJson) return c.json({ error: 'invalid_request', error_description: 'redirect_uri does not match the registered value' }, 400);
+		return c.html(
+			loginPage({
+				clientId,
+				redirectUri: '',
+				scope,
+				state,
+				responseType,
+				error: 'Invalid redirect_uri',
 				instanceTitle: await getInstanceTitle(),
 			}),
 			400,
@@ -638,6 +667,19 @@ app.post('/', async (c) => {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Validate a request-supplied redirect_uri against the application's registered
+ * value(s) using exact string matching, as required by the OAuth 2.0 Security
+ * BCP. Without this check an attacker can have an authorization code issued to
+ * an arbitrary URL (authorization-code leakage / open redirect).
+ *
+ * Registered URIs may be whitespace/newline separated (Mastodon allows multiple).
+ */
+function isAllowedRedirectUri(registered: string | null | undefined, provided: string): boolean {
+	if (!registered || !provided) return false;
+	return registered.split(/\s+/).filter(Boolean).includes(provided);
+}
 
 async function issueAuthorizationCode(
 	c: any,

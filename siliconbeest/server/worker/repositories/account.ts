@@ -56,6 +56,9 @@ export const findByUri = async (uri: string): Promise<Account | null> => {
 
 export const findByUsername = async (username: string, domain?: string | null): Promise<Account | null> => {
 	if (domain === undefined || domain === null) {
+		// Local account lookups are case-sensitive (exact), consistent with
+		// ActivityPub identity. Case-insensitive matching is limited to auth
+		// flows (login / password reset) in services/auth.ts.
 		const result = await env.DB
 			.prepare('SELECT * FROM accounts WHERE username = ? AND domain IS NULL')
 			.bind(username)

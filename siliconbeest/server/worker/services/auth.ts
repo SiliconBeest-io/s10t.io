@@ -192,15 +192,20 @@ export async function verifyPasswordByUsernameOrEmail(
 		return verifyPassword(identifier, password);
 	}
 
-	// Try username lookup (local accounts only: domain IS NULL)
+	// Try username lookup (local accounts only: domain IS NULL).
+	// Usernames are stored case-preserved but compared case-insensitively
+	// (COLLATE NOCASE) to match the registration uniqueness check. Binding the
+	// raw identifier — NOT a lowercased copy — is required: lowercasing the
+	// input while the column comparison is case-sensitive would never match a
+	// username containing uppercase letters, locking those users out.
 	const user = (await env.DB
 		.prepare(
 			`SELECT u.* FROM users u
 			 JOIN accounts a ON a.id = u.account_id
-			 WHERE a.username = ? AND a.domain IS NULL
+			 WHERE a.username = ? COLLATE NOCASE AND a.domain IS NULL
 			 LIMIT 1`,
 		)
-		.bind(identifier.toLowerCase())
+		.bind(identifier)
 		.first()) as UserRow | null;
 
 	if (!user) {
@@ -422,11 +427,13 @@ export async function createPasswordResetToken(
 	username: string,
 	email: string,
 ): Promise<{ userId: string; locale: string | null; token: string } | null> {
-	// Both username and email must match a local account
+	// Both username and email must match a local account. Username is matched
+	// case-insensitively (COLLATE NOCASE) to stay consistent with login and the
+	// registration uniqueness check; email is already normalised to lowercase.
 	const user = await env.DB.prepare(
 		`SELECT u.id, u.locale FROM users u
 		 JOIN accounts a ON a.id = u.account_id
-		 WHERE a.username = ? AND u.email = ? AND a.domain IS NULL
+		 WHERE a.username = ? COLLATE NOCASE AND u.email = ? AND a.domain IS NULL
 		 LIMIT 1`,
 	).bind(username, email.toLowerCase()).first();
 

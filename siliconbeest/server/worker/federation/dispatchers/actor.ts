@@ -67,6 +67,11 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
       }
 
       // ---- Regular user actors ----
+      // ActivityPub identity is case-sensitive: the actor lives at the exact
+      // `/users/<username>` path using the stored casing. We emit that canonical
+      // URI everywhere, so remote servers always reference the exact case.
+      // (Registration enforces case-insensitive uniqueness, so at most one
+      // local account can match a given handle regardless of casing.)
       const account = await env.DB.prepare(
         `SELECT * FROM accounts WHERE username = ?1 AND domain IS NULL LIMIT 1`,
       )
