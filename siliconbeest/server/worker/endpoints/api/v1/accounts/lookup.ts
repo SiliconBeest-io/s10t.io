@@ -28,10 +28,14 @@ app.get('/lookup', async (c) => {
   const cleaned = acct.replace(/^@/, '');
   const parts = cleaned.split('@');
   const username = parts[0]!;
-  const acctDomain = parts[1] || null;
+  // Domains are DNS names (case-insensitive): normalize to lowercase so the
+  // instance-domain check, WebFinger resource, INSERT, and re-SELECT all use
+  // the canonical form (remote rows store URL.host, which is lowercase).
+  // The username intentionally keeps its exact case (AP identity).
+  const acctDomain = parts[1]?.toLowerCase() || null;
 
   let row;
-  if (!acctDomain || acctDomain === instanceDomain) {
+  if (!acctDomain || acctDomain === instanceDomain.toLowerCase()) {
     // Local account
     row = await getAccountByUsername(username);
   } else {
@@ -40,7 +44,7 @@ app.get('/lookup', async (c) => {
   }
 
   // If remote account not in DB, try WebFinger + Fedify lookupObject
-  if (!row && acctDomain && acctDomain !== instanceDomain) {
+  if (!row && acctDomain && acctDomain !== instanceDomain.toLowerCase()) {
     console.log(`[lookup] Remote account not in DB, resolving ${username}@${acctDomain}`);
     try {
       const fed = c.get('federation');

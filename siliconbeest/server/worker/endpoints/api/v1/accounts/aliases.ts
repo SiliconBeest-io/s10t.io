@@ -48,7 +48,14 @@ app.post('/aliases', authRequired, async (c) => {
 		// WebFinger resolve to get the actor URI via Fedify
 		const fed = c.get('federation');
 		const ctx = getFedifyContext(fed);
-		const normalizedAlias = alias.replace(/^@/, '');
+		// The domain part of the handle is case-insensitive (RFC 7565) — lowercase
+		// it for the WebFinger resource; strict remotes match it case-sensitively.
+		// Username casing is preserved. Split on the LAST '@' to match Fedify.
+		const handle = alias.replace(/^@/, '');
+		const at = handle.lastIndexOf('@');
+		const normalizedAlias = at === -1
+			? handle
+			: `${handle.slice(0, at)}@${handle.slice(at + 1).toLowerCase()}`;
 		const wfResult = await ctx.lookupWebFinger(`acct:${normalizedAlias}`);
 		const selfLink = wfResult?.links?.find(
 			(link) =>

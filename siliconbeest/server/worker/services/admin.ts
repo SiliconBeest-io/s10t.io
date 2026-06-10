@@ -254,7 +254,10 @@ export async function createDomainBlock(
 		obfuscate?: boolean;
 	},
 ): Promise<Record<string, unknown>> {
-	const existing = await env.DB.prepare('SELECT id FROM domain_blocks WHERE domain = ?1').bind(data.domain).first();
+	// Domains are DNS names (case-insensitive): store lowercase so enforcement
+	// in isDomainBlocked — which compares lowercased input — actually matches.
+	const domain = data.domain.trim().toLowerCase();
+	const existing = await env.DB.prepare('SELECT id FROM domain_blocks WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Domain block already exists');
 
 	const id = generateUlid();
@@ -265,7 +268,7 @@ export async function createDomainBlock(
 		`INSERT INTO domain_blocks (id, domain, severity, reject_media, reject_reports, private_comment, public_comment, obfuscate, created_at, updated_at)
 		 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
 	).bind(
-		id, data.domain, severity,
+		id, domain, severity,
 		data.reject_media ? 1 : 0, data.reject_reports ? 1 : 0,
 		data.private_comment || null, data.public_comment || null,
 		data.obfuscate ? 1 : 0, now, now,
@@ -333,6 +336,9 @@ export async function getDomainAllow(id: string): Promise<Record<string, unknown
 }
 
 export async function createDomainAllow(domain: string): Promise<Record<string, unknown>> {
+	// Domains are DNS names (case-insensitive): store lowercase, matching the
+	// comparison convention of isDomainBlocked/isEmailDomainBlocked.
+	domain = domain.trim().toLowerCase();
 	const existing = await env.DB.prepare('SELECT id FROM domain_allows WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Domain allow already exists');
 
@@ -433,6 +439,10 @@ export async function getEmailDomainBlock(id: string): Promise<Record<string, un
 }
 
 export async function createEmailDomainBlock(domain: string): Promise<Record<string, unknown>> {
+	// Email domains are DNS names (case-insensitive): store lowercase so the
+	// signup-side check in isEmailDomainBlocked — which compares lowercased
+	// input — actually matches.
+	domain = domain.trim().toLowerCase();
 	const existing = await env.DB.prepare('SELECT id FROM email_domain_blocks WHERE domain = ?1').bind(domain).first();
 	if (existing) throw new AppError(422, 'Email domain block already exists');
 

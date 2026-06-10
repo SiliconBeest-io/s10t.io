@@ -53,7 +53,11 @@ export async function handleImportItem(
   // Parse acct parts
   const parts = acct.split('@');
   const username = parts[0];
-  const domain = parts.length >= 2 ? parts[parts.length - 1] : null;
+  // Domains are DNS names (case-insensitive); accounts.domain stores the
+  // lowercase URL host, so normalize here or known accounts are silently
+  // missed and the import item dropped. Username casing stays exact (AP).
+  const domain = parts.length >= 2 ? parts[parts.length - 1].toLowerCase() : null;
+  const normalizedAcct = domain ? `${username}@${domain}` : acct;
 
   // Look up the target account in DB
   let targetAccount: {
@@ -89,7 +93,9 @@ export async function handleImportItem(
 
   // If not found and it's a remote account, try WebFinger and enqueue fetch
   if (!targetAccount && domain) {
-    const actorUri = await webfingerResolve(acct);
+    // Use the domain-lowercased acct: it feeds both the WebFinger host and the
+    // acct: resource, which some remote servers match case-sensitively.
+    const actorUri = await webfingerResolve(normalizedAcct);
     if (!actorUri) {
       console.warn(`WebFinger resolve failed for ${acct}, skipping import`);
       return;

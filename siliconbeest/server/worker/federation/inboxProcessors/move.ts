@@ -17,17 +17,29 @@ import { env } from 'cloudflare:workers';
 
 class MoveProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
-		const oldAccountUri =
+		// URI hosts are case-insensitive (DNS): normalize inbound URIs through
+		// the URL parser (lowercases scheme+host, preserves path case) before
+		// comparing or looking up — a host-casing difference must not reject a
+		// legitimate migration. alsoKnownAs entries below are URL.href values
+		// and therefore already normalized.
+		const normalizeUri = (u: string): string => {
+			try { return new URL(u).href; } catch { return u; }
+		};
+
+		const rawOldUri =
 			typeof activity.object === 'string' ? activity.object : undefined;
-		const newAccountUri =
+		const rawNewUri =
 			typeof activity.target === 'string' ? activity.target : undefined;
 
-		if (!oldAccountUri || !newAccountUri) {
+		if (!rawOldUri || !rawNewUri) {
 			console.warn('[move] Missing object or target URI');
 			return;
 		}
 
-		if (activity.actor !== oldAccountUri) {
+		const oldAccountUri = normalizeUri(rawOldUri);
+		const newAccountUri = normalizeUri(rawNewUri);
+
+		if (normalizeUri(String(activity.actor)) !== oldAccountUri) {
 			console.warn('[move] Actor does not match old account URI');
 			return;
 		}
@@ -52,7 +64,11 @@ class MoveProcessor extends BaseProcessor {
 			return;
 		}
 
-		const oldAccount = await this.findAccountByUri(oldAccountUri);
+		// Stored remote uris written before URI normalization may be
+		// unnormalized — fall back to the raw inbound string.
+		const oldAccount =
+			(await this.findAccountByUri(oldAccountUri)) ??
+			(rawOldUri !== oldAccountUri ? await this.findAccountByUri(rawOldUri) : null);
 		if (!oldAccount) {
 			console.warn(`[move] Old account not found: ${oldAccountUri}`);
 			return;

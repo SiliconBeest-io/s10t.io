@@ -54,8 +54,15 @@ app.get('/', authOptional, async (c) => {
     if (resolve && looksLikeAcct) {
       const fed = c.get('federation');
       const ctx = getFedifyContext(fed);
-      // Normalize acct for WebFinger lookup
-      const normalizedAcct = q.replace(/^@/, '');
+      // Normalize acct for WebFinger lookup: the domain part is case-insensitive
+      // (RFC 7565 lowercases the acct host) — strict remotes match the resource
+      // case-sensitively. Username casing is preserved. Split on the LAST '@'
+      // to match Fedify's own server extraction.
+      const cleanedQ = q.replace(/^@/, '');
+      const atPos = cleanedQ.lastIndexOf('@');
+      const normalizedAcct = atPos === -1
+        ? cleanedQ
+        : `${cleanedQ.slice(0, atPos)}@${cleanedQ.slice(atPos + 1).toLowerCase()}`;
       const wfResult = await ctx.lookupWebFinger(`acct:${normalizedAcct}`);
       // Extract actor URI from self link
       const selfLink = wfResult?.links?.find(

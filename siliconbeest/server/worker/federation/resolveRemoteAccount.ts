@@ -30,10 +30,17 @@ export async function resolveRemoteAccount(
 	actorUri: string,
 	signerAccountId: string | null = null,
 ): Promise<string | null> {
+	// URI hosts are case-insensitive (DNS): normalize through the WHATWG URL
+	// parser (lowercases scheme+host, preserves path case) so the dedup lookup
+	// matches the stored canonical form. The raw input is checked too, because
+	// rows written before this normalization may carry an unnormalized uri.
+	let lookupUri = actorUri;
+	try { lookupUri = new URL(actorUri).href; } catch { /* keep raw */ }
+
 	const existing = await env.DB.prepare(
-		`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+		`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
 	)
-		.bind(actorUri)
+		.bind(lookupUri, actorUri)
 		.first<{ id: string }>();
 
 	if (existing) return existing.id;
@@ -49,6 +56,9 @@ export async function resolveRemoteAccount(
 	let summary = '';
 	let actorUrl = '';
 	let resolved = false;
+	// The actor's own id is the canonical AP identity — store and enqueue that,
+	// not the (possibly differently-cased) reference URI we were handed.
+	let canonicalUri = lookupUri;
 
 	try {
 		const url = new URL(actorUri);
@@ -76,6 +86,7 @@ export async function resolveRemoteAccount(
 		const actorObj = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
 		if (actorObj && isActor(actorObj)) {
 			resolved = true;
+			canonicalUri = actorObj.id?.href ?? lookupUri;
 			username = (actorObj.preferredUsername ?? '') as string;
 			displayName = (actorObj.name?.toString() ?? '') as string;
 			summary = sanitizeHtml(actorObj.summary?.toString() ?? '');
@@ -113,6 +124,30 @@ export async function resolveRemoteAccount(
 		return null;
 	}
 
+	// The canonical id may differ from the reference URI we were handed (e.g.
+	// host casing, or a forwarded/alternate URI). Dedup again by the canonical
+	// id and re-derive the domain from it before inserting.
+	if (canonicalUri !== lookupUri) {
+		const byCanonical = await env.DB.prepare(
+			`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+		)
+			.bind(canonicalUri)
+			.first<{ id: string }>();
+		if (byCanonical) return byCanonical.id;
+
+		try {
+			const canonicalHost = new URL(canonicalUri).host;
+			if (canonicalHost !== domain) {
+				domain = canonicalHost;
+				const canonicalBlock = await isDomainBlocked(env.DB, env.CACHE ?? null, domain);
+				if (canonicalBlock.blocked) {
+					console.log(`[resolveRemoteAccount] Refusing to resolve account from suspended domain: ${domain}`);
+					return null;
+				}
+			}
+		} catch { /* keep the domain derived from the reference URI */ }
+	}
+
 	const now = new Date().toISOString();
 	const id = generateUlid();
 
@@ -121,13 +156,13 @@ export async function resolveRemoteAccount(
 			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, created_at, updated_at)
 			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?12)`,
 		)
-			.bind(id, username, domain, displayName, summary, actorUri, actorUrl || actorUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, now)
+			.bind(id, username, domain, displayName, summary, canonicalUri, actorUrl || canonicalUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, now)
 			.run();
 	} catch {
 		const retry = await env.DB.prepare(
-			`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+			`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
 		)
-			.bind(actorUri)
+			.bind(canonicalUri, actorUri)
 			.first<{ id: string }>();
 		return retry?.id ?? null;
 	}
@@ -135,7 +170,7 @@ export async function resolveRemoteAccount(
 	// Also enqueue a full fetch for any fields we might have missed
 	await env.QUEUE_FEDERATION.send({
 		type: 'fetch_remote_account',
-		actorUri,
+		actorUri: canonicalUri,
 		...(signerAccountId ? { signerAccountId } : {}),
 	});
 

@@ -92,7 +92,10 @@ function processMentions(text: string, localDomain: string, mentions: ParsedMent
 	const mentionRegex = /(?<=^|[\s>,.;:!?()])@([a-zA-Z0-9_]+)(?:@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,}))?/g;
 
 	return text.replace(mentionRegex, (match, username: string, mentionDomain: string | undefined) => {
-		const domain = mentionDomain || null;
+		// DNS names are case-insensitive; remote account domains are stored
+		// lowercase (resolveRemoteAccount uses new URL(uri).host), so
+		// canonicalize here or cached-account lookups and dedupe never match.
+		const domain = mentionDomain ? mentionDomain.toLowerCase() : null;
 		const acct = domain ? `${username}@${domain}` : username;
 
 		// Add to mentions list if not already present

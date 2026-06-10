@@ -46,9 +46,11 @@ export const findById = async (id: string): Promise<User | null> => {
 };
 
 export const findByEmail = async (email: string): Promise<User | null> => {
+	// Emails are stored lowercase (see services/auth.ts registerUser);
+	// normalize here so the comparison is effectively case-insensitive.
 	const result = await env.DB
 		.prepare('SELECT * FROM users WHERE email = ?')
-		.bind(email)
+		.bind(email.toLowerCase())
 		.first<User>();
 	return result ?? null;
 };
@@ -67,7 +69,9 @@ export const create = async (input: CreateUserInput): Promise<User> => {
 	const user: User = {
 		id,
 		account_id: input.account_id,
-		email: input.email,
+		// Storage convention: emails are always lowercase (auth flows compare
+		// lowercased input — see services/auth.ts).
+		email: input.email.toLowerCase(),
 		encrypted_password: input.encrypted_password,
 		locale: input.locale ?? 'en',
 		confirmed_at: input.confirmed_at ?? null,

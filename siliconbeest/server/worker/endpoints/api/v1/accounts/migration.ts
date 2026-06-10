@@ -45,7 +45,15 @@ app.post('/migration', authRequired, async (c) => {
 	// 1. WebFinger resolve target via Fedify
 	const fed = c.get('federation');
 	const ctx = getFedifyContext(fed);
-	const wfResult = await ctx.lookupWebFinger(`acct:${targetAcct.replace(/^@/, '')}`);
+	// The domain part of the handle is case-insensitive (RFC 7565) — lowercase
+	// it for the WebFinger resource; strict remotes match it case-sensitively.
+	// Username casing is preserved. Split on the LAST '@' to match Fedify.
+	const cleanedTarget = targetAcct.replace(/^@/, '');
+	const targetAtPos = cleanedTarget.lastIndexOf('@');
+	const targetHandle = targetAtPos === -1
+		? cleanedTarget
+		: `${cleanedTarget.slice(0, targetAtPos)}@${cleanedTarget.slice(targetAtPos + 1).toLowerCase()}`;
+	const wfResult = await ctx.lookupWebFinger(`acct:${targetHandle}`);
 	const selfLink = wfResult?.links?.find(
 		(link) =>
 			link.rel === 'self' &&

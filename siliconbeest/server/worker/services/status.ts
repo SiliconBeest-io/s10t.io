@@ -611,25 +611,35 @@ export async function createStatus(
 
   if (localParsedMentions.length > 0) {
     const localUsernames = localParsedMentions.map((m) => m.username);
+    // Typed mentions resolve case-insensitively (COLLATE NOCASE, binding the
+    // raw typed usernames — never pre-lowercased): '@alice' must reach stored
+    // 'Alice'. Registration uniqueness is NOCASE (migration 0030), so at most
+    // one account matches. The mention/notification then uses the row's
+    // canonical id/uri/url, keeping ActivityPub identity exact-case.
     const localAccounts = await env.DB
       .prepare(
-        `SELECT id, uri, url, inbox_url, domain, username FROM accounts WHERE username IN (${localUsernames.map(() => '?').join(',')}) AND domain IS NULL`,
+        `SELECT id, uri, url, inbox_url, domain, username FROM accounts WHERE username COLLATE NOCASE IN (${localUsernames.map(() => '?').join(',')}) AND domain IS NULL`,
       )
       .bind(...localUsernames)
       .all<Record<string, unknown>>();
 
     const localAccountMap = new Map<string, Record<string, unknown>>();
     localAccounts.results.forEach((acc) => {
-      localAccountMap.set(acc.username as string, acc);
+      localAccountMap.set((acc.username as string).toLowerCase(), acc);
     });
 
     const mentionsToInsert: Array<[string, string, string, string]> = [];
+    const seenAccountIds = new Set<string>();
 
     for (const mention of localParsedMentions) {
-      const accountRow = localAccountMap.get(mention.username);
+      const accountRow = localAccountMap.get(mention.username.toLowerCase());
       if (!accountRow) continue;
 
       const mentionedAccountId = accountRow.id as string;
+      // '@Alice' and '@alice' typed in one status fold to the same account —
+      // keep only the first so one mention row / one notification is created.
+      if (seenAccountIds.has(mentionedAccountId)) continue;
+      seenAccountIds.add(mentionedAccountId);
       const mentionId = generateUlid();
       mentionsToInsert.push([mentionId, statusId, mentionedAccountId, now]);
 
@@ -866,25 +876,35 @@ export async function editStatus(
 
   if (localParsedMentions.length > 0) {
     const localUsernames = localParsedMentions.map((m) => m.username);
+    // Typed mentions resolve case-insensitively (COLLATE NOCASE, binding the
+    // raw typed usernames — never pre-lowercased): '@alice' must reach stored
+    // 'Alice'. Registration uniqueness is NOCASE (migration 0030), so at most
+    // one account matches. The mention/notification then uses the row's
+    // canonical id/uri/url, keeping ActivityPub identity exact-case.
     const localAccounts = await env.DB
       .prepare(
-        `SELECT id, uri, url, inbox_url, domain, username FROM accounts WHERE username IN (${localUsernames.map(() => '?').join(',')}) AND domain IS NULL`,
+        `SELECT id, uri, url, inbox_url, domain, username FROM accounts WHERE username COLLATE NOCASE IN (${localUsernames.map(() => '?').join(',')}) AND domain IS NULL`,
       )
       .bind(...localUsernames)
       .all<Record<string, unknown>>();
 
     const localAccountMap = new Map<string, Record<string, unknown>>();
     localAccounts.results.forEach((acc) => {
-      localAccountMap.set(acc.username as string, acc);
+      localAccountMap.set((acc.username as string).toLowerCase(), acc);
     });
 
     const mentionsToInsert: Array<[string, string, string, string]> = [];
+    const seenAccountIds = new Set<string>();
 
     for (const mention of localParsedMentions) {
-      const accountRow = localAccountMap.get(mention.username);
+      const accountRow = localAccountMap.get(mention.username.toLowerCase());
       if (!accountRow) continue;
 
       const mentionedAccountId = accountRow.id as string;
+      // '@Alice' and '@alice' typed in one status fold to the same account —
+      // keep only the first so one mention row / one notification is created.
+      if (seenAccountIds.has(mentionedAccountId)) continue;
+      seenAccountIds.add(mentionedAccountId);
       const mentionId = generateUlid();
       mentionsToInsert.push([mentionId, statusId, mentionedAccountId, now]);
 

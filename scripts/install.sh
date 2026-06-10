@@ -95,6 +95,10 @@ if [[ -z "$ADMIN_EMAIL" ]]; then
   error "Admin email is required."
   exit 1
 fi
+# Normalise email to lowercase: the app stores emails lowercase and every
+# auth comparison (login, password reset) lowercases the input — a mixed-case
+# stored email would lock the admin out.
+ADMIN_EMAIL=$(printf '%s' "$ADMIN_EMAIL" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
 
 read -rp "$(echo -e "${CYAN}Admin username${NC}: ")" ADMIN_USERNAME
 if [[ -z "$ADMIN_USERNAME" ]]; then

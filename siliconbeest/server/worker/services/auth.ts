@@ -493,9 +493,11 @@ export async function resetPasswordWithToken(
 export async function getUserForConfirmation(
 	email: string,
 ): Promise<{ id: string; confirmed_at: string | null; confirmation_token: string | null } | null> {
+	// Emails are stored lowercase (see registerUser); normalize here too so
+	// every caller compares case-insensitively.
 	return env.DB.prepare(
 		'SELECT id, confirmed_at, confirmation_token FROM users WHERE email = ?1 LIMIT 1',
-	).bind(email).first<{ id: string; confirmed_at: string | null; confirmation_token: string | null }>();
+	).bind(email.toLowerCase()).first<{ id: string; confirmed_at: string | null; confirmation_token: string | null }>();
 }
 
 /**

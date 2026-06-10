@@ -37,6 +37,12 @@ if [[ -z "$ADMIN_EMAIL" || -z "$ADMIN_USERNAME" || -z "$ADMIN_PASSWORD" ]]; then
   exit 1
 fi
 
+# Normalise email to lowercase: the app stores emails lowercase and every
+# auth comparison (login, password reset) lowercases the input — a mixed-case
+# stored email would lock the admin out. Username stays case-preserved (AP
+# canonical identity; auth matches it COLLATE NOCASE).
+ADMIN_EMAIL=$(printf '%s' "$ADMIN_EMAIL" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+
 # ---------------------------------------------------------------------------
 # Prerequisites
 # ---------------------------------------------------------------------------
