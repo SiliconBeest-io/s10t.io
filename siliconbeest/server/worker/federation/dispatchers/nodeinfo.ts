@@ -19,7 +19,9 @@ const STATS_CACHE_KEY = 'nodeinfo:stats:fedify';
 const STATS_CACHE_TTL = 3600; // 1 hour
 
 interface NodeInfoStats {
-  userCount: number;
+  totalUserCount: number;
+  activeUserCount: number;
+  activeHalfyearUserCount: number;
   statusCount: number;
   domainCount: number;
   localComments: number;
@@ -32,15 +34,19 @@ async function getStats(): Promise<NodeInfoStats> {
   const cached = await env.CACHE.get(STATS_CACHE_KEY, 'json');
   if (cached) return cached as NodeInfoStats;
 
-  const [usersResult, statusesResult, domainsResult, commentsResult] = await Promise.all([
+  const [usersResult, activeUserCount, activeHalfyearUserCount, statusesResult, domainsResult, commentsResult] = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accounts WHERE domain IS NULL`).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accounts WHERE last_seen_at > datetime('now', '-30 days')`).first(),
+    env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accounts WHERE last_seen_at > datetime('now', '-180 days')`).first(),
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM statuses WHERE deleted_at IS NULL`).first(),
     env.DB.prepare(`SELECT COUNT(DISTINCT domain) AS cnt FROM accounts WHERE domain IS NOT NULL`).first(),
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM statuses WHERE deleted_at IS NULL AND local = 1 AND reply = 1`).first(),
   ]);
 
   const stats: NodeInfoStats = {
-    userCount: (usersResult?.cnt as number) ?? 0,
+    totalUserCount: (usersResult?.cnt as number) ?? 0,
+    activeUserCount: (activeUserCount?.cnt as number) ?? 0,
+    activeHalfyearUserCount: (activeHalfyearUserCount?.cnt as number) ?? 0,
     statusCount: (statusesResult?.cnt as number) ?? 0,
     domainCount: (domainsResult?.cnt as number) ?? 0,
     localComments: (commentsResult?.cnt as number) ?? 0,
@@ -72,9 +78,9 @@ export function setupNodeInfoDispatcher(fed: Federation<FedifyContextData>): voi
       openRegistrations: registrationOpen,
       usage: {
         users: {
-          total: stats.userCount,
-          activeMonth: stats.userCount,
-          activeHalfyear: stats.userCount,
+          total: stats.totalUserCount,
+          activeMonth: stats.activeUserCount,
+          activeHalfyear: stats.activeHalfyearUserCount,
         },
         localPosts: stats.statusCount,
         localComments: stats.localComments,
