@@ -177,7 +177,9 @@ export async function deleteRule(id: string): Promise<void> {
 // ----------------------------------------------------------------
 
 export interface InstanceStats {
-	userCount: number;
+	activeUserCount: number;
+	activeMonthUserCount: number;
+	activeHalfyearUserCount: number;
 	statusCount: number;
 	domainCount: number;
 }
@@ -194,14 +196,33 @@ export async function getStats(): Promise<InstanceStats> {
 		if (cached) return cached as InstanceStats;
 	}
 
-	const [usersResult, statusesResult, domainsResult] = await Promise.all([
+	const activeMonthSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+	const activeHalfyearSince = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
+
+
+	const [activeUserResult, activeMonthUserResult, activeHalfyearUserResult, statusesResult, domainsResult] = await Promise.all([
 		env.DB.prepare('SELECT COUNT(*) AS cnt FROM accounts WHERE domain IS NULL AND suspended_at IS NULL').first<{ cnt: number }>(),
+		env.DB.prepare('SELECT COUNT(*) AS cnt FROM accounts WHERE domain IS NULL AND suspended_at IS NULL').first<{ cnt: number }>(),
+		env.DB.prepare(
+			`SELECT COUNT(DISTINCT a.id) AS cnt
+	   FROM accounts a
+	   JOIN users u ON u.account_id = a.id
+	   WHERE a.domain IS NULL AND u.current_sign_in_at >= ?1`,
+		).bind(activeMonthSince).first<{ cnt: number }>(),
+		env.DB.prepare(
+			`SELECT COUNT(DISTINCT a.id) AS cnt
+	   FROM accounts a
+	   JOIN users u ON u.account_id = a.id
+	   WHERE a.domain IS NULL AND u.current_sign_in_at >= ?1`,
+		).bind(activeHalfyearSince).first<{ cnt: number }>(),
 		env.DB.prepare('SELECT COUNT(*) AS cnt FROM statuses WHERE local = 1 AND deleted_at IS NULL').first<{ cnt: number }>(),
 		env.DB.prepare('SELECT COUNT(DISTINCT domain) AS cnt FROM accounts WHERE domain IS NOT NULL').first<{ cnt: number }>(),
 	]);
 
 	const stats: InstanceStats = {
-		userCount: usersResult?.cnt ?? 0,
+		activeUserCount: activeUserResult?.cnt ?? 0,
+		activeMonthUserCount: activeMonthUserResult?.cnt ?? 0,
+		activeHalfyearUserCount: activeHalfyearUserResult?.cnt ?? 0,
 		statusCount: statusesResult?.cnt ?? 0,
 		domainCount: domainsResult?.cnt ?? 0,
 	};

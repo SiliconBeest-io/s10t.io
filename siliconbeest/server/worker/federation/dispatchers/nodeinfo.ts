@@ -20,8 +20,8 @@ const STATS_CACHE_KEY = 'nodeinfo:stats:fedify';
 const STATS_CACHE_TTL = 3600; // 1 hour
 
 interface NodeInfoStats {
-  totalUserCount: number;
   activeUserCount: number;
+  activeMonthUserCount: number;
   activeHalfyearUserCount: number;
   statusCount: number;
   domainCount: number;
@@ -38,7 +38,7 @@ async function getStats(): Promise<NodeInfoStats> {
   const activeMonthSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const activeHalfyearSince = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
 
-  const [usersResult, activeUserCountResult, activeHalfyearUserCountResult, statusesResult, domainsResult, commentsResult] = await Promise.all([
+  const [usersResult, activeMonthUserCountResult, activeHalfyearUserCountResult, statusesResult, domainsResult, commentsResult] = await Promise.all([
     env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accounts WHERE domain IS NULL`).first(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT a.id) AS cnt
@@ -58,8 +58,8 @@ async function getStats(): Promise<NodeInfoStats> {
   ]);
 
   const stats: NodeInfoStats = {
-    totalUserCount: (usersResult?.cnt as number) ?? 0,
-    activeUserCount: (activeUserCountResult?.cnt as number) ?? 0,
+    activeUserCount: (usersResult?.cnt as number) ?? 0,
+    activeMonthUserCount: (activeMonthUserCountResult?.cnt as number) ?? 0,
     activeHalfyearUserCount: (activeHalfyearUserCountResult?.cnt as number) ?? 0,
     statusCount: (statusesResult?.cnt as number) ?? 0,
     domainCount: (domainsResult?.cnt as number) ?? 0,
@@ -92,8 +92,8 @@ export function setupNodeInfoDispatcher(fed: Federation<FedifyContextData>): voi
       openRegistrations: registrationOpen,
       usage: {
         users: {
-          total: stats.totalUserCount,
-          activeMonth: stats.activeUserCount,
+          total: stats.activeUserCount,
+          activeMonth: stats.activeMonthUserCount,
           activeHalfyear: stats.activeHalfyearUserCount,
         },
         localPosts: stats.statusCount,
