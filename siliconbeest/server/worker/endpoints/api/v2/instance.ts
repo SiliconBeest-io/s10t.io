@@ -26,7 +26,7 @@ app.get('/', async (c) => {
 
   // Usage stats + rules (parallel)
   const [stats, ruleRows] = await Promise.all([
-    getStats().catch(() => ({ totalUserCount: 0, activeUserCount: 0, activeMonthUserCount: 0, activeHalfyearUserCount: 0, statusCount: 0, domainCount: 0 })),
+    getStats().catch(() => ({ activeUserCount: 0, activeMonthUserCount: 0, activeHalfyearUserCount: 0, statusCount: 0, domainCount: 0 })),
     getRules().catch(() => []),
   ]);
 
