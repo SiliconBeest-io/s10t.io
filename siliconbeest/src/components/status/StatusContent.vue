@@ -10,6 +10,7 @@ const props = defineProps<{
   spoilerText?: string
   sensitive?: boolean
   emojis?: Array<{ shortcode: string; url: string; static_url: string }>
+  hideQuoteInline?: boolean
 }>()
 
 const revealed = ref(false)
@@ -100,7 +101,7 @@ function enrichMentions(html: string): string {
   )
 }
 
-const processedContent = computed(() => emojifyHtml(enrichMentions(props.content), props.emojis))
+const processedContent = computed(() => stripQuoteInline(emojifyHtml(enrichMentions(props.content), props.emojis)))
 const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoilerText || ''), props.emojis))
 </script>
 
@@ -126,3 +127,10 @@ const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoiler
     />
   </div>
 </template>
+function stripQuoteInline(html: string): string {
+  if (!props.hideQuoteInline || typeof document === 'undefined') return html
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content.querySelectorAll('.quote-inline').forEach((node) => node.remove())
+  return template.innerHTML
+}

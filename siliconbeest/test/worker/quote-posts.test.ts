@@ -40,6 +40,8 @@ describe('Quote Posts (FEP-e232)', () => {
     expect(body.quote).not.toBeNull();
     expect(body.quote.id).toBe(quotableStatusId);
     expect(body.quote.content).toContain('quotable post');
+    expect(body.content).toContain(`${BASE}/@quoteuser/${quotableStatusId}`);
+    expect(body.content).not.toContain(`${BASE}/users/quoteuser/statuses/${quotableStatusId}`);
   });
 
   it('quote object includes the quoted status account', async () => {

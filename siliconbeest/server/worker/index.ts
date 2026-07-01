@@ -340,6 +340,14 @@ app.route('/api/v2/filters', filters);
 // ActivityPub
 // ---------------------------------------------------------------------------
 
+app.get('/users/:identifier/statuses/:id', async (c, next) => {
+  const accept = c.req.header('Accept') || '';
+  if (accept.includes('activity+json') || accept.includes('ld+json')) {
+    return next();
+  }
+  return c.redirect(`https://${env.INSTANCE_DOMAIN}/@${c.req.param('identifier')}/${c.req.param('id')}`);
+});
+
 app.route('/users', apActor);
 app.route('/actor', apInstanceActor);
 

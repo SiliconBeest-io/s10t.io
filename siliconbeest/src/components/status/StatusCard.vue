@@ -417,6 +417,7 @@ async function handleDelete() {
             :spoiler-text="displayStatus.spoiler_text"
             :sensitive="displayStatus.sensitive"
             :emojis="displayStatus.emojis"
+            :hide-quote-inline="!!displayStatus.quote"
           />
 
           <!-- Poll -->

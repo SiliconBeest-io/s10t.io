@@ -354,6 +354,7 @@ export interface CreateStatusResult {
   inReplyToAccountId: string | null;
   quoteId: string | null;
   quoteUri: string | null;
+  quoteUrl: string | null;
   quoteAuthorizationUri: string | null;
   quoteApprovalStatus: string;
   quoteRequestUri: string | null;
@@ -405,16 +406,18 @@ export async function createStatus(
   // -- FEP-e232: Resolve quote post --
   let quoteId: string | null = null;
   let quoteUri: string | null = null;
+  let quoteUrl: string | null = null;
   let quoteApprovalStatus = 'none';
   let quoteRequestUri: string | null = null;
   if (data.quoteId) {
     const quoted = await env.DB
-      .prepare('SELECT id, uri FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
+      .prepare('SELECT id, uri, url FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
       .bind(data.quoteId)
       .first();
     if (quoted) {
       quoteId = quoted.id as string;
       quoteUri = quoted.uri as string;
+      quoteUrl = (quoted.url as string | null) || quoteUri;
       quoteApprovalStatus = 'pending';
       quoteRequestUri = `${statusUri}/quote`;
     }
@@ -688,6 +691,7 @@ export async function createStatus(
     inReplyToAccountId,
     quoteId,
     quoteUri,
+    quoteUrl,
     quoteAuthorizationUri: null,
     quoteApprovalStatus,
     quoteRequestUri,

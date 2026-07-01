@@ -81,7 +81,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     localMentions, hashtags, emojiTags: resolvedEmojiTags,
     pollData, conversationApUri,
     inReplyToId, inReplyToAccountId,
-    quoteId, quoteUri,
+    quoteId, quoteUri, quoteUrl,
     quoteAuthorizationUri: initialQuoteAuthorizationUri,
     quoteApprovalStatus: initialQuoteApprovalStatus,
     quoteRequestUri,
@@ -318,9 +318,13 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
       );
     }
   }
-  if (quoteUri && !fixedContent.includes(quoteUri)) {
-    const escapedQuoteUri = quoteUri.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    fixedContent += `<span class="quote-inline"><br/>RE: <a href="${escapedQuoteUri}">${escapedQuoteUri}</a></span>`;
+  if (quoteUri) {
+    const fallbackQuoteUrl = quoteUrl || quoteUri;
+    if (!fixedContent.includes(quoteUri) && !fixedContent.includes(fallbackQuoteUrl)) {
+      const escapedHref = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const escapedText = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      fixedContent += `<span class="quote-inline"><br/>RE: <a href="${escapedHref}">${escapedText}</a></span>`;
+    }
   }
   // Update DB content if changed
   if (fixedContent !== content) {
