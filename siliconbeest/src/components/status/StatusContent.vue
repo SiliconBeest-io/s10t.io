@@ -101,6 +101,14 @@ function enrichMentions(html: string): string {
   )
 }
 
+function stripQuoteInline(html: string): string {
+  if (!props.hideQuoteInline || typeof document === 'undefined') return html
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content.querySelectorAll('.quote-inline').forEach((node) => node.remove())
+  return template.innerHTML
+}
+
 const processedContent = computed(() => stripQuoteInline(emojifyHtml(enrichMentions(props.content), props.emojis)))
 const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoilerText || ''), props.emojis))
 </script>
@@ -127,10 +135,3 @@ const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoiler
     />
   </div>
 </template>
-function stripQuoteInline(html: string): string {
-  if (!props.hideQuoteInline || typeof document === 'undefined') return html
-  const template = document.createElement('template')
-  template.innerHTML = html
-  template.content.querySelectorAll('.quote-inline').forEach((node) => node.remove())
-  return template.innerHTML
-}
