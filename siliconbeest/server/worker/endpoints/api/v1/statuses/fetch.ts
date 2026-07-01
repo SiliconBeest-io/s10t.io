@@ -5,6 +5,7 @@ import { authOptional } from '../../../../middleware/auth';
 import { AppError } from '../../../../middleware/errorHandler';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import type { MediaAttachment } from '../../../../types/mastodon';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -16,27 +17,9 @@ function toISO(d: unknown): string {
 
 function parseAccountEmojiTags(
   emojiTagsJson: string | null | undefined,
-  acctDomain: string | null,
   instanceDomain: string,
 ): Array<{ shortcode: string; url: string; static_url: string; visible_in_picker: boolean }> {
-  if (!emojiTagsJson || !acctDomain) return [];
-  try {
-    const tags = JSON.parse(emojiTagsJson) as Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }>;
-    return tags.map((t) => {
-      const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-      const rawUrl = t.url || '';
-      const rawStatic = t.static_url || rawUrl;
-      const proxyIt = (u: string) => {
-        if (!u) return u;
-        try {
-          const parsed = new URL(u);
-          if (parsed.hostname === instanceDomain) return u;
-          return `https://${instanceDomain}/proxy?url=${encodeURIComponent(u)}`;
-        } catch { return u; }
-      };
-      return { shortcode: sc, url: proxyIt(rawUrl), static_url: proxyIt(rawStatic), visible_in_picker: false };
-    });
-  } catch { return []; }
+  return parseCustomEmojiTagsJson(emojiTagsJson, instanceDomain);
 }
 
 function serializeStatus(row: Record<string, unknown>, domain: string, currentAccountId?: string, accountEmojis?: any[]) {
@@ -46,10 +29,9 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
 
   // Derive account emojis from emoji_tags if not explicitly provided
   const resolvedAccountEmojis = (accountEmojis && accountEmojis.length > 0)
-    ? accountEmojis
-    : parseAccountEmojiTags(
+      ? accountEmojis
+      : parseAccountEmojiTags(
         row.account_emoji_tags as string | null,
-        row.account_domain as string | null,
         domain,
       );
 
@@ -75,6 +57,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
     content: (row.content as string) || '',
     filtered: [] as Record<string, unknown>[],
     reblog: null,
+    quote: null as import('../../../../types/mastodon').Status | null,
     application: null,
     account: {
       id: row.account_id as string,
@@ -132,6 +115,7 @@ async function serializeStatusEnriched(
     status.bookmarked = e.bookmarked ?? false;
     status.card = e.card ?? null;
     status.poll = e.poll ?? null;
+    status.quote = e.quote ?? null;
     status.emojis = e.emojis ?? [];
     status.mentions = e.mentions ?? [];
   }

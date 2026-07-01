@@ -181,6 +181,7 @@
   "status": {
     "reply": "回复",
     "boost": "转发",
+    "quote": "引用",
     "favourite": "收藏",
     "bookmark": "书签",
     "share": "分享",
@@ -216,7 +217,8 @@
     "visibility_direct": "私信",
     "report": "举报",
     "reblogged": "已转发",
-    "cannot_boost": "此帖文无法被转发"
+    "cannot_boost": "此帖文无法被转发",
+    "cannot_quote": "此帖文无法被引用"
   },
   "notification": {
     "title": "通知",

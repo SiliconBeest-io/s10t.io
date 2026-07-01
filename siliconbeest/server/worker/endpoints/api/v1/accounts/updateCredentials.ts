@@ -5,6 +5,7 @@ import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { isValidLocale } from '../../../../utils/locales';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -21,6 +22,46 @@ function addProfileField(
   const value = String(field.value ?? '');
   if (!name.trim() && !value.trim()) return;
   fields.push({ name, value, verified_at: null });
+}
+
+function collectShortcodes(...values: Array<string | null | undefined>): string[] {
+  const shortcodes = new Set<string>();
+  const regex = /:([A-Za-z0-9_]+):/g;
+  for (const value of values) {
+    if (!value) continue;
+    let match;
+    while ((match = regex.exec(value)) !== null) {
+      shortcodes.add(match[1]!);
+    }
+  }
+  return [...shortcodes];
+}
+
+async function updateLocalAccountEmojiTags(accountId: string, domain: string) {
+  const row = await env.DB.prepare(
+    'SELECT display_name, note, fields FROM accounts WHERE id = ?1',
+  ).bind(accountId).first<{ display_name: string | null; note: string | null; fields: string | null }>();
+  if (!row) return;
+
+  const fieldText = parseFields(row.fields).flatMap((field) => [field.name, field.value]).join(' ');
+  const shortcodes = collectShortcodes(row.display_name, row.note, fieldText);
+  if (shortcodes.length === 0) {
+    await env.DB.prepare('UPDATE accounts SET emoji_tags = NULL WHERE id = ?1').bind(accountId).run();
+    return;
+  }
+
+  const placeholders = shortcodes.map(() => '?').join(',');
+  const { results } = await env.DB.prepare(
+    `SELECT shortcode, image_key FROM custom_emojis WHERE shortcode IN (${placeholders}) AND (domain IS NULL OR domain = ?)`,
+  ).bind(...shortcodes, domain).all<{ shortcode: string; image_key: string }>();
+
+  const emojiTags = (results ?? []).map((emoji) => {
+    const url = emoji.image_key.startsWith('http') ? emoji.image_key : `https://${domain}/media/${emoji.image_key}`;
+    return { shortcode: emoji.shortcode, url, static_url: url };
+  });
+  await env.DB.prepare('UPDATE accounts SET emoji_tags = ?1 WHERE id = ?2')
+    .bind(emojiTags.length > 0 ? JSON.stringify(emojiTags) : null, accountId)
+    .run();
 }
 
 const app = new Hono<HonoEnv>();
@@ -187,6 +228,8 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     ).bind(sourcePrivacy, now, currentUser.account_id).run();
   }
 
+  await updateLocalAccountEmojiTags(currentUser.account_id, domain);
+
   // Fetch updated account
   const row = await env.DB.prepare(
     `SELECT a.*, u.locale, u.role, u.default_privacy
@@ -220,7 +263,7 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     following_count: (row.following_count as number) || 0,
     statuses_count: (row.statuses_count as number) || 0,
     last_status_at: (row.last_status_at as string) || null,
-    emojis: [],
+    emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
     fields: parseFields(row.fields as string | null),
     source: {
       privacy: (row.default_privacy as string) || 'public',

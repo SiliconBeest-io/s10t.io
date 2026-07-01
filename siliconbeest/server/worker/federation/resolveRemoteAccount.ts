@@ -17,6 +17,7 @@ import { sanitizeHtml } from '../utils/sanitize';
 import { createFed } from './fedify';
 import { getFedifyContext } from './helpers/send';
 import { pickSignerUsername } from '../../../../packages/shared/services/signer';
+import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 
 /**
  * Resolve or upsert a remote ActivityPub account.
@@ -55,6 +56,7 @@ export async function resolveRemoteAccount(
 	let headerUrl = '';
 	let summary = '';
 	let actorUrl = '';
+	let emojiTagsJson: string | null = null;
 	let resolved = false;
 	// The actor's own id is the canonical AP identity — store and enqueue that,
 	// not the (possibly differently-cased) reference URI we were handed.
@@ -98,6 +100,17 @@ export async function resolveRemoteAccount(
 			if (icon?.url) avatarUrl = String(icon.url);
 			const image = await actorObj.getImage({ documentLoader: docLoader });
 			if (image?.url) headerUrl = String(image.url);
+
+			const actorDoc = await actorObj.toJsonLd() as Record<string, unknown>;
+			const tags = actorDoc.tag as Array<Record<string, unknown>> | undefined;
+			if (Array.isArray(tags)) {
+				const emojis = tags
+					.filter((tag) => tag.type === 'Emoji')
+					.map((tag) => emojiTagToCustomEmoji(tag))
+					.filter((emoji): emoji is NonNullable<typeof emoji> => !!emoji)
+					.map((emoji) => ({ shortcode: emoji.shortcode, url: emoji.url, static_url: emoji.static_url }));
+				emojiTagsJson = emojis.length > 0 ? JSON.stringify(emojis) : null;
+			}
 		} else {
 			console.warn(`[resolveRemoteAccount] Could not resolve actor via Fedify: ${actorUri}`);
 		}
@@ -153,10 +166,10 @@ export async function resolveRemoteAccount(
 
 	try {
 		await env.DB.prepare(
-			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, created_at, updated_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?12)`,
+			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, emoji_tags, created_at, updated_at)
+			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?13, ?13)`,
 		)
-			.bind(id, username, domain, displayName, summary, canonicalUri, actorUrl || canonicalUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, now)
+			.bind(id, username, domain, displayName, summary, canonicalUri, actorUrl || canonicalUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, emojiTagsJson, now)
 			.run();
 	} catch {
 		const retry = await env.DB.prepare(

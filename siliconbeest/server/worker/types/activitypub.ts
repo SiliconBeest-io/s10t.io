@@ -31,6 +31,8 @@ export type {
   APFollow,
   APAccept,
   APReject,
+  APQuoteRequest,
+  APQuoteAuthorization,
   APLike,
   APAnnounce,
   APUndo,

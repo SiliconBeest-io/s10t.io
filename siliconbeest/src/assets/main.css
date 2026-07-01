@@ -84,12 +84,14 @@
     transition: transform 0.2s ease;
   }
 
-  .status-content .custom-emoji {
-    display: inline;
+  .custom-emoji {
+    display: inline-block;
     height: 1.2em;
+    max-width: 3em;
     width: auto;
     vertical-align: middle;
     margin: 0 0.05em;
+    object-fit: contain;
   }
 
   .status-content p {

@@ -181,6 +181,7 @@
   "status": {
     "reply": "Reply",
     "boost": "Boost",
+    "quote": "Quote",
     "favourite": "Favourite",
     "bookmark": "Bookmark",
     "share": "Share",
@@ -216,7 +217,8 @@
     "visibility_direct": "Direct message",
     "report": "Report",
     "reblogged": "boosted",
-    "cannot_boost": "This post cannot be boosted"
+    "cannot_boost": "This post cannot be boosted",
+    "cannot_quote": "This post cannot be quoted"
   },
   "notification": {
     "title": "Notifications",

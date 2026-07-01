@@ -26,9 +26,15 @@ const canReblog = computed(() => {
   return v === 'public' || v === 'unlisted'
 })
 
+const canQuote = computed(() => {
+  const v = props.visibility ?? 'public'
+  return v === 'public' || v === 'unlisted'
+})
+
 const emit = defineEmits<{
   reply: [id: string]
   reblog: [id: string]
+  quote: [id: string]
   favourite: [id: string]
   bookmark: [id: string]
   share: [id: string]
@@ -119,6 +125,20 @@ function formatCount(n: number): string {
       <svg v-if="loadingReblog" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
       <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
       <span class="text-xs">{{ formatCount(reblogsCount) }}</span>
+    </button>
+
+    <!-- Quote -->
+    <button
+      @click="canQuote && emit('quote', statusId)"
+      :disabled="!canQuote"
+      class="flex items-center gap-1 p-2 rounded-full transition-colors group"
+      :class="canQuote
+        ? 'text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+        : 'text-gray-300 dark:text-gray-600 cursor-not-allowed'"
+      :aria-label="t('status.quote')"
+      :title="!canQuote ? t('status.cannot_quote') : t('status.quote')"
+    >
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 8h10M7 12h6m-7 8l-2-2V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H9l-3 4z" /></svg>
     </button>
 
     <!-- Favourite -->

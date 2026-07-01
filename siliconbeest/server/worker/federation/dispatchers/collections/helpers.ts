@@ -13,6 +13,8 @@ import {
   Document as APDocument,
   Source,
   Emoji as APEmoji,
+  InteractionPolicy,
+  InteractionRule,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import type { AccountRow, StatusRow, PollRow } from '../../../types/db';
@@ -94,6 +96,7 @@ export function buildFedifyNote(
       }[]
     >;
     replyUriMap: Map<string, string>;
+    quoteUriMap: Map<string, string>;
   },
 ): FedifyNoteResult {
   const actorUri = `https://${domain}/users/${account.username}`;
@@ -137,6 +140,12 @@ export function buildFedifyNote(
     ccs: ccs.map((u) => u),
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
+    interactionPolicy: new InteractionPolicy({
+      canQuote: new InteractionRule({
+        automaticApproval: new URL(AS_PUBLIC),
+        manualApproval: new URL(actorUri),
+      }),
+    }),
   };
 
   if (replyTarget) {
@@ -156,6 +165,18 @@ export function buildFedifyNote(
       content: status.text,
       mediaType: 'text/plain',
     });
+  }
+
+  if (status.quote_id) {
+    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+    if (quoteUri) {
+      noteValues.quote = new URL(quoteUri);
+      noteValues.quoteUrl = new URL(quoteUri);
+    }
+  }
+
+  if (status.quote_authorization_uri) {
+    noteValues.quoteAuthorization = new URL(status.quote_authorization_uri);
   }
 
   // Build custom emoji tags from emoji_tags JSON
@@ -196,6 +217,7 @@ export function buildFedifyQuestion(
     convMap: Map<string, string | null>;
     mediaMap: Map<string, { url: string; mediaType: string; description: string; width: number | null; height: number | null; blurhash: string | null; type: string }[]>;
     replyUriMap: Map<string, string>;
+    quoteUriMap: Map<string, string>;
   },
 ): FedifyQuestionResult {
   // Build the base Note first to reuse all shared logic
@@ -204,6 +226,7 @@ export function buildFedifyQuestion(
   // Parse poll options
   const options: Array<{ title: string; votes_count: number }> = JSON.parse(poll.options);
   const optionNotes = options.map((o) => new Note({ name: o.title }));
+  const actorUri = `https://${domain}/users/${account.username}`;
 
   // Build Question values from the Note's JSON-LD-compatible properties
   const questionValues: ConstructorParameters<typeof Question>[0] = {
@@ -215,10 +238,15 @@ export function buildFedifyQuestion(
     ccs: ccs.map((u) => u),
     sensitive: status.sensitive === 1,
     summary: status.content_warning || null,
+    interactionPolicy: new InteractionPolicy({
+      canQuote: new InteractionRule({
+        automaticApproval: new URL(AS_PUBLIC),
+        manualApproval: new URL(actorUri),
+      }),
+    }),
   };
 
   // Set actor URI (Question is an Activity, needs actor)
-  const actorUri = `https://${domain}/users/${account.username}`;
   questionValues.actor = new URL(actorUri);
 
   if (poll.multiple) {
@@ -247,6 +275,18 @@ export function buildFedifyQuestion(
       content: status.text,
       mediaType: 'text/plain',
     });
+  }
+
+  if (status.quote_id) {
+    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+    if (quoteUri) {
+      questionValues.quote = new URL(quoteUri);
+      questionValues.quoteUrl = new URL(quoteUri);
+    }
+  }
+
+  if (status.quote_authorization_uri) {
+    questionValues.quoteAuthorization = new URL(status.quote_authorization_uri);
   }
 
   // Carry over attachments

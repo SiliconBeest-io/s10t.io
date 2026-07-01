@@ -6,9 +6,10 @@
 /* oxlint-disable fp/no-let, fp/no-loop-statements, fp/no-throw-statements, fp/no-try-statements, no-param-reassign */
 
 import { env } from 'cloudflare:workers';
-import type { MediaAttachment as MastodonMediaAttachment, PreviewCard, Poll as MastodonPoll } from '../types/mastodon';
-import { serializeMediaAttachment, serializePoll } from './mastodonSerializer';
-import type { MediaAttachmentRow, PollRow } from '../types/db';
+import type { MediaAttachment as MastodonMediaAttachment, PreviewCard, Poll as MastodonPoll, Status as MastodonStatus } from '../types/mastodon';
+import { serializeAccount, serializeMediaAttachment, serializePoll, serializeStatus } from './mastodonSerializer';
+import type { AccountRow, MediaAttachmentRow, PollRow, StatusRow } from '../types/db';
+import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 
 export type MentionInfo = {
   id: string;
@@ -50,6 +51,7 @@ export type StatusEnrichment = {
   mentions: MentionInfo[];
   card: PreviewCard | null;
   poll: MastodonPoll | null;
+  quote: MastodonStatus | null;
   emojis: EmojiInfo[];
   accountEmojis: EmojiInfo[];
 };
@@ -63,6 +65,7 @@ const EMPTY: StatusEnrichment = {
   mentions: [],
   card: null,
   poll: null,
+  quote: null,
   emojis: [],
   accountEmojis: [],
 };
@@ -86,7 +89,7 @@ export async function enrichStatuses(
 
   // Initialize all entries
   for (const id of statusIds) {
-    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, emojis: [], accountEmojis: [] });
+    result.set(id, { ...EMPTY, mediaAttachments: [], reactions: [], mentions: [], card: null, poll: null, quote: null, emojis: [], accountEmojis: [] });
   }
 
   // Build parallel queries
@@ -313,6 +316,68 @@ export async function enrichStatuses(
     );
   }
 
+  queries.push(
+    env.DB
+      .prepare(
+        `SELECT owner.id AS owner_status_id,
+                qs.*,
+                a.id AS account_id, a.username, a.domain, a.display_name, a.note, a.uri AS account_uri,
+                a.url AS account_url, a.avatar_url, a.avatar_static_url, a.header_url, a.header_static_url,
+                a.locked, a.bot, a.discoverable, a.manually_approves_followers,
+                a.statuses_count, a.followers_count, a.following_count, a.last_status_at,
+                a.created_at AS account_created_at, a.updated_at AS account_updated_at,
+                a.suspended_at, a.silenced_at, a.memorial, a.moved_to_account_id, a.emoji_tags AS account_emoji_tags
+         FROM statuses owner
+         JOIN statuses qs ON qs.id = owner.quote_id AND qs.deleted_at IS NULL
+         JOIN accounts a ON a.id = qs.account_id
+         WHERE owner.id IN (${placeholders})`,
+      )
+      .bind(...statusIds)
+      .all<Record<string, unknown>>()
+      .then(({ results }) => {
+        for (const row of results ?? []) {
+          const entry = result.get(row.owner_status_id as string);
+          if (!entry) continue;
+          const accountRow: AccountRow = {
+            id: row.account_id as string,
+            username: row.username as string,
+            domain: row.domain as string | null,
+            display_name: (row.display_name as string) || '',
+            note: (row.note as string) || '',
+            uri: row.account_uri as string,
+            url: (row.account_url as string) || null,
+            avatar_url: (row.avatar_url as string) || '',
+            avatar_static_url: (row.avatar_static_url as string) || '',
+            header_url: (row.header_url as string) || '',
+            header_static_url: (row.header_static_url as string) || '',
+            locked: (row.locked as number) || 0,
+            bot: (row.bot as number) || 0,
+            discoverable: row.discoverable as number | null,
+            manually_approves_followers: (row.manually_approves_followers as number) || 0,
+            statuses_count: (row.statuses_count as number) || 0,
+            followers_count: (row.followers_count as number) || 0,
+            following_count: (row.following_count as number) || 0,
+            last_status_at: row.last_status_at as string | null,
+            created_at: row.account_created_at as string,
+            updated_at: row.account_updated_at as string,
+            suspended_at: row.suspended_at as string | null,
+            silenced_at: row.silenced_at as string | null,
+            memorial: (row.memorial as number) || 0,
+            moved_to_account_id: row.moved_to_account_id as string | null,
+            emoji_tags: row.account_emoji_tags as string | null,
+          };
+          entry.quote = serializeStatus(row as StatusRow, {
+            account: serializeAccount(accountRow, { instanceDomain: domain }),
+            mediaAttachments: [],
+            mentions: [],
+            tags: [],
+            emojis: [],
+            quote: null,
+          });
+        }
+      }),
+  );
+
   await Promise.all(queries);
 
   // 9. Custom emojis — extract from emoji_tags JSON, verify accessibility, proxy URLs
@@ -348,15 +413,13 @@ export async function enrichStatuses(
     } catch { /* skip */ }
 
     for (const tag of emojiTags) {
-      const shortcode = (typeof tag.shortcode === 'string' ? tag.shortcode : ((tag.name as string) || '').replace(/^:|:$/g, ''));
-      if (!shortcodesInContent.has(shortcode)) continue;
-      const url = (tag.url as string) || (tag.icon as { url?: string } | undefined)?.url;
-      if (!url) continue;
+      const emoji = emojiTagToCustomEmoji(tag);
+      if (!emoji || !shortcodesInContent.has(emoji.shortcode)) continue;
 
-      const proxyUrl = proxyEmojiUrl(url, domain);
+      const proxyUrl = proxyEmojiUrl(emoji.url, domain);
       if (!statusEmojiMap.has(statusId)) statusEmojiMap.set(statusId, []);
       statusEmojiMap.get(statusId)!.push({
-        shortcode,
+        shortcode: emoji.shortcode,
         url: proxyUrl,
         static_url: proxyUrl,
         visible_in_picker: false,

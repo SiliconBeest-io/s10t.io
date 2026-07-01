@@ -11,6 +11,14 @@ import { listNotifications } from '../../../../services/notification';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
+function formatEmojiUrl(imageKey: string, emojiDomain: string | null, instanceDomain: string): string {
+  if (!emojiDomain || emojiDomain === instanceDomain) {
+    return imageKey.startsWith('http') ? imageKey : `https://${instanceDomain}/media/${imageKey}`;
+  }
+  const originalUrl = imageKey.startsWith('http') ? imageKey : `https://${emojiDomain}/${imageKey}`;
+  return `https://${instanceDomain}/proxy?url=${encodeURIComponent(originalUrl)}`;
+}
+
 app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
   const account = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
@@ -108,6 +116,7 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
         muted: false,
         pinned: false,
         reblog: null,
+        quote: e?.quote ?? null,
         poll: null,
         card: e?.card ?? null,
         application: null,
@@ -122,7 +131,7 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
     }
   }
 
-  // Batch-fetch custom emoji URLs for emoji_reaction notifications
+  // Batch-fetch fallback custom emoji URLs for older emoji_reaction rows.
   const emojiShortcodes = new Set<string>();
   for (const row of rows) {
     const emoji = row.emoji;
@@ -138,13 +147,23 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
     ).bind(...emojiShortcodes).all<{ shortcode: string; domain: string | null; image_key: string }>();
     const instanceDomain = env.INSTANCE_DOMAIN;
     for (const er of emojiRows.results) {
-      const isLocal = !er.domain || er.domain === instanceDomain;
-      const url = isLocal
-        ? `https://${instanceDomain}/media/${er.image_key}`
-        : `https://${instanceDomain}/proxy?url=${encodeURIComponent(er.image_key)}`;
-      emojiUrlMap.set(er.shortcode, url);
+      emojiUrlMap.set(er.shortcode, formatEmojiUrl(er.image_key, er.domain, instanceDomain));
     }
   }
+
+  const reactionEmojiUrlMap = new Map<string, string>();
+  await Promise.all(rows.map(async (row) => {
+    const emoji = row.emoji;
+    if (row.type !== 'emoji_reaction' || !row.status_id || !emoji?.startsWith(':') || !emoji.endsWith(':')) return;
+    const er = await env.DB.prepare(
+      `SELECT ce.domain, ce.image_key
+       FROM emoji_reactions er
+       JOIN custom_emojis ce ON ce.id = er.custom_emoji_id
+       WHERE er.status_id = ?1 AND er.account_id = ?2 AND er.emoji = ?3
+       LIMIT 1`,
+    ).bind(row.status_id, row.from_account_id, emoji).first<{ domain: string | null; image_key: string }>();
+    if (er) reactionEmojiUrlMap.set(row.id, formatEmojiUrl(er.image_key, er.domain, env.INSTANCE_DOMAIN));
+  }));
 
   const notifications = rows.map((row) => {
     const accountRow: AccountRow = {
@@ -175,7 +194,7 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
     const emoji = row.emoji;
     if (notifRow.type === 'emoji_reaction' && emoji?.startsWith(':') && emoji?.endsWith(':')) {
       const sc = emoji.slice(1, -1);
-      const url = emojiUrlMap.get(sc);
+      const url = reactionEmojiUrlMap.get(row.id) ?? emojiUrlMap.get(sc);
       if (url) (notif as Record<string, unknown>).emoji_url = url;
     }
     return notif;

@@ -20,6 +20,7 @@ import {
 	Accept,
 	Reject,
 	EmojiReact,
+	QuoteRequest,
 } from '@fedify/vocab';
 
 import type { FedifyContextData } from '../fedify';
@@ -38,6 +39,7 @@ import { processBlock } from '../inboxProcessors/block';
 import { processMove } from '../inboxProcessors/move';
 import { processFlag } from '../inboxProcessors/flag';
 import { processEmojiReact } from '../inboxProcessors/emojiReact';
+import { processQuoteRequest } from '../inboxProcessors/quoteRequest';
 
 export function setupWorkerInboxListeners(
 	federation: Federation<FedifyContextData>,
@@ -58,6 +60,7 @@ export function setupWorkerInboxListeners(
 			Accept,
 			Reject,
 			EmojiReact,
+			QuoteRequest,
 		},
 		{
 			processFollow,
@@ -73,6 +76,7 @@ export function setupWorkerInboxListeners(
 			processMove,
 			processFlag,
 			processEmojiReact,
+			processQuoteRequest,
 		},
 	);
 }

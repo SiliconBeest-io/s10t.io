@@ -250,6 +250,18 @@ function setupOutboxDispatcher(
           if (rr) replyUriMap.set(rid, rr.uri);
         }
 
+        const quoteIds = pageRows
+          .filter((r) => r.quote_id)
+          .map((r) => r.quote_id!);
+        const quoteUriMap = new Map<string, string>();
+        for (const qid of quoteIds) {
+          const qr = await db
+            .prepare('SELECT uri FROM statuses WHERE id = ?1 LIMIT 1')
+            .bind(qid)
+            .first<{ uri: string }>();
+          if (qr) quoteUriMap.set(qid, qr.uri);
+        }
+
         const activities = pageRows.map((status) => {
           if (status.reblog_of_id) {
             const originalUri =
@@ -268,6 +280,7 @@ function setupOutboxDispatcher(
             convMap,
             mediaMap,
             replyUriMap,
+            quoteUriMap,
           });
 
           return new Create({
@@ -413,11 +426,24 @@ function setupFeaturedDispatcher(
         if (rr) replyUriMap.set(rid, rr.uri);
       }
 
+      const quoteIds = rows
+        .filter((r) => r.quote_id)
+        .map((r) => r.quote_id!);
+      const quoteUriMap = new Map<string, string>();
+      for (const qid of quoteIds) {
+        const qr = await db
+          .prepare('SELECT uri FROM statuses WHERE id = ?1 LIMIT 1')
+          .bind(qid)
+          .first<{ uri: string }>();
+        if (qr) quoteUriMap.set(qid, qr.uri);
+      }
+
       const items = rows.map((status) => {
         const { note } = buildFedifyNote(status, account, domain, {
           convMap,
           mediaMap,
           replyUriMap,
+          quoteUriMap,
         });
         return note;
       });

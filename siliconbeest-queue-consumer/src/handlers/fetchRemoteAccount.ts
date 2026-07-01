@@ -15,6 +15,7 @@ import type { FetchRemoteAccountMessage } from '../shared/types/queue';
 import { getUserAgent } from '../utils/repository';
 import { ensureInstanceRecord } from '../../../packages/shared/services/instance';
 import { pickSignerUsername } from '../../../packages/shared/services/signer';
+import { emojiTagToCustomEmoji } from '../../../packages/shared/utils/customEmoji';
 
 /** Cache TTL for remote actor documents (5 minutes). */
 const ACTOR_CACHE_TTL = 300;
@@ -147,18 +148,13 @@ export async function handleFetchRemoteAccount(
   const fieldsJson = JSON.stringify(profileFields);
 
   // Extract Emoji tags from the actor document
-  const emojiTags: Array<{ shortcode: string; url: string }> = [];
+  const emojiTags: Array<{ shortcode: string; url: string; static_url: string }> = [];
   const tags = actorDoc.tag as Array<Record<string, unknown>> | undefined;
   if (Array.isArray(tags)) {
     for (const tag of tags) {
-      if (tag.type === 'Emoji' && tag.name) {
-        const shortcode = String(tag.name).replace(/^:|:$/g, '');
-        const iconObj = tag.icon as Record<string, unknown> | undefined;
-        const emojiUrl = iconObj?.url as string | undefined;
-        if (shortcode && emojiUrl) {
-          emojiTags.push({ shortcode, url: emojiUrl });
-        }
-      }
+      if (tag.type !== 'Emoji') continue;
+      const emoji = emojiTagToCustomEmoji(tag);
+      if (emoji) emojiTags.push({ shortcode: emoji.shortcode, url: emoji.url, static_url: emoji.static_url });
     }
   }
   const emojiTagsJson = emojiTags.length > 0 ? JSON.stringify(emojiTags) : null;

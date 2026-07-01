@@ -90,6 +90,12 @@ export function buildActivityFromJsonLd(
 	if (jsonLd.target !== undefined) {
 		activity.target = normalizeObjectValue(jsonLd.target);
 	}
+	if (jsonLd.instrument !== undefined) {
+		activity.instrument = normalizeObjectValue(jsonLd.instrument);
+	}
+	if (jsonLd.result !== undefined) {
+		activity.result = normalizeObjectValue(jsonLd.result);
+	}
 
 	const to = normalizeToStringArray(jsonLd.to);
 	if (to) activity.to = to;
@@ -105,7 +111,16 @@ export function buildActivityFromJsonLd(
 
 	// Preserve vendor extensions
 	for (const key of Object.keys(jsonLd)) {
-		if (key.startsWith('_misskey_') || key === 'quoteUri') {
+		if (
+			key.startsWith('_misskey_') ||
+			key === 'quote' ||
+			key === 'quoteUrl' ||
+			key === 'quoteUri' ||
+			key === 'quoteAuthorization' ||
+			key === 'interactionPolicy' ||
+			key === 'interactingObject' ||
+			key === 'interactionTarget'
+		) {
 			activity[key] = jsonLd[key];
 		}
 	}

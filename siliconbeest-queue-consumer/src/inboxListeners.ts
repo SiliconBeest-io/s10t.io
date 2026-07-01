@@ -23,6 +23,7 @@ import {
 	Accept,
 	Reject,
 	EmojiReact,
+	QuoteRequest,
 } from '@fedify/vocab';
 
 import type { FedifyContextData } from './fedify';
@@ -43,6 +44,7 @@ import {
 	processMove,
 	processFlag,
 	processEmojiReact,
+	processQuoteRequest,
 } from '../../siliconbeest/server/worker/federation/inboxProcessors/processors';
 
 export function setupConsumerInboxListeners(
@@ -64,6 +66,7 @@ export function setupConsumerInboxListeners(
 			Accept,
 			Reject,
 			EmojiReact,
+			QuoteRequest,
 		},
 		{
 			processFollow,
@@ -79,6 +82,7 @@ export function setupConsumerInboxListeners(
 			processMove,
 			processFlag,
 			processEmojiReact,
+			processQuoteRequest,
 		},
 		{ measure: measureAsync },
 	);

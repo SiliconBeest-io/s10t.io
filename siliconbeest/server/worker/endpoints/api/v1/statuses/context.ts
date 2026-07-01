@@ -60,6 +60,7 @@ app.get('/:id/context', authOptional, async (c) => {
       s.bookmarked = e.bookmarked ?? false;
       s.card = e.card ?? null;
       s.poll = e.poll ?? null;
+      s.quote = e.quote ?? null;
       s.emojis = e.emojis ?? [];
     }
     return s;

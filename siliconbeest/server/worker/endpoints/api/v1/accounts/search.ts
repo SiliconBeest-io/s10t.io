@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
 import { searchAccounts } from '../../../../services/account';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -22,30 +23,8 @@ app.get('/search', authRequired, async (c) => {
 
   const accounts = results.map((row) => {
     const acct = row.domain ? `${row.username}@${row.domain}` : (row.username as string);
-    const acctDomain = (row.domain as string) || null;
 
-    // Parse account emoji_tags and proxy URLs
-    let emojis: Array<{ shortcode: string; url: string; static_url: string; visible_in_picker: boolean }> = [];
-    const emojiTagsRaw = row.emoji_tags as string | null;
-    if (emojiTagsRaw && acctDomain) {
-      try {
-        const tags = JSON.parse(emojiTagsRaw) as Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }>;
-        emojis = tags.map((t) => {
-          const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-          const rawUrl = t.url || '';
-          const rawStatic = t.static_url || rawUrl;
-          const proxyIt = (u: string) => {
-            if (!u) return u;
-            try {
-              const p = new URL(u);
-              if (p.hostname === domain) return u;
-              return `https://${domain}/proxy?url=${encodeURIComponent(u)}`;
-            } catch { return u; }
-          };
-          return { shortcode: sc, url: proxyIt(rawUrl), static_url: proxyIt(rawStatic), visible_in_picker: false };
-        });
-      } catch { /* ignore */ }
-    }
+    const emojis = parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain);
 
     return {
       id: row.id as string,

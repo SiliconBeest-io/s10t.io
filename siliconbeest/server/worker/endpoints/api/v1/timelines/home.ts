@@ -110,6 +110,7 @@ app.get('/', authRequired, async (c) => {
       reblogged: e?.reblogged,
       bookmarked: e?.bookmarked,
       card: e?.card, poll: e?.poll,
+      quote: e?.quote,
       emojis: e?.emojis,
     });
     // Fill reblog object if this is a boost

@@ -8,6 +8,7 @@
 import type { APActivity, APObject } from '../../types/activitypub';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
+import { FEP044F_QUOTE_REQUEST, getId } from '../helpers/quote';
 
 class RejectProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -15,6 +16,14 @@ class RejectProcessor extends BaseProcessor {
 		if (!object) {
 			console.warn('[reject] activity.object is missing');
 			return;
+		}
+
+		if (typeof object === 'object') {
+			const objectType = (object as APObject).type;
+			if (objectType === 'QuoteRequest' || objectType === FEP044F_QUOTE_REQUEST) {
+				await this.processQuoteReject(object as APObject);
+				return;
+			}
 		}
 
 		const remoteAccount = await this.findAccountByUri(activity.actor);
@@ -55,6 +64,26 @@ class RejectProcessor extends BaseProcessor {
 				.bind(remoteAccount.id)
 				.run();
 		}
+	}
+
+	private async processQuoteReject(quoteRequest: APObject): Promise<void> {
+		const instrumentUri = getId(quoteRequest.instrument);
+		const quotedUri = getId(quoteRequest.object);
+		if (!instrumentUri || !quotedUri) {
+			console.warn('[reject] QuoteRequest Reject missing instrument or object');
+			return;
+		}
+
+		await env.DB.prepare(
+			`UPDATE statuses
+			 SET quote_id = NULL,
+			     quote_authorization_uri = NULL,
+			     quote_approval_status = 'rejected',
+			     updated_at = ?1
+			 WHERE uri = ?2
+			   AND local = 1
+			   AND quote_id IN (SELECT id FROM statuses WHERE uri = ?3)`,
+		).bind(new Date().toISOString(), instrumentUri, quotedUri).run();
 	}
 }
 

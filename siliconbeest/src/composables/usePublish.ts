@@ -12,6 +12,7 @@ export interface PublishPayload {
   spoiler_text?: string;
   language?: string;
   in_reply_to_id?: string;
+  quote_id?: string;
   media_ids?: string[];
 }
 
@@ -66,6 +67,7 @@ export function usePublish() {
     }
     if (payload.language) compose.language = payload.language;
     if (payload.in_reply_to_id) compose.inReplyToId = payload.in_reply_to_id;
+    if (payload.quote_id) compose.quoteId = payload.quote_id;
     if (payload.media_ids?.length) {
       // Media already uploaded — store IDs are set via the composer's own flow
     }

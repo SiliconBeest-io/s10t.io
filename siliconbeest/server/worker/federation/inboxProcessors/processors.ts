@@ -18,3 +18,4 @@ export { processBlock } from './block';
 export { processMove } from './move';
 export { processFlag } from './flag';
 export { processEmojiReact } from './emojiReact';
+export { processQuoteRequest } from './quoteRequest';

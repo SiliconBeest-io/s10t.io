@@ -16,6 +16,7 @@ export interface CreateStatusParams {
   visibility?: 'public' | 'unlisted' | 'private' | 'direct';
   language?: string;
   scheduled_at?: string;
+  quote_id?: string;
 }
 
 export function getStatus(id: string, token?: string) {

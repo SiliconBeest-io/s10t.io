@@ -7,31 +7,9 @@ import { blockAccount, unblockAccount, muteAccount, unmuteAccount } from '@/api/
 import Avatar from '../common/Avatar.vue'
 import FollowButton from './FollowButton.vue'
 import ReportDialog from '../common/ReportDialog.vue'
+import { emojifyHtml, emojifyPlainText } from '@/utils/customEmoji'
 
 const { t } = useI18n()
-
-/** Replace :shortcode: with <img> for custom emojis */
-function emojifyText(text: string, emojis?: Array<{ shortcode: string; url: string; static_url: string }>): string {
-  if (!emojis || emojis.length === 0 || !text) return text
-  // Deduplicate by shortcode to prevent double-replacement
-  const seen = new Set<string>()
-  const uniqueEmojis = emojis.filter(e => {
-    if (seen.has(e.shortcode)) return false
-    seen.add(e.shortcode)
-    return true
-  })
-  let result = text
-  for (const e of uniqueEmojis) {
-    // Use negative lookbehind/lookahead to avoid matching inside HTML attributes
-    // Simple approach: replace only :shortcode: that are NOT inside quotes
-    const escaped = e.shortcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    result = result.replace(
-      new RegExp(`(?<!=")\\u200B?:${escaped}:\\u200B?`, 'g'),
-      `<img src="${e.url}" alt="${e.shortcode}" title="${e.shortcode}" class="inline-block h-5 w-5 align-text-bottom" draggable="false" />`
-    )
-  }
-  return result
-}
 
 const props = defineProps<{
   account: {
@@ -51,8 +29,14 @@ const props = defineProps<{
   relationship?: Relationship
 }>()
 
-const emojifiedName = computed(() => emojifyText(props.account.display_name || props.account.acct, props.account.emojis))
-const emojifiedNote = computed(() => emojifyText(props.account.note || '', props.account.emojis))
+const emojiClass = 'custom-emoji inline-block h-5 max-w-8 align-text-bottom'
+const emojifiedName = computed(() => emojifyPlainText(props.account.display_name || props.account.acct, props.account.emojis, emojiClass))
+const emojifiedNote = computed(() => emojifyHtml(props.account.note || '', props.account.emojis, emojiClass))
+const emojifiedFields = computed(() => (props.account.fields ?? []).map((field) => ({
+  ...field,
+  nameHtml: emojifyPlainText(field.name, props.account.emojis, emojiClass),
+  valueHtml: emojifyHtml(field.value, props.account.emojis, emojiClass),
+})))
 
 const auth = useAuthStore()
 
@@ -230,17 +214,17 @@ function handleToggle() {
       />
 
       <!-- Fields -->
-      <dl v-if="account.fields?.length" class="mt-3 space-y-1">
+      <dl v-if="emojifiedFields.length" class="mt-3 space-y-1">
         <div
-          v-for="field in account.fields"
+          v-for="field in emojifiedFields"
           :key="field.name"
           class="flex text-sm border border-gray-200 dark:border-gray-700 rounded overflow-hidden"
         >
-          <dt class="px-3 py-1.5 bg-gray-50 dark:bg-gray-800 font-medium w-1/3 truncate">{{ field.name }}</dt>
+          <dt class="px-3 py-1.5 bg-gray-50 dark:bg-gray-800 font-medium w-1/3 truncate" v-html="field.nameHtml" />
           <dd
             class="px-3 py-1.5 flex-1 truncate"
             :class="{ 'text-green-600 dark:text-green-400': field.verified_at }"
-            v-html="field.value"
+            v-html="field.valueHtml"
           />
         </div>
       </dl>

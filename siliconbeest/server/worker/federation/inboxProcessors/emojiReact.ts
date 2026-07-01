@@ -10,6 +10,7 @@ import { env } from 'cloudflare:workers';
 import type { APActivity } from '../../types/activitypub';
 import { generateUlid } from '../../utils/ulid';
 import { BaseProcessor } from './BaseProcessor';
+import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
 
 /**
  * Extract emoji from an activity.
@@ -53,25 +54,23 @@ class EmojiReactProcessor extends BaseProcessor {
 
 		// Store custom emoji if present in the activity's tag array
 		const activityTags = activity.tag as (Record<string, unknown>)[] | undefined;
+		let customEmojiDomain: string | null = null;
 		if (Array.isArray(activityTags)) {
 			for (const tagObj of activityTags) {
 				if (tagObj.type !== 'Emoji') continue;
-				const emojiName = ((tagObj.name as string) || '').replace(/^:|:$/g, '');
-				const iconObj = tagObj.icon as Record<string, unknown> | undefined;
-				const emojiUrl = iconObj?.url as string | undefined;
-				if (!emojiName || !emojiUrl) continue;
-
-				const reactorUri = activity.actor;
-				const emojiDomain = new URL(reactorUri).hostname;
+				const customEmoji = emojiTagToCustomEmoji(tagObj);
+				if (!customEmoji) continue;
+				const emojiDomain = customEmojiTagDomain(tagObj, activity.actor);
 
 				if (emojiDomain) {
+					if (emoji === `:${customEmoji.shortcode}:`) customEmojiDomain = emojiDomain;
 					await env.DB.prepare(
 						`INSERT INTO custom_emojis (id, shortcode, domain, image_key, visible_in_picker, created_at, updated_at)
 						 VALUES (?1, ?2, ?3, ?4, 0, datetime('now'), datetime('now'))
 						 ON CONFLICT(shortcode, domain) DO UPDATE SET
 						   image_key = excluded.image_key,
 						   updated_at = datetime('now')`,
-					).bind(generateUlid(), emojiName, emojiDomain, emojiUrl).run();
+					).bind(generateUlid(), customEmoji.shortcode, emojiDomain, customEmoji.url).run();
 				}
 			}
 		}
@@ -80,8 +79,7 @@ class EmojiReactProcessor extends BaseProcessor {
 		let customEmojiId: string | null = null;
 		if (emoji.startsWith(':') && emoji.endsWith(':')) {
 			const shortcode = emoji.slice(1, -1);
-			const reactorUri = activity.actor;
-			const emojiDomain = new URL(reactorUri).hostname;
+			const emojiDomain = customEmojiDomain ?? new URL(activity.actor).hostname;
 			if (emojiDomain) {
 				const emojiRow = await env.DB.prepare(
 					'SELECT id FROM custom_emojis WHERE shortcode = ? AND domain = ? LIMIT 1',

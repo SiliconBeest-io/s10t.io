@@ -25,6 +25,7 @@ const emit = defineEmits<{
     visibility: string
     language: string
     in_reply_to_id?: string
+    quote_id?: string
     media_ids?: string[]
   }]
 }>()
@@ -401,7 +402,7 @@ function initialVisibility() {
 const selectedVisibility = ref(initialVisibility())
 
 const canSubmit = computed(() => {
-  const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0
+  const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
   return hasContent && charsRemaining.value >= 0 && !compose.uploading
 })
 
@@ -495,12 +496,14 @@ function submit() {
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
     in_reply_to_id: props.replyTo?.id,
+    quote_id: compose.quoteId ?? undefined,
     media_ids: compose.mediaAttachments.map(m => m.id),
   })
   content.value = ''
   spoilerText.value = ''
   showCw.value = false
   compose.mediaAttachments.splice(0)
+  compose.clearQuote()
 }
 </script>
 
@@ -607,6 +610,32 @@ function submit() {
           @click="compose.removeMedia(media.id)"
           class="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/80"
           aria-label="Remove"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- Quote preview -->
+    <div
+      v-if="compose.quoteStatus"
+      class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg p-3 bg-gray-50 dark:bg-gray-800/50"
+    >
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+            @{{ compose.quoteStatus.account.acct }}
+          </div>
+          <div
+            class="mt-1 text-sm text-gray-800 dark:text-gray-100 line-clamp-3"
+            v-html="compose.quoteStatus.content"
+          />
+        </div>
+        <button
+          type="button"
+          class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500"
+          :aria-label="t('common.cancel')"
+          @click="compose.clearQuote()"
         >
           ✕
         </button>

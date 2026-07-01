@@ -7,17 +7,11 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccountsStore } from '@/stores/accounts'
 import Avatar from '../common/Avatar.vue'
 import FollowButton from './FollowButton.vue'
+import { emojifyPlainText } from '@/utils/customEmoji'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const accountsStore = useAccountsStore()
-
-function emojifyText(text: string, emojis?: Array<{ shortcode: string; url: string }>): string {
-  if (!emojis || emojis.length === 0 || !text) return text
-  let r = text
-  for (const e of emojis) r = r.replace(new RegExp(`:${e.shortcode}:`, 'g'), `<img src="${e.url}" alt=":${e.shortcode}:" class="inline-block h-5 w-5 align-text-bottom" draggable="false" />`)
-  return r
-}
 
 const props = defineProps<{
   account: {
@@ -32,7 +26,11 @@ const props = defineProps<{
   relationship?: Relationship
 }>()
 
-const emojifiedName = computed(() => emojifyText(props.account.display_name || props.account.acct, props.account.emojis))
+const emojifiedName = computed(() => emojifyPlainText(
+  props.account.display_name || props.account.acct,
+  props.account.emojis,
+  'custom-emoji inline-block h-5 max-w-8 align-text-bottom',
+))
 
 async function handleToggle() {
   if (!auth.token) return

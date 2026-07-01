@@ -12,6 +12,7 @@ import { sendToFollowers, sendToRecipients } from '../../../../federation/helper
 import { getStatusFederationAudience } from '../../../../federation/helpers/status-audience';
 import { Announce } from '@fedify/fedify/vocab';
 import { reblogStatus } from '../../../../services/status';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 const app = new Hono<HonoEnv>();
 
@@ -20,6 +21,10 @@ app.post('/:id/reblog', authRequired, requireScope('write:statuses'), async (c) 
   const currentUser = c.get('currentUser')!;
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
+  const currentAccountFull = await env.DB.prepare(
+    'SELECT * FROM accounts WHERE id = ?1',
+  ).bind(currentUser.account_id).first<Record<string, unknown>>();
+  if (!currentAccountFull) throw new AppError(404, 'Account not found');
 
   const row = await env.DB.prepare(
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
@@ -69,24 +74,24 @@ app.post('/:id/reblog', authRequired, requireScope('write:statuses'), async (c) 
         id: currentUser.account_id,
         username: currentAccount.username,
         acct: currentAccount.username,
-        display_name: '',
-        locked: false,
-        bot: false,
-        discoverable: true,
+        display_name: (currentAccountFull.display_name as string) || '',
+        locked: !!currentAccountFull.locked,
+        bot: !!currentAccountFull.bot,
+        discoverable: currentAccountFull.discoverable == null ? null : !!currentAccountFull.discoverable,
         group: false,
-        created_at: '',
-        note: '',
+        created_at: (currentAccountFull.created_at as string) || '',
+        note: (currentAccountFull.note as string) || '',
         url: `https://${domain}/@${currentAccount.username}`,
         uri: `https://${domain}/users/${currentAccount.username}`,
-        avatar: '',
-        avatar_static: '',
-        header: '',
-        header_static: '',
-        followers_count: 0,
-        following_count: 0,
-        statuses_count: 0,
-        last_status_at: null,
-        emojis: [],
+        avatar: (currentAccountFull.avatar_url as string) || '',
+        avatar_static: (currentAccountFull.avatar_static_url as string) || (currentAccountFull.avatar_url as string) || '',
+        header: (currentAccountFull.header_url as string) || '',
+        header_static: (currentAccountFull.header_static_url as string) || (currentAccountFull.header_url as string) || '',
+        followers_count: (currentAccountFull.followers_count as number) || 0,
+        following_count: (currentAccountFull.following_count as number) || 0,
+        statuses_count: (currentAccountFull.statuses_count as number) || 0,
+        last_status_at: (currentAccountFull.last_status_at as string) || null,
+        emojis: parseCustomEmojiTagsJson(currentAccountFull.emoji_tags as string | null, domain),
         fields: [],
       },
       media_attachments: [],
@@ -184,24 +189,24 @@ app.post('/:id/reblog', authRequired, requireScope('write:statuses'), async (c) 
       id: currentUser.account_id,
       username: currentAccount.username,
       acct: currentAccount.username,
-      display_name: '',
-      locked: false,
-      bot: false,
-      discoverable: true,
+      display_name: (currentAccountFull.display_name as string) || '',
+      locked: !!currentAccountFull.locked,
+      bot: !!currentAccountFull.bot,
+      discoverable: currentAccountFull.discoverable == null ? null : !!currentAccountFull.discoverable,
       group: false,
       created_at: now,
-      note: '',
+      note: (currentAccountFull.note as string) || '',
       url: `https://${domain}/@${currentAccount.username}`,
       uri: `https://${domain}/users/${currentAccount.username}`,
-      avatar: '',
-      avatar_static: '',
-      header: '',
-      header_static: '',
-      followers_count: 0,
-      following_count: 0,
-      statuses_count: 0,
-      last_status_at: null,
-      emojis: [],
+      avatar: (currentAccountFull.avatar_url as string) || '',
+      avatar_static: (currentAccountFull.avatar_static_url as string) || (currentAccountFull.avatar_url as string) || '',
+      header: (currentAccountFull.header_url as string) || '',
+      header_static: (currentAccountFull.header_static_url as string) || (currentAccountFull.header_url as string) || '',
+      followers_count: (currentAccountFull.followers_count as number) || 0,
+      following_count: (currentAccountFull.following_count as number) || 0,
+      statuses_count: (currentAccountFull.statuses_count as number) || 0,
+      last_status_at: (currentAccountFull.last_status_at as string) || null,
+      emojis: parseCustomEmojiTagsJson(currentAccountFull.emoji_tags as string | null, domain),
       fields: [],
     },
     media_attachments: [],

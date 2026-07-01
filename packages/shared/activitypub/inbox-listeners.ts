@@ -108,6 +108,7 @@ export interface InboxListenerVocab {
 	Accept: any;
 	Reject: any;
 	EmojiReact: any;
+	QuoteRequest: any;
 }
 
 /** Inbox processor functions — plain business logic with no Fedify dependency. */
@@ -125,6 +126,7 @@ export interface InboxListenerProcessors {
 	processMove: ProcessorFn;
 	processFlag: ProcessorFn;
 	processEmojiReact: ProcessorFn;
+	processQuoteRequest: ProcessorFn;
 }
 
 export interface InboxListenerOptions {
@@ -398,6 +400,10 @@ export function setupInboxListeners<TData>(
 		.on(
 			vocab.Reject,
 			standardHandler('Reject', processors.processReject, viaJsonLd),
+		)
+		.on(
+			vocab.QuoteRequest,
+			standardHandler('QuoteRequest', processors.processQuoteRequest, viaJsonLd),
 		)
 
 		// Like: special handling for Misskey emoji reactions

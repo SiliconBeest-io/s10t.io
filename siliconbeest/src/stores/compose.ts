@@ -25,6 +25,8 @@ export const useComposeStore = defineStore('compose', () => {
   const sensitive = ref(false);
   const inReplyToId = ref<string | null>(null);
   const inReplyToStatus = ref<Status | null>(null);
+  const quoteId = ref<string | null>(null);
+  const quoteStatus = ref<Status | null>(null);
   const editingId = ref<string | null>(null);
   const mediaAttachments = ref<MediaAttachment[]>([]);
   const uploading = ref(false);
@@ -56,6 +58,8 @@ export const useComposeStore = defineStore('compose', () => {
     sensitive.value = false;
     inReplyToId.value = null;
     inReplyToStatus.value = null;
+    quoteId.value = null;
+    quoteStatus.value = null;
     editingId.value = null;
     mediaAttachments.value = [];
     uploading.value = false;
@@ -86,6 +90,19 @@ export const useComposeStore = defineStore('compose', () => {
     if (!text.value.startsWith(mention)) {
       text.value = mention + text.value;
     }
+  }
+
+  function setQuote(status: Status) {
+    quoteId.value = status.id;
+    quoteStatus.value = status;
+    if (visibility.value === 'direct') {
+      visibility.value = status.visibility === 'private' ? 'private' : defaultVisibility.value;
+    }
+  }
+
+  function clearQuote() {
+    quoteId.value = null;
+    quoteStatus.value = null;
   }
 
   function setEditing(status: Status) {
@@ -130,6 +147,7 @@ export const useComposeStore = defineStore('compose', () => {
         spoiler_text: showContentWarning.value ? contentWarning.value : undefined,
         visibility: visibility.value,
         language: language.value,
+        quote_id: quoteId.value ?? undefined,
         poll:
           showPoll.value && pollOptions.value.length >= 2
             ? {
@@ -180,6 +198,8 @@ export const useComposeStore = defineStore('compose', () => {
     sensitive,
     inReplyToId,
     inReplyToStatus,
+    quoteId,
+    quoteStatus,
     editingId,
     mediaAttachments,
     uploading,
@@ -194,6 +214,8 @@ export const useComposeStore = defineStore('compose', () => {
     canPublish,
     reset,
     setReplyTo,
+    setQuote,
+    clearQuote,
     setEditing,
     addMedia,
     removeMedia,

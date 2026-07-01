@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -68,7 +69,7 @@ app.get('/:id/followers', async (c) => {
       following_count: (row.following_count as number) || 0,
       statuses_count: (row.statuses_count as number) || 0,
       last_status_at: (row.last_status_at as string) || null,
-      emojis: [],
+      emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
       fields: [],
     };
   });

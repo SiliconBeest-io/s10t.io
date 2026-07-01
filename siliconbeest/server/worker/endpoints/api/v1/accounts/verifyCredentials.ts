@@ -4,6 +4,7 @@ import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -50,7 +51,7 @@ app.get('/verify_credentials', authRequired, requireScope('read:accounts'), asyn
     following_count: (row.following_count as number) || 0,
     statuses_count: (row.statuses_count as number) || 0,
     last_status_at: (row.last_status_at as string) || null,
-    emojis: [],
+    emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
     fields: safeJsonParse(row.fields as string | null, []),
     source: {
       privacy: (row.default_privacy as string) || 'public',

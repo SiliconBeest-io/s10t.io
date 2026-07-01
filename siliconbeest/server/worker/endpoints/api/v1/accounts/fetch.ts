@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { getAccountById } from '../../../../services/account';
+import { parseCustomEmojiTagsJson, proxyCustomEmojiUrl } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -47,34 +48,9 @@ app.get('/:id', async (c) => {
   const defaultHeader = `https://${domain}/default-header.svg`;
 
   // Proxy remote avatar/header URLs through our media proxy
-  const proxyRemote = (url: string): string => {
-    if (!url || !acctDomain) return url;
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname === domain) return url;
-      return `https://${domain}/proxy?url=${encodeURIComponent(url)}`;
-    } catch { return url; }
-  };
+  const proxyRemote = (url: string): string => proxyCustomEmojiUrl(url, domain);
 
-  // Parse account emoji_tags and proxy URLs
-  let emojis: Array<{ shortcode: string; url: string; static_url: string; visible_in_picker: boolean }> = [];
-  const emojiTagsRaw = row.emoji_tags as string | null;
-  if (emojiTagsRaw && acctDomain) {
-    try {
-      const tags = JSON.parse(emojiTagsRaw) as Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }>;
-      emojis = tags.map((t) => {
-        const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-        const rawUrl = t.url || '';
-        const rawStatic = t.static_url || rawUrl;
-        return {
-          shortcode: sc,
-          url: proxyRemote(rawUrl),
-          static_url: proxyRemote(rawStatic),
-          visible_in_picker: false,
-        };
-      });
-    } catch { /* ignore malformed JSON */ }
-  }
+  const emojis = parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain);
 
   const rawAvatar = avatarUrl || defaultAvatar;
   const rawAvatarStatic = (row.avatar_static_url as string) || avatarUrl || defaultAvatar;

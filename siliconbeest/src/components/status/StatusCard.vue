@@ -19,6 +19,7 @@ import StatusPoll from './StatusPoll.vue'
 import StatusReactions from './StatusReactions.vue'
 import ReportDialog from '../common/ReportDialog.vue'
 import ImageViewer from '../common/ImageViewer.vue'
+import { emojifyPlainText } from '@/utils/customEmoji'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -93,24 +94,12 @@ const relativeTime = computed(() => {
   return t('time.days_ago', { n: diffDays })
 })
 
-/** Replace :shortcode: in text with <img> tags using account emojis */
 const emojifiedDisplayName = computed(() => {
-  let name = displayStatus.value.account.display_name || ''
-  const emojis = displayStatus.value.account.emojis
-  if (!emojis || emojis.length === 0) return name
-  name = name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  // Deduplicate by shortcode
-  const seen = new Set<string>()
-  for (const emoji of emojis) {
-    if (seen.has(emoji.shortcode)) continue
-    seen.add(emoji.shortcode)
-    const escaped = emoji.shortcode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    name = name.replace(
-      new RegExp(`\\u200B?:${escaped}:\\u200B?`, 'g'),
-      `<img src="${emoji.url}" alt="${emoji.shortcode}" title="${emoji.shortcode}" class="custom-emoji" draggable="false" style="display:inline;height:1.2em;width:auto;vertical-align:middle;margin:0 0.05em;" />`
-    )
-  }
-  return name
+  return emojifyPlainText(
+    displayStatus.value.account.display_name || '',
+    displayStatus.value.account.emojis,
+    'custom-emoji inline-block h-5 max-w-8 align-text-bottom',
+  )
 })
 
 const hasAccountEmojis = computed(() => {
@@ -178,6 +167,12 @@ function handleReply() {
   // For reblogs, reply to the original status, not the reblog wrapper
   const target = cachedStatus.value.reblog ?? cachedStatus.value
   composeStore.setReplyTo(target)
+  uiStore.openComposeModal()
+}
+
+function handleQuote() {
+  const target = cachedStatus.value.reblog ?? cachedStatus.value
+  composeStore.setQuote(target)
   uiStore.openComposeModal()
 }
 
@@ -447,6 +442,23 @@ async function handleDelete() {
             :card="displayStatus.card"
             @click.stop
           />
+
+          <div
+            v-if="displayStatus.quote"
+            class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
+            @click.stop="emit('navigate', displayStatus.quote)"
+          >
+            <div class="flex items-center gap-1 text-sm min-w-0">
+              <span class="font-semibold truncate">{{ displayStatus.quote.account.display_name || displayStatus.quote.account.username }}</span>
+              <span class="text-gray-500 dark:text-gray-400 truncate">@{{ displayStatus.quote.account.acct }}</span>
+            </div>
+            <StatusContent
+              :content="displayStatus.quote.content"
+              :spoiler-text="displayStatus.quote.spoiler_text"
+              :sensitive="displayStatus.quote.sensitive"
+              :emojis="displayStatus.quote.emojis"
+            />
+          </div>
         </template>
 
         <!-- 이모지 리액션 -->
@@ -476,6 +488,7 @@ async function handleDelete() {
           class="mt-2"
           @favourite="handleFavourite"
           @reblog="handleReblog"
+          @quote="handleQuote"
           @bookmark="handleBookmark"
           @reply="handleReply"
           @share="handleShare"

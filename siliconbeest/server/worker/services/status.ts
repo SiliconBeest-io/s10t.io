@@ -354,6 +354,9 @@ export interface CreateStatusResult {
   inReplyToAccountId: string | null;
   quoteId: string | null;
   quoteUri: string | null;
+  quoteAuthorizationUri: string | null;
+  quoteApprovalStatus: string;
+  quoteRequestUri: string | null;
   visibility: string;
   sensitive: number;
   spoilerText: string;
@@ -402,6 +405,8 @@ export async function createStatus(
   // -- FEP-e232: Resolve quote post --
   let quoteId: string | null = null;
   let quoteUri: string | null = null;
+  let quoteApprovalStatus = 'none';
+  let quoteRequestUri: string | null = null;
   if (data.quoteId) {
     const quoted = await env.DB
       .prepare('SELECT id, uri FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
@@ -410,6 +415,8 @@ export async function createStatus(
     if (quoted) {
       quoteId = quoted.id as string;
       quoteUri = quoted.uri as string;
+      quoteApprovalStatus = 'pending';
+      quoteRequestUri = `${statusUri}/quote`;
     }
   }
 
@@ -464,8 +471,8 @@ export async function createStatus(
   // -- Main batch: status INSERT + account count + reply count + media linking + home_timeline --
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
-      `INSERT INTO statuses (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id, text, content, content_warning, visibility, sensitive, language, conversation_id, reply, quote_id, local, emoji_tags, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 1, ?16, ?17, ?17)`,
+      `INSERT INTO statuses (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id, text, content, content_warning, visibility, sensitive, language, conversation_id, reply, quote_id, quote_approval_status, quote_request_uri, local, emoji_tags, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18, ?19, ?19)`,
     ).bind(
       statusId,
       statusUri,
@@ -482,6 +489,8 @@ export async function createStatus(
       conversationId,
       isReply,
       quoteId,
+      quoteApprovalStatus,
+      quoteRequestUri,
       emojiTagsJson,
       now,
     ),
@@ -679,6 +688,9 @@ export async function createStatus(
     inReplyToAccountId,
     quoteId,
     quoteUri,
+    quoteAuthorizationUri: null,
+    quoteApprovalStatus,
+    quoteRequestUri,
     visibility,
     sensitive,
     spoilerText,

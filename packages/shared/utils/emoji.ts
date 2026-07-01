@@ -7,6 +7,7 @@
  */
 
 import type { CustomEmoji } from '../types/mastodon-base';
+import { emojiTagToCustomEmoji, parseCustomEmojiTagsJson } from './customEmoji';
 
 /**
  * Fetch emojis referenced in a status's content from its emoji_tags JSON column.
@@ -27,7 +28,7 @@ export async function fetchEmojisForStatus(
   const tagsJson = row.emoji_tags as string | null;
   if (!tagsJson) return [];
 
-  let tags: Array<{ shortcode?: string; name?: string; url?: string; icon?: { url?: string } }> = [];
+  let tags: Array<Record<string, unknown>> = [];
   try {
     tags = JSON.parse(tagsJson);
   } catch {
@@ -43,13 +44,9 @@ export async function fetchEmojisForStatus(
 
   return tags
     .map((t) => {
-      const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-      const url = t.url || t.icon?.url || '';
-      if (!sc || !url || !shortcodesInContent.has(sc)) return null;
-      const proxied = url.startsWith('http')
-        ? `https://${instanceDomain}/proxy?url=${encodeURIComponent(url)}`
-        : url;
-      return { shortcode: sc, url: proxied, static_url: proxied, visible_in_picker: false };
+      const emoji = emojiTagToCustomEmoji(t, instanceDomain);
+      if (!emoji || !shortcodesInContent.has(emoji.shortcode)) return null;
+      return emoji;
     })
     .filter(Boolean) as CustomEmoji[];
 }
@@ -72,25 +69,5 @@ export async function fetchAccountEmojis(
   const tagsJson = row.emoji_tags as string | null;
   if (!tagsJson) return [];
 
-  let tags: Array<{ shortcode?: string; name?: string; url?: string; static_url?: string }> = [];
-  try {
-    tags = JSON.parse(tagsJson);
-  } catch {
-    return [];
-  }
-
-  return tags
-    .map((t) => {
-      const sc = t.shortcode || (t.name || '').replace(/^:|:$/g, '');
-      const url = t.url || '';
-      const staticUrl = t.static_url || url;
-      const proxied = url.startsWith('http')
-        ? `https://${instanceDomain}/proxy?url=${encodeURIComponent(url)}`
-        : url;
-      const proxiedStatic = staticUrl.startsWith('http')
-        ? `https://${instanceDomain}/proxy?url=${encodeURIComponent(staticUrl)}`
-        : staticUrl;
-      return { shortcode: sc, url: proxied, static_url: proxiedStatic, visible_in_picker: false };
-    })
-    .filter((e) => e.shortcode && e.url);
+  return parseCustomEmojiTagsJson(tagsJson, instanceDomain);
 }

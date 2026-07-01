@@ -13,6 +13,7 @@ import {
   Announce,
   Hashtag,
   Mention,
+  QuoteAuthorization,
 } from '@fedify/vocab';
 import type { Federation } from '@fedify/fedify';
 import type { FedifyContextData } from '../fedify';
@@ -32,6 +33,36 @@ import { env } from 'cloudflare:workers';
 export function setupObjectDispatchers(
   federation: Federation<FedifyContextData>,
 ): void {
+  federation.setObjectDispatcher(
+    QuoteAuthorization,
+    '/users/{identifier}/stamps/{id}',
+    async (_ctx, values) => {
+      const { identifier, id } = values;
+
+      const row = await env.DB.prepare(
+        `SELECT qa.*, a.username, a.domain AS account_domain, a.uri AS account_uri
+         FROM quote_authorizations qa
+         JOIN accounts a ON a.id = qa.attributed_to_account_id
+         WHERE qa.id = ?1 AND a.username = ?2 AND a.domain IS NULL AND qa.revoked_at IS NULL
+         LIMIT 1`,
+      ).bind(id, identifier).first<{
+        uri: string;
+        account_uri: string;
+        interacting_object_uri: string;
+        interaction_target_uri: string;
+      }>();
+
+      if (!row) return null;
+
+      return new QuoteAuthorization({
+        id: new URL(row.uri),
+        attribution: new URL(row.account_uri),
+        interactingObject: new URL(row.interacting_object_uri),
+        interactionTarget: new URL(row.interaction_target_uri),
+      });
+    },
+  );
+
   federation.setObjectDispatcher(
     Note,
     '/users/{identifier}/statuses/{id}',
@@ -61,7 +92,7 @@ export function setupObjectDispatchers(
       if (!account) return null;
 
       // Load supporting data
-      const { convMap, mediaMap, replyUriMap } = await loadStatusContext(row, id, domain);
+      const { convMap, mediaMap, replyUriMap, quoteUriMap } = await loadStatusContext(row, id, domain);
 
       // Load mention and hashtag tags (shared by Note and Question)
       const tags: (Mention | Hashtag)[] = [];
@@ -94,7 +125,7 @@ export function setupObjectDispatchers(
         ).bind(row.poll_id).first<PollRow>();
         if (poll) {
           const { question } = buildFedifyQuestion(row as StatusRow, account, poll, domain, {
-            convMap, mediaMap, replyUriMap,
+            convMap, mediaMap, replyUriMap, quoteUriMap,
           });
           return tags.length > 0 ? question.clone({ tags }) : question;
         }
@@ -102,7 +133,7 @@ export function setupObjectDispatchers(
 
       // Build core Note
       const { note } = buildFedifyNote(row as StatusRow, account, domain, {
-        convMap, mediaMap, replyUriMap,
+        convMap, mediaMap, replyUriMap, quoteUriMap,
       });
 
       return tags.length > 0 ? note.clone({ tags }) : note;
@@ -171,7 +202,7 @@ export async function handleActivityRequest(
       });
     }
 
-    const { convMap, mediaMap, replyUriMap } = await loadStatusContext(row, id, domain);
+    const { convMap, mediaMap, replyUriMap, quoteUriMap } = await loadStatusContext(row, id, domain);
 
     // Check for poll → build Question instead of Note
     let objectToWrap: Note | Question;
@@ -184,14 +215,14 @@ export async function handleActivityRequest(
       ).bind(row.poll_id).first<PollRow>();
       if (poll) {
         const result = buildFedifyQuestion(row as StatusRow, account, poll, domain, {
-          convMap, mediaMap, replyUriMap,
+          convMap, mediaMap, replyUriMap, quoteUriMap,
         });
         objectToWrap = result.question;
         tos = result.tos;
         ccs = result.ccs;
       } else {
         const result = buildFedifyNote(row as StatusRow, account, domain, {
-          convMap, mediaMap, replyUriMap,
+          convMap, mediaMap, replyUriMap, quoteUriMap,
         });
         objectToWrap = result.note;
         tos = result.tos;
@@ -199,7 +230,7 @@ export async function handleActivityRequest(
       }
     } else {
       const result = buildFedifyNote(row as StatusRow, account, domain, {
-        convMap, mediaMap, replyUriMap,
+        convMap, mediaMap, replyUriMap, quoteUriMap,
       });
       objectToWrap = result.note;
       tos = result.tos;
@@ -266,5 +297,13 @@ async function loadStatusContext(
     if (rr) replyUriMap.set(row.in_reply_to_id, rr.uri);
   }
 
-  return { convMap, mediaMap, replyUriMap };
+  const quoteUriMap = new Map<string, string>();
+  if (row.quote_id) {
+    const quotedRow = await env.DB.prepare(
+      'SELECT uri FROM statuses WHERE id = ?1 AND deleted_at IS NULL LIMIT 1',
+    ).bind(row.quote_id).first<{ uri: string }>();
+    if (quotedRow) quoteUriMap.set(row.quote_id, quotedRow.uri);
+  }
+
+  return { convMap, mediaMap, replyUriMap, quoteUriMap };
 }

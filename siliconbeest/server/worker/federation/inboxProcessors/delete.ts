@@ -34,9 +34,55 @@ class DeleteProcessor extends BaseProcessor {
 			return;
 		}
 
+		const revokedAuthorization = await env.DB.prepare(
+			`SELECT qa.id, qa.attributed_to_account_id, a.uri AS attributed_to_uri
+			 FROM quote_authorizations qa
+			 JOIN accounts a ON a.id = qa.attributed_to_account_id
+			 WHERE qa.uri = ?1 AND qa.revoked_at IS NULL
+			 LIMIT 1`,
+		).bind(objectUri).first<{ id: string; attributed_to_account_id: string; attributed_to_uri: string }>();
+
 		const actorAccount = await this.findAccountByUri(activity.actor);
 		if (!actorAccount) {
 			console.warn(`[delete] Actor not found: ${activity.actor}`);
+			return;
+		}
+
+		if (revokedAuthorization) {
+			if (revokedAuthorization.attributed_to_account_id !== actorAccount.id) {
+				console.warn('[delete] Actor does not own the quote authorization being deleted');
+				return;
+			}
+
+			await env.DB.batch([
+				env.DB.prepare(
+					'UPDATE quote_authorizations SET revoked_at = ?1, updated_at = ?1 WHERE id = ?2',
+				).bind(now, revokedAuthorization.id),
+				env.DB.prepare(
+					`UPDATE statuses
+					 SET quote_id = NULL,
+					     quote_authorization_uri = NULL,
+					     quote_approval_status = 'revoked',
+					     updated_at = ?1
+					 WHERE quote_authorization_uri = ?2`,
+				).bind(now, objectUri),
+			]);
+			return;
+		}
+
+		const revokedRemoteAuthorization = await env.DB.prepare(
+			`SELECT id FROM statuses
+			 WHERE quote_authorization_uri = ?1 AND deleted_at IS NULL`,
+		).bind(objectUri).first<{ id: string }>();
+		if (revokedRemoteAuthorization) {
+			await env.DB.prepare(
+				`UPDATE statuses
+				 SET quote_id = NULL,
+				     quote_authorization_uri = NULL,
+				     quote_approval_status = 'revoked',
+				     updated_at = ?1
+				 WHERE quote_authorization_uri = ?2`,
+			).bind(now, objectUri).run();
 			return;
 		}
 

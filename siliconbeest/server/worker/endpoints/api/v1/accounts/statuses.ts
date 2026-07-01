@@ -6,6 +6,7 @@ import { AppError } from '../../../../middleware/errorHandler';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import type { MediaAttachment } from '../../../../types/mastodon';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -35,6 +36,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
     pinned: false,
     content: (row.content as string) || '',
     reblog: null,
+    quote: null as import('../../../../types/mastodon').Status | null,
     application: null,
     account: {
       id: row.account_id as string,
@@ -57,7 +59,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
       following_count: (row.account_following_count as number) || 0,
       statuses_count: (row.account_statuses_count as number) || 0,
       last_status_at: (row.account_last_status_at as string) || null,
-      emojis: [],
+      emojis: parseCustomEmojiTagsJson(row.account_emoji_tags as string | null, domain),
       fields: [],
     },
     media_attachments: [] as MediaAttachment[],
@@ -144,7 +146,7 @@ app.get('/:id/statuses', authOptional, async (c) => {
       a.locked AS account_locked, a.bot AS account_bot, a.discoverable AS account_discoverable,
       a.followers_count AS account_followers_count, a.following_count AS account_following_count,
       a.statuses_count AS account_statuses_count, a.last_status_at AS account_last_status_at,
-      a.created_at AS account_created_at
+      a.created_at AS account_created_at, a.emoji_tags AS account_emoji_tags
     FROM statuses s
     JOIN accounts a ON a.id = s.account_id
     WHERE ${conditions.join(' AND ')}
@@ -177,7 +179,7 @@ app.get('/:id/statuses', authOptional, async (c) => {
         a.locked AS account_locked, a.bot AS account_bot, a.discoverable AS account_discoverable,
         a.followers_count AS account_followers_count, a.following_count AS account_following_count,
         a.statuses_count AS account_statuses_count, a.last_status_at AS account_last_status_at,
-        a.created_at AS account_created_at
+        a.created_at AS account_created_at, a.emoji_tags AS account_emoji_tags
       FROM statuses s
       JOIN accounts a ON a.id = s.account_id
       WHERE s.id IN (${placeholders}) AND s.deleted_at IS NULL`,
@@ -202,6 +204,7 @@ app.get('/:id/statuses', authOptional, async (c) => {
       s.reblogged = e.reblogged ?? false;
       s.bookmarked = e.bookmarked ?? false;
       s.card = e.card ?? null;
+      s.quote = e.quote ?? null;
       s.emojis = e.emojis ?? [];
     }
     // Fill reblog object
@@ -217,6 +220,7 @@ app.get('/:id/statuses', authOptional, async (c) => {
           origStatus.reblogged = origE.reblogged ?? false;
           origStatus.bookmarked = origE.bookmarked ?? false;
           origStatus.card = origE.card ?? null;
+          origStatus.quote = origE.quote ?? null;
           origStatus.emojis = origE.emojis ?? [];
         }
         (s as { reblog: ReturnType<typeof serializeStatus> | null }).reblog = origStatus;

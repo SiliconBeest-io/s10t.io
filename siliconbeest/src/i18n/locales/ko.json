@@ -181,6 +181,7 @@
   "status": {
     "reply": "답글",
     "boost": "부스트",
+    "quote": "인용",
     "favourite": "좋아요",
     "bookmark": "북마크",
     "share": "공유",
@@ -216,7 +217,8 @@
     "visibility_direct": "다이렉트 메시지",
     "report": "신고",
     "reblogged": "부스트했습니다",
-    "cannot_boost": "이 게시물은 부스트할 수 없습니다"
+    "cannot_boost": "이 게시물은 부스트할 수 없습니다",
+    "cannot_quote": "이 게시물은 인용할 수 없습니다"
   },
   "notification": {
     "title": "알림",

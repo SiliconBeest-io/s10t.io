@@ -108,6 +108,19 @@ export interface APNote extends APObject {
   conversation?: string;
   replies?: APCollection | APOrderedCollection | string;
   atomUri?: string;
+  /** FEP-044f: quoted object URI */
+  quote?: string;
+  /** ActivityStreams quote URL fallback */
+  quoteUrl?: string;
+  /** FEP-044f: approval stamp URI */
+  quoteAuthorization?: string;
+  /** GoToSocial/FEP-044f quote policy */
+  interactionPolicy?: {
+    canQuote?: {
+      automaticApproval?: APOneOrMany<string>;
+      manualApproval?: APOneOrMany<string>;
+    };
+  };
   /** FEP-e232: Quote post URI */
   quoteUri?: string;
   // Misskey-specific extensions
@@ -212,6 +225,8 @@ export interface APActivity {
   actor: string;
   object?: APOneOrMany<string | APObject | Record<string, unknown>>;
   target?: string | APObject;
+  result?: APOneOrMany<string | APObject | Record<string, unknown>>;
+  instrument?: APOneOrMany<string | APObject | Record<string, unknown>>;
   published?: string;
   to?: APOneOrMany<string>;
   cc?: APOneOrMany<string>;
@@ -261,6 +276,19 @@ export interface APAccept extends APActivity {
 export interface APReject extends APActivity {
   type: 'Reject';
   object: APFollow | APActivity | string;
+}
+
+export interface APQuoteRequest extends APActivity {
+  type: 'QuoteRequest' | 'https://w3id.org/fep/044f#QuoteRequest';
+  object: string | APObject;
+  instrument: string | APNote | APObject;
+}
+
+export interface APQuoteAuthorization extends APObject {
+  type: 'QuoteAuthorization' | 'https://w3id.org/fep/044f#QuoteAuthorization';
+  attributedTo: string;
+  interactingObject: string;
+  interactionTarget: string;
 }
 
 export interface APLike extends APActivity {

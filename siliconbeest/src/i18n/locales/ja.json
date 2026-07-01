@@ -181,6 +181,7 @@
   "status": {
     "reply": "返信",
     "boost": "ブースト",
+    "quote": "引用",
     "favourite": "お気に入り",
     "bookmark": "ブックマーク",
     "share": "共有",
@@ -216,7 +217,8 @@
     "visibility_direct": "ダイレクトメッセージ",
     "report": "報告",
     "reblogged": "ブーストしました",
-    "cannot_boost": "この投稿はブーストできません"
+    "cannot_boost": "この投稿はブーストできません",
+    "cannot_quote": "この投稿は引用できません"
   },
   "notification": {
     "title": "通知",
