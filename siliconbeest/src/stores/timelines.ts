@@ -8,6 +8,7 @@ import {
   getTagTimeline,
 } from '@/api/mastodon/timelines';
 import { StreamingClient } from '@/api/streaming';
+import { playNewPostSound } from '@/utils/newPostSound';
 import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
 
@@ -234,6 +235,8 @@ export const useTimelinesStore = defineStore('timelines', () => {
         }
         // Add to new status IDs queue for the correct timeline
         prependStatus(timelineType, status.id);
+        // Chime once per post, even when several streams deliver it
+        playNewPostSound(status.id);
       },
       onDelete(statusId: string) {
         removeStatus(statusId);
