@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useInstanceStore } from '@/stores/instance'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useDeckColumns } from '../composables/useDeckColumns'
 import type { ColumnType } from '@/stores/ui'
@@ -13,10 +12,10 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const instanceStore = useInstanceStore()
 const notifStore = useNotificationsStore()
 
-const instanceIcon = computed(() => instanceStore.instance?.thumbnail?.url || '/thumbnail.png')
+// Same-origin: the worker always serves /thumbnail.png (SVG fallback inside)
+const instanceIcon = '/thumbnail.png'
 const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns()
 
 // Short labels — the rail buttons are 58px wide, long labels overflow

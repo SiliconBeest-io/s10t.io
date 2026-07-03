@@ -112,9 +112,11 @@ function navigate(status: Status) {
   >
     <!-- Column header -->
     <div class="dk-card flex flex-none items-center gap-2.5 rounded-[14px] px-3.5 py-2.5">
+      <!-- Bound (not static) src: keeps Vue's asset transform from treating
+           the same-origin URL as a module import at build time -->
       <img
         v-if="type === 'local'"
-        :src="instanceStore.instance?.thumbnail?.url || '/thumbnail.png'"
+        :src="'/thumbnail.png'"
         alt=""
         class="h-[18px] w-[18px] flex-none rounded-[5px] object-contain"
         aria-hidden="true"
