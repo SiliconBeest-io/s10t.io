@@ -60,7 +60,8 @@ describe('DeckStatusActions', () => {
 
     await wrapper.findAll('button')[2]!.trigger('click');
     await buttonByText(wrapper, 'React with emoji')!.trigger('click');
-    expect(wrapper.emitted('react')![0]).toEqual(['123']);
+    // Payload: status id + the star button as emoji-picker anchor
+    expect(wrapper.emitted('react')![0]![0]).toBe('123');
   });
 
   it('bookmark and share live in the more menu with text labels', async () => {

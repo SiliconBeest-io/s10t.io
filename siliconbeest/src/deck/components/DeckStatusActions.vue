@@ -40,7 +40,7 @@ const emit = defineEmits<{
   report: [payload: { accountId: string; accountAcct: string; statusId: string }]
   block: [accountId: string]
   mute: [accountId: string]
-  react: [id: string]
+  react: [id: string, anchor?: HTMLElement]
   overlay: [open: boolean]
 }>()
 
@@ -64,6 +64,7 @@ const quoteTooltip = computed(() => {
   return t('status.cannot_quote_visibility')
 })
 
+const starBtnRef = ref<HTMLElement | null>(null)
 const showBoostMenu = ref(false)
 const showStarMenu = ref(false)
 const showMoreMenu = ref(false)
@@ -173,6 +174,7 @@ function formatCount(n: number): string {
     <!-- Star chooser: favourite or emoji reaction -->
     <div class="relative">
       <button
+        ref="starBtnRef"
         type="button"
         class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)]"
         :style="favourited ? 'color: var(--dk-acc)' : 'color: var(--dk-dim)'"
@@ -197,7 +199,7 @@ function formatCount(n: number): string {
         <button
           type="button"
           class="dk-menu-item"
-          @click="pick(() => emit('react', statusId))"
+          @click="pick(() => emit('react', statusId, starBtnRef ?? undefined))"
         >
           <span aria-hidden="true">😀</span>
           <span>{{ t('deck.react') }}</span>

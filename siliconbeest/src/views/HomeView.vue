@@ -53,11 +53,16 @@ const visibleColumns = computed(() => {
 // is instant and scroll position is preserved.
 // ---------------------------------------------------------------------------
 const mobileColumns = ALL_COLUMNS
-const visitedMobileColumns = ref<Set<ColumnType>>(new Set([ui.mobileColumn]))
+// The deck design can select column types Aurora doesn't render — fall back
+// to home instead of showing an empty view.
+const activeMobileColumn = computed<ColumnType>(() =>
+  mobileColumns.includes(ui.mobileColumn) ? ui.mobileColumn : 'home',
+)
+const visitedMobileColumns = ref<Set<ColumnType>>(new Set([activeMobileColumn.value]))
 const tabStrip = ref<HTMLElement | null>(null)
 
 watch(
-  () => ui.mobileColumn,
+  activeMobileColumn,
   async (col) => {
     if (!visitedMobileColumns.value.has(col)) {
       visitedMobileColumns.value = new Set([...visitedMobileColumns.value, col])
@@ -174,15 +179,15 @@ function getBannerText(type: ColumnType): string {
             :key="type"
             @click="ui.setMobileColumn(type)"
             class="relative flex shrink-0 touch-manipulation items-center gap-1.5 rounded-full px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-            :class="ui.mobileColumn === type
+            :class="activeMobileColumn === type
               ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-300'
               : 'text-slate-500 hover:bg-surface-2 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-surface-2-dark dark:hover:text-slate-200'"
-            :aria-pressed="ui.mobileColumn === type"
+            :aria-pressed="activeMobileColumn === type"
           >
             <svg class="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" :d="columnIcons[type]" />
             </svg>
-            <span v-if="ui.mobileColumn === type" class="whitespace-nowrap">{{ getColumnTitle(type) }}</span>
+            <span v-if="activeMobileColumn === type" class="whitespace-nowrap">{{ getColumnTitle(type) }}</span>
             <span
               v-if="type === 'notifications' && notifStore.unreadCount > 0"
               class="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-linear-to-r from-brand-600 to-fuchsia-600 px-1 text-[10px] font-bold text-white dark:from-brand-500 dark:to-fuchsia-500"
@@ -206,7 +211,7 @@ function getBannerText(type: ColumnType): string {
       <div class="relative min-h-0 flex-1">
         <div
           v-for="type in mobileColumns"
-          v-show="ui.mobileColumn === type"
+          v-show="activeMobileColumn === type"
           :key="`mobile-${type}`"
           class="h-full min-h-0"
         >

@@ -290,8 +290,8 @@ const actionsOverlayOpen = ref(false)
 const reactionsOverlayOpen = ref(false)
 const overlayOpen = computed(() => actionsOverlayOpen.value || reactionsOverlayOpen.value)
 
-function handleReact() {
-  reactionsRef.value?.openPicker()
+function handleReact(_id: string, anchor?: HTMLElement) {
+  reactionsRef.value?.openPicker(anchor)
 }
 
 async function handleDelete() {

@@ -5,7 +5,7 @@
 // star chooser in DeckStatusActions via the exposed openPicker()), and an
 // `overlay` emit so the card can raise its z-index while the picker is
 // open (each deck card is its own stacking context).
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
@@ -31,7 +31,6 @@ const loading = ref(false)
 const showPicker = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
 const pickerRef = ref<HTMLElement | null>(null)
-const pickerAbove = ref(true)
 
 const hasReactions = computed(() => reactions.value.length > 0)
 
@@ -99,16 +98,53 @@ async function handleEmojiSelect(emoji: string) {
   }
 }
 
-/** Opened from the star chooser in DeckStatusActions. */
-function openPicker() {
-  showPicker.value = true
-  nextTick(() => {
-    if (containerRef.value) {
-      const rect = containerRef.value.getBoundingClientRect()
-      // Picker is ~300px tall; drop below when there is no room above
-      pickerAbove.value = rect.top > 320
+// ---------------------------------------------------------------------------
+// Emoji picker — teleported to <body> with fixed, viewport-clamped
+// coordinates so the columns' overflow scroll containers can't clip it.
+// Anchored to the star chooser button (passed by DeckStatusCard), falling
+// back to the reactions row.
+// ---------------------------------------------------------------------------
+const PICKER_WIDTH = 288 // w-72
+const PICKER_HEIGHT = 320 // max-h-80
+const PICKER_MARGIN = 8
+
+const pickerStyle = ref<Record<string, string>>({})
+let anchorEl: HTMLElement | null = null
+
+function computePickerPosition() {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const rect = anchorEl?.isConnected ? anchorEl.getBoundingClientRect() : null
+
+  let top: number
+  let left: number
+  if (rect) {
+    const spaceBelow = vh - rect.bottom - PICKER_MARGIN
+    const spaceAbove = rect.top - PICKER_MARGIN
+    if (spaceBelow >= PICKER_HEIGHT) {
+      top = rect.bottom + PICKER_MARGIN
+    } else if (spaceAbove >= PICKER_HEIGHT) {
+      top = rect.top - PICKER_MARGIN - PICKER_HEIGHT
+    } else {
+      top = (vh - PICKER_HEIGHT) / 2
     }
-  })
+    left = rect.left
+  } else {
+    top = (vh - PICKER_HEIGHT) / 2
+    left = (vw - PICKER_WIDTH) / 2
+  }
+
+  left = Math.max(PICKER_MARGIN, Math.min(left, vw - PICKER_WIDTH - PICKER_MARGIN))
+  top = Math.max(PICKER_MARGIN, Math.min(top, vh - PICKER_HEIGHT - PICKER_MARGIN))
+  pickerStyle.value = { top: `${top}px`, left: `${left}px` }
+}
+
+/** Opened from the star chooser in DeckStatusActions. */
+async function openPicker(anchor?: HTMLElement) {
+  anchorEl = anchor ?? containerRef.value
+  showPicker.value = true
+  await nextTick()
+  computePickerPosition()
 }
 
 defineExpose({ openPicker })
@@ -119,15 +155,37 @@ function handleClickOutside(e: MouseEvent) {
   }
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') showPicker.value = false
+}
+
+// Follow the anchor while the column scrolls or the window resizes
+function handleWindowChange() {
+  computePickerPosition()
+}
+
+function removePickerListeners() {
+  document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('scroll', handleWindowChange, true)
+  window.removeEventListener('resize', handleWindowChange)
+}
+
 watch(showPicker, (val) => {
   if (val) {
     setTimeout(() => {
       document.addEventListener('click', handleClickOutside)
     }, 0)
+    document.addEventListener('keydown', handleKeydown)
+    window.addEventListener('scroll', handleWindowChange, true)
+    window.addEventListener('resize', handleWindowChange)
   } else {
-    document.removeEventListener('click', handleClickOutside)
+    removePickerListeners()
+    anchorEl = null
   }
 })
+
+onUnmounted(removePickerListeners)
 
 function isCustomEmoji(reaction: EmojiReaction): boolean {
   return reaction.name.startsWith(':') && reaction.name.endsWith(':') && !!reaction.url
@@ -176,14 +234,18 @@ function getShortcode(name: string): string {
       </button>
     </TransitionGroup>
 
-    <!-- Emoji picker popover (opened from the star chooser) -->
-    <div
-      v-if="showPicker"
-      ref="pickerRef"
-      class="absolute left-0 z-50"
-      :class="pickerAbove ? 'bottom-full mb-2' : 'top-full mt-2'"
-    >
-      <EmojiPicker @select="handleEmojiSelect" />
-    </div>
+    <!-- Emoji picker popover (opened from the star chooser) — teleported to
+         <body> and fixed so the column's overflow scroll can't clip it -->
+    <Teleport to="body">
+      <div
+        v-if="showPicker"
+        ref="pickerRef"
+        class="fixed z-[80]"
+        :style="pickerStyle"
+        @click.stop
+      >
+        <EmojiPicker @select="handleEmojiSelect" />
+      </div>
+    </Teleport>
   </div>
 </template>

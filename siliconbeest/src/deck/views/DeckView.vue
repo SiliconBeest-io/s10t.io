@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiStore, type ColumnType } from '@/stores/ui'
 
@@ -12,9 +12,20 @@ import { useDeckColumns } from '../composables/useDeckColumns'
 
 const { t } = useI18n()
 const ui = useUiStore()
-const { columns } = useDeckColumns()
+const { columns, configRows } = useDeckColumns()
 
 const deckEl = ref<HTMLElement | null>(null)
+
+// SSR always renders the desktop deck (isMobile is false on the server).
+// Swapping v-if branches during hydration leaves the desktop branch's
+// attributes on reused DOM nodes (Vue doesn't patch attributes while
+// hydrating), which mangled the mobile layout — so only switch to the
+// mobile branch after mount.
+const hydrated = ref(false)
+onMounted(() => {
+  hydrated.value = true
+})
+const showMobile = computed(() => hydrated.value && ui.isMobile)
 
 /**
  * Plain vertical mouse wheels have no horizontal axis; when the pointer is
@@ -41,13 +52,29 @@ const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
   follow_requests: 'deck.col_requests',
 }
 
-// Mobile shows one column at a time
-const activeMobile = ref<ColumnType>(columns.value[0] ?? 'home')
+// Mobile shows one column at a time. Every column type is selectable
+// (enabled ones first, then the rest), regardless of the desktop deck
+// config. The choice lives in the ui store so the bottom-nav deck picker
+// shares it, and it persists across visits.
+const mobileColumns = configRows
+const activeMobile = computed<ColumnType>(() =>
+  mobileColumns.value.includes(ui.mobileColumn) ? ui.mobileColumn : (mobileColumns.value[0] ?? 'home'),
+)
 
-watch(columns, (cols) => {
-  if (cols.length > 0 && !cols.includes(activeMobile.value)) {
-    activeMobile.value = cols[0]!
+// Columns mount lazily on first visit and stay mounted (v-show) so
+// switching is instant and scroll position is preserved.
+const visitedMobile = ref<Set<ColumnType>>(new Set([activeMobile.value]))
+const chipStrip = ref<HTMLElement | null>(null)
+
+watch(activeMobile, async (col) => {
+  if (!visitedMobile.value.has(col)) {
+    visitedMobile.value = new Set([...visitedMobile.value, col])
   }
+  // Keep the active chip visible when the strip overflows
+  await nextTick()
+  chipStrip.value
+    ?.querySelector('[aria-selected="true"]')
+    ?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
 })
 </script>
 
@@ -55,7 +82,7 @@ watch(columns, (cols) => {
   <DeckShell>
     <!-- Desktop: horizontal multi-column deck, ordered by the user's config -->
     <div
-      v-if="!ui.isMobile"
+      v-if="!showMobile"
       ref="deckEl"
       class="flex h-full min-h-0 gap-3.5 overflow-x-auto overflow-y-hidden px-[18px] pb-2.5 pt-3.5"
       tabindex="0"
@@ -73,30 +100,36 @@ watch(columns, (cols) => {
       </div>
     </div>
 
-    <!-- Mobile: single column + switcher chips -->
+    <!-- Mobile: single column + switcher chips (every column type selectable) -->
     <div v-else class="flex h-full min-h-0 flex-col">
-      <div class="flex flex-none gap-1.5 overflow-x-auto px-3 py-2" role="tablist">
+      <div ref="chipStrip" class="flex flex-none items-center gap-1.5 overflow-x-auto px-3 py-2" role="tablist">
         <button
-          v-for="key in columns"
+          v-for="key in mobileColumns"
           :key="key"
           type="button"
           role="tab"
           class="dk-pill-btn flex-none"
           :style="activeMobile === key ? 'color: var(--dk-acc); border-color: var(--dk-acc)' : ''"
           :aria-selected="activeMobile === key"
-          @click="activeMobile = key"
+          @click="ui.setMobileColumn(key)"
         >
           {{ t(MOBILE_LABEL_KEYS[key]) }}
         </button>
       </div>
-      <div class="min-h-0 flex-1 px-3 pb-2">
-        <div v-if="columns.length === 0" class="dk-card dk-dim-text mx-auto mt-6 max-w-md px-6 py-8 text-center text-[13.5px]">
-          {{ t('deck.columns_empty') }}
+      <div class="relative min-h-0 flex-1 px-3 pb-2">
+        <div
+          v-for="key in mobileColumns"
+          v-show="activeMobile === key"
+          :key="`m-${key}`"
+          class="h-full min-h-0"
+        >
+          <template v-if="visitedMobile.has(key)">
+            <DeckNotificationsColumn v-if="key === 'notifications'" fluid />
+            <DeckSearchColumn v-else-if="key === 'search'" fluid />
+            <DeckFollowRequestsColumn v-else-if="key === 'follow_requests'" fluid />
+            <DeckColumn v-else :type="key" fluid />
+          </template>
         </div>
-        <DeckNotificationsColumn v-else-if="activeMobile === 'notifications'" :key="activeMobile" fluid />
-        <DeckSearchColumn v-else-if="activeMobile === 'search'" :key="activeMobile" fluid />
-        <DeckFollowRequestsColumn v-else-if="activeMobile === 'follow_requests'" :key="activeMobile" fluid />
-        <DeckColumn v-else :key="activeMobile" :type="activeMobile" fluid />
       </div>
     </div>
   </DeckShell>
