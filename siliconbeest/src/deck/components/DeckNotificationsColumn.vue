@@ -79,7 +79,7 @@ watch(
     </div>
 
     <!-- Column body -->
-    <div class="dk-card min-h-0 flex-1 overflow-y-auto overscroll-contain">
+    <div data-deck-scroll class="dk-card min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain">
       <div
         v-if="error"
         class="dk-dim-text px-4 py-3 text-center text-[13px]"

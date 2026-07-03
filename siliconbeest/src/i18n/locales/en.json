@@ -996,6 +996,7 @@
     "col_notifications": "~/alerts",
     "move_up": "Move up",
     "move_down": "Move down",
-    "drag_to_reorder": "Drag to reorder"
+    "drag_to_reorder": "Drag to reorder",
+    "live_toggle": "Toggle live updates"
   }
 }

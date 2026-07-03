@@ -996,6 +996,7 @@
     "col_notifications": "~/alerts",
     "move_up": "上へ移動",
     "move_down": "下へ移動",
-    "drag_to_reorder": "ドラッグで並べ替え"
+    "drag_to_reorder": "ドラッグで並べ替え",
+    "live_toggle": "リアルタイム更新の切り替え"
   }
 }

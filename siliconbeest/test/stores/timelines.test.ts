@@ -13,6 +13,15 @@ vi.mock('@/api/client', () => ({
   parseLinkHeader: vi.fn(() => ({})),
 }));
 
+vi.mock('@/api/streaming', () => ({
+  // Must be constructible (`new StreamingClient(...)`), so no arrow function
+  StreamingClient: vi.fn(function (this: Record<string, unknown>) {
+    this.connect = vi.fn();
+    this.disconnect = vi.fn();
+    this.isActive = vi.fn(() => true);
+  }),
+}));
+
 describe('Timelines Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -102,6 +111,50 @@ describe('Timelines Store', () => {
       store.removeStatus('5');
       const timeline = store.getTimeline('home');
       expect(timeline.newStatusIds).toEqual(['6']);
+    });
+  });
+
+  describe('LIVE toggle (pauseStream/resumeStream)', () => {
+    it('pauseStream disconnects and blocks reconnection', () => {
+      const store = useTimelinesStore();
+      store.connectStream('token', 'public:local', 'local');
+      expect(store.streamingClients.has('public:local')).toBe(true);
+
+      store.pauseStream('public:local');
+      expect(store.isStreamPaused('public:local')).toBe(true);
+      expect(store.streamingClients.has('public:local')).toBe(false);
+
+      // While paused, connectStream (e.g. from a background fetch) is a no-op
+      store.connectStream('token', 'public:local', 'local');
+      expect(store.streamingClients.has('public:local')).toBe(false);
+    });
+
+    it('resumeStream refetches the timeline to fill the gap, then reconnects', async () => {
+      const { getPublicTimeline } = await import('@/api/mastodon/timelines');
+      vi.mocked(getPublicTimeline).mockResolvedValue({
+        data: [],
+        headers: { get: () => null },
+      } as never);
+
+      const store = useTimelinesStore();
+      store.pauseStream('public:local');
+      expect(store.isStreamPaused('public:local')).toBe(true);
+
+      await store.resumeStream('public:local', 'local', { token: 'token' });
+
+      expect(store.isStreamPaused('public:local')).toBe(false);
+      expect(getPublicTimeline).toHaveBeenCalled();
+      expect(store.streamingClients.has('public:local')).toBe(true);
+    });
+
+    it('pausing one stream leaves other streams connected', () => {
+      const store = useTimelinesStore();
+      store.connectStream('token', 'user', 'home');
+      store.connectStream('token', 'public', 'public');
+
+      store.pauseStream('public');
+      expect(store.streamingClients.has('user')).toBe(true);
+      expect(store.streamingClients.has('public')).toBe(false);
     });
   });
 });

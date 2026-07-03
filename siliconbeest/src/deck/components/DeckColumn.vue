@@ -49,7 +49,19 @@ const statuses = computed(() => {
 })
 
 const hasNewPosts = computed(() => timeline.value.newStatusIds.length > 0)
-const live = computed(() => timelinesStore.streamingClients.has(meta.value.streamKey))
+const livePaused = computed(() => timelinesStore.isStreamPaused(meta.value.streamKey))
+const live = computed(() => !livePaused.value && timelinesStore.streamingClients.has(meta.value.streamKey))
+
+async function toggleLive() {
+  if (livePaused.value) {
+    // Resume: refetch first so posts missed while paused aren't skipped
+    await timelinesStore.resumeStream(meta.value.streamKey, meta.value.timelineType, {
+      token: auth.token ?? undefined,
+    })
+  } else {
+    timelinesStore.pauseStream(meta.value.streamKey)
+  }
+}
 
 const isAtTop = ref(true)
 
@@ -100,14 +112,29 @@ function navigate(status: Status) {
       <span class="dk-mono dk-text text-[13.5px] font-semibold">{{ title }}</span>
       <span v-if="scope" class="dk-chip">{{ scope }}</span>
       <div class="flex-1" />
-      <span v-if="live" class="dk-live">
-        <span class="dk-dot !h-1.5 !w-1.5" aria-hidden="true" />{{ t('deck.live') }}
-      </span>
+      <button
+        v-if="auth.token"
+        type="button"
+        class="dk-live cursor-pointer border-0 bg-transparent p-0"
+        :style="live ? '' : 'color: var(--dk-dim)'"
+        :aria-pressed="live"
+        :aria-label="t('deck.live_toggle')"
+        :title="t('deck.live_toggle')"
+        @click="toggleLive"
+      >
+        <span
+          class="dk-dot !h-1.5 !w-1.5"
+          :style="live ? '' : 'animation: none; background: var(--dk-dim)'"
+          aria-hidden="true"
+        />{{ t('deck.live') }}
+      </button>
     </div>
 
     <!-- Column body -->
+    <!-- overscroll-y only: horizontal trackpad swipes must chain up to the deck's x-scroller -->
     <div
-      class="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-1.5"
+      data-deck-scroll
+      class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain pb-1.5"
       @scroll.passive="handleScroll"
     >
       <button

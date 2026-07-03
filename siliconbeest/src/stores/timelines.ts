@@ -38,6 +38,8 @@ export const useTimelinesStore = defineStore('timelines', () => {
   const timelines = ref<Map<string, TimelineState>>(new Map());
   // Multiple streaming connections — one per stream type
   const streamingClients = ref<Map<string, StreamingClient>>(new Map());
+  // Streams the user toggled off (LIVE toggle) — connectStream respects this
+  const pausedStreams = ref<Set<string>>(new Set());
   // Cache for newly discovered remote custom emojis
   const emojiCache = ref<Map<string, { shortcode: string; url: string; static_url: string }> | null>(null);
 
@@ -185,8 +187,33 @@ export const useTimelinesStore = defineStore('timelines', () => {
     }
   }
 
+  function isStreamPaused(stream: string): boolean {
+    return pausedStreams.value.has(stream);
+  }
+
+  /** LIVE toggle off: remember the choice and close this feed's connection. */
+  function pauseStream(stream: string) {
+    pausedStreams.value = new Set([...pausedStreams.value, stream]);
+    disconnectStream(stream);
+  }
+
+  /**
+   * LIVE toggle on: refetch the timeline first so posts missed while paused
+   * aren't silently skipped, then reconnect (fetchTimeline auto-connects
+   * when a token is present).
+   */
+  async function resumeStream(
+    stream: string,
+    type: TimelineType,
+    opts?: { tag?: string; token?: string },
+  ) {
+    pausedStreams.value = new Set([...pausedStreams.value].filter((s) => s !== stream));
+    await fetchTimeline(type, opts);
+  }
+
   function connectStream(token: string, stream: string = 'user', timelineType: TimelineType = 'home') {
     if (typeof window === 'undefined') return;
+    if (pausedStreams.value.has(stream)) return;
 
     const existingClient = streamingClients.value.get(stream);
     if (existingClient?.isActive()) return;
@@ -251,6 +278,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
   return {
     timelines,
     streamingClients,
+    pausedStreams,
     getTimeline,
     fetchTimeline,
     fetchMore,
@@ -259,5 +287,8 @@ export const useTimelinesStore = defineStore('timelines', () => {
     removeStatus,
     connectStream,
     disconnectStream,
+    isStreamPaused,
+    pauseStream,
+    resumeStream,
   };
 });

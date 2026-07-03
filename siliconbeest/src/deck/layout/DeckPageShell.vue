@@ -4,11 +4,11 @@ import DeckShell from './DeckShell.vue'
 withDefaults(defineProps<{
   /** Slot manages its own height/scroll (multi-column screens). */
   containedMain?: boolean
-  /** Content column width: feed (2xl), wide (4xl), or full-bleed. */
+  /** Content column width: full-bleed (default, like admin), wide (4xl), or feed (2xl). */
   width?: 'feed' | 'wide' | 'full'
 }>(), {
   containedMain: false,
-  width: 'feed',
+  width: 'full',
 })
 </script>
 

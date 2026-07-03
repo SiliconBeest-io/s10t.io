@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiStore, type ColumnType } from '@/stores/ui'
+
 import DeckShell from '../layout/DeckShell.vue'
 import DeckColumn from '../components/DeckColumn.vue'
 import DeckNotificationsColumn from '../components/DeckNotificationsColumn.vue'
@@ -10,6 +11,23 @@ import { useDeckColumns } from '../composables/useDeckColumns'
 const { t } = useI18n()
 const ui = useUiStore()
 const { columns } = useDeckColumns()
+
+const deckEl = ref<HTMLElement | null>(null)
+
+/**
+ * Plain vertical mouse wheels have no horizontal axis; when the pointer is
+ * over deck chrome (headers, gaps) rather than a scrolling feed, translate
+ * vertical wheel motion into horizontal deck panning (TweetDeck-style).
+ */
+function onDeckWheel(event: WheelEvent) {
+  const el = deckEl.value
+  if (!el || el.scrollWidth <= el.clientWidth) return
+  if (event.deltaX !== 0) return // trackpad already scrolls horizontally
+  const target = event.target as HTMLElement | null
+  if (target?.closest('[data-deck-scroll]')) return // feed handles its own wheel
+  el.scrollLeft += event.deltaY
+  event.preventDefault()
+}
 
 const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
   home: 'deck.col_home',
@@ -33,7 +51,10 @@ watch(columns, (cols) => {
     <!-- Desktop: horizontal multi-column deck, ordered by the user's config -->
     <div
       v-if="!ui.isMobile"
-      class="flex h-full min-h-0 gap-3.5 overflow-x-auto px-[18px] pb-2.5 pt-3.5"
+      ref="deckEl"
+      class="flex h-full min-h-0 gap-3.5 overflow-x-auto overflow-y-hidden px-[18px] pb-2.5 pt-3.5"
+      tabindex="0"
+      @wheel="onDeckWheel"
     >
       <template v-for="key in columns" :key="key">
         <DeckNotificationsColumn v-if="key === 'notifications'" />

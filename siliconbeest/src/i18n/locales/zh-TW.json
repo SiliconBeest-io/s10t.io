@@ -996,6 +996,7 @@
     "col_notifications": "~/alerts",
     "move_up": "上移",
     "move_down": "下移",
-    "drag_to_reorder": "拖曳以重新排序"
+    "drag_to_reorder": "拖曳以重新排序",
+    "live_toggle": "切換即時更新"
   }
 }
