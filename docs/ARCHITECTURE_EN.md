@@ -154,6 +154,7 @@ A dedicated worker that consumes messages from both queues and processes them as
 **Queue configuration:**
 - Federation queue: max 5 retries, Dead Letter Queue (`siliconbeest-federation-dlq`)
 - Internal queue: max 3 retries, no DLQ
+- DLQ: consumed by the same consumer (max 2 retries) — one more processing round, then persistent failures are parked into the `federation_dlq_parked` D1 table for inspection/replay/discard via the admin API (`/api/v1/admin/federation/dlq`)
 
 ### Worker 3: `siliconbeest-vue` (Frontend)
 
@@ -1763,6 +1764,7 @@ Remote custom emojis are cached locally with `domain` set to the source instance
 |-------|---------|---------|-----|
 | `siliconbeest-federation` | Federation-related jobs (delivery, fetching, forwarding) | 5 | `siliconbeest-federation-dlq` |
 | `siliconbeest-internal` | Internal jobs (timeline, notifications, media, trends) | 3 | None |
+| `siliconbeest-federation-dlq` | Reprocess dead-lettered messages; persistent failures parked into the `federation_dlq_parked` D1 table | 2 | None (parked in D1) |
 
 ### Message Types (15 total)
 

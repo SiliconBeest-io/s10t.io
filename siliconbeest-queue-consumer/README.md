@@ -95,10 +95,11 @@ The consumer is configured in `wrangler.jsonc`:
 
 ### Queue Consumer Settings
 
-| Queue                      | Max Retries | Dead Letter Queue              |
-| -------------------------- | ----------- | ------------------------------ |
-| `siliconbeest-federation`  | 5           | `siliconbeest-federation-dlq`  |
-| `siliconbeest-internal`    | 3           | (none)                         |
+| Queue                          | Max Retries | Dead Letter Queue              |
+| ------------------------------ | ----------- | ------------------------------ |
+| `siliconbeest-federation`      | 5           | `siliconbeest-federation-dlq`  |
+| `siliconbeest-internal`        | 3           | (none)                         |
+| `siliconbeest-federation-dlq`  | 2           | (parked into D1 on failure)    |
 
 ---
 
@@ -123,8 +124,10 @@ When a forwarded activity is received (e.g., a reply to a local post from a remo
 
 ## Retry and Dead Letter Queue Behavior
 
-- **Federation queue**: Messages are retried up to **5 times**. After all retries are exhausted, the message is moved to the `siliconbeest-federation-dlq` dead letter queue for manual inspection.
+- **Federation queue**: Messages are retried up to **5 times**. After all retries are exhausted, Cloudflare moves the message to the `siliconbeest-federation-dlq` dead letter queue.
 - **Internal queue**: Messages are retried up to **3 times**. Failed messages are dropped after exhausting retries (no DLQ configured).
+- **Federation DLQ**: This worker also consumes the DLQ. Each dead-lettered message gets one more processing round (which automatically drains backlogs caused by transient outages or since-fixed bugs). Messages that still fail are **parked** into the `federation_dlq_parked` D1 table together with the error, then acked.
+- Parked messages can be inspected, replayed (re-enqueued to the federation queue), or discarded via the admin API: `GET /api/v1/admin/federation/dlq`, `POST /api/v1/admin/federation/dlq/:id/replay`, `DELETE /api/v1/admin/federation/dlq/:id`.
 - Each handler catches errors individually: on success it calls `msg.ack()`, on error it calls `msg.retry()` and logs the error.
 
 ---

@@ -1,12 +1,20 @@
 /**
  * SiliconBeest Queue Consumer
  *
- * Cloudflare Worker that consumes messages from the federation
- * and internal queues. Dispatches each message to the appropriate
- * handler based on the discriminated union type field.
+ * Cloudflare Worker that consumes messages from the federation,
+ * internal, and federation-dlq queues. Dispatches each message to
+ * the appropriate handler based on the discriminated union type field.
  *
  * Fedify messages (enqueued by WorkersMessageQueue via sendActivity)
  * are detected and routed to federation.processQueuedTask().
+ *
+ * Retry semantics per queue:
+ * - federation: on failure always retry(); Cloudflare moves the message
+ *   to the federation-dlq queue once max_retries is exhausted.
+ * - internal: no DLQ — poison messages are dropped after max attempts.
+ * - federation-dlq: reprocess once more; persistent failures are parked
+ *   into the `federation_dlq_parked` D1 table (admin API can replay or
+ *   discard them), then acked.
  */
 
 import { env } from 'cloudflare:workers';
@@ -32,6 +40,19 @@ import { handleSendWebPush } from './handlers/sendWebPush';
 import { handleFetchPreviewCard } from './handlers/fetchPreviewCard';
 import { handleForwardActivity } from './handlers/forwardActivity';
 import { handleImportItem } from './handlers/importItem';
+
+// ---------------------------------------------------------------------------
+// Queue name classification
+// ---------------------------------------------------------------------------
+// The prefix is configurable (PROJECT_PREFIX in scripts/config.sh); the
+// suffixes are fixed by scripts/install.sh and scripts/sync-config.sh.
+const DLQ_QUEUE_SUFFIX = '-federation-dlq';
+const INTERNAL_QUEUE_SUFFIX = '-internal';
+
+/** Internal queue has no DLQ: drop poison messages after max_retries=3 (+1 first attempt). */
+const INTERNAL_MAX_ATTEMPTS = 4;
+/** DLQ consumer: park after max_retries=2 (+1 first attempt). */
+const DLQ_MAX_ATTEMPTS = 3;
 
 // ---------------------------------------------------------------------------
 // Fedify — singleton per isolate (avoids createFederation + setup per message)
@@ -100,151 +121,254 @@ interface ProcessMessageResult {
   [key: string]: unknown;
 }
 
+type ProcessOutcome = 'processed' | 'deferred' | 'skipped';
+
+/**
+ * Process a single queue message body. Shared between the main queue
+ * consumers and the DLQ consumer so both run identical logic.
+ *
+ * Returns 'deferred' when a Fedify ordering lock is held (caller should
+ * retry), 'skipped' for unrecognized bodies. Throws on processing failure.
+ */
+async function processMessageBody(body: Record<string, unknown>): Promise<ProcessOutcome> {
+  // Ensure federation dispatchers are registered before any handler runs.
+  // Legacy handlers (fetch_remote_account, fetch_remote_status) need
+  // ctx.getDocumentLoader({ identifier: '__instance__' }) for signed fetches,
+  // which requires the actor + key-pairs dispatcher to be set up.
+  const fed = ensureFedInitialized();
+
+  // ---- Fedify queued tasks (from WorkersMessageQueue / sendActivity) ----
+  if (isFedifyMessage(body)) {
+    const wmq = new WorkersMessageQueue(env.QUEUE_FEDERATION);
+    const result = await measureAsync('queue.fedify.processMessage', () => wmq.processMessage(body)) as ProcessMessageResult;
+    if (!result.shouldProcess) return 'deferred';
+    try {
+      await measureAsync(
+        'queue.fedify.processQueuedTask',
+        () => fed.processQueuedTask({ env }, result.message!),
+        { messageType: result.message?.type }
+      );
+    } finally {
+      await result.release?.();
+    }
+    return 'processed';
+  }
+
+  // ---- Legacy messages (discriminated union on `type`) ----
+  if (!body || typeof body !== 'object' || !('type' in body) || typeof body.type !== 'string') {
+    console.warn('[queue] Unknown message format, skipping:', JSON.stringify(body).slice(0, 200));
+    return 'skipped';
+  }
+  // body has been validated to have a string `type` field — safe to treat as QueueMessage
+  const legacyMsg = body as QueueMessage & Record<string, unknown>;
+  await measureAsync(
+    `queue.legacy.${legacyMsg.type}`,
+    async () => {
+      switch (legacyMsg.type) {
+        case 'deliver_activity':
+          await handleDeliverActivity(legacyMsg);
+          break;
+        case 'deliver_activity_fanout':
+          await handleDeliverActivityFanout(legacyMsg);
+          break;
+        case 'timeline_fanout':
+          await handleTimelineFanout(legacyMsg);
+          break;
+        case 'create_notification':
+          await handleCreateNotification(legacyMsg);
+          break;
+        case 'process_media':
+          await handleProcessMedia(legacyMsg);
+          break;
+        case 'fetch_remote_account':
+          await handleFetchRemoteAccount(legacyMsg);
+          break;
+        case 'fetch_remote_status':
+          await handleFetchRemoteStatus(legacyMsg);
+          break;
+        case 'send_web_push':
+          await handleSendWebPush(legacyMsg);
+          break;
+        case 'fetch_preview_card':
+          await handleFetchPreviewCard(legacyMsg);
+          break;
+        case 'forward_activity':
+          await handleForwardActivity(legacyMsg);
+          break;
+        case 'import_item':
+          await handleImportItem(legacyMsg);
+          break;
+        default:
+          console.warn('Unknown message type:', (legacyMsg as { type: string }).type);
+      }
+    },
+    { messageType: legacyMsg.type }
+  );
+  return 'processed';
+}
+
+// ---------------------------------------------------------------------------
+// DLQ post-processing
+// ---------------------------------------------------------------------------
+
+interface ParkMeta {
+  messageType: string;
+  activityType: string | null;
+  activityId: string | null;
+  actor: string | null;
+}
+
+/** Best-effort triage metadata extracted from a message body for parking. */
+function extractParkMeta(body: unknown): ParkMeta {
+  if (body && typeof body === 'object' && '__fedify_payload__' in (body as Record<string, unknown>)) {
+    const payload = (body as Record<string, unknown>).__fedify_payload__ as Record<string, unknown> | null;
+    const activity = (payload?.activity ?? null) as Record<string, unknown> | null;
+    return {
+      messageType: `fedify:${typeof payload?.type === 'string' ? payload.type : 'unknown'}`,
+      activityType: typeof activity?.type === 'string' ? activity.type : null,
+      activityId: typeof activity?.id === 'string' ? activity.id : null,
+      actor: typeof activity?.actor === 'string' ? activity.actor : null,
+    };
+  }
+  const type = body && typeof body === 'object' ? (body as Record<string, unknown>).type : undefined;
+  return {
+    messageType: typeof type === 'string' ? type : 'unknown',
+    activityType: null,
+    activityId: null,
+    actor: null,
+  };
+}
+
+/** Persist a dead-lettered message into D1 for admin inspection/replay. */
+async function parkMessage(queueName: string, msg: Message, error: string): Promise<void> {
+  const meta = extractParkMeta(msg.body);
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO federation_dlq_parked (
+       id, queue, message_id, body, message_type, activity_type, activity_id, actor,
+       error, attempts, status, parked_at, updated_at
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'parked', ?11, ?11)`
+  ).bind(
+    crypto.randomUUID(),
+    queueName,
+    msg.id,
+    JSON.stringify(msg.body),
+    meta.messageType,
+    meta.activityType,
+    meta.activityId,
+    meta.actor,
+    error.slice(0, 4000),
+    msg.attempts,
+    now,
+  ).run();
+  console.error(
+    `[dlq] Parked message ${msg.id} (${meta.messageType}${meta.activityType ? `/${meta.activityType}` : ''}): ${error.slice(0, 200)}`
+  );
+}
+
+/**
+ * Consume the federation-dlq queue: give each dead-lettered message one
+ * more processing round (drains transient failures and backlogs created
+ * by since-fixed bugs); park persistent failures into D1, then ack.
+ */
+async function consumeDlqBatch(batch: MessageBatch): Promise<void> {
+  for (const msg of batch.messages) {
+    const messageStart = performance.now();
+    const body = msg.body as Record<string, unknown>;
+    try {
+      const outcome = await processMessageBody(body);
+      if (outcome === 'deferred' && msg.attempts < DLQ_MAX_ATTEMPTS) {
+        msg.retry({ delaySeconds: 60 });
+        continue;
+      }
+      if (outcome === 'deferred') {
+        await parkMessage(batch.queue, msg, 'ordering lock still held after DLQ retries');
+        logPerformance('dlq.message.parked', performance.now() - messageStart, { messageType: 'fedify' });
+      } else {
+        console.log(`[dlq] Reprocessed message ${msg.id} successfully`);
+        logPerformance('dlq.message.recovered', performance.now() - messageStart, {
+          messageType: extractParkMeta(body).messageType,
+        });
+      }
+      msg.ack();
+    } catch (err) {
+      const errText = err instanceof Error ? `${err.message}${err.stack ? `\n${err.stack}` : ''}` : String(err);
+      try {
+        await parkMessage(batch.queue, msg, errText);
+        logPerformance('dlq.message.parked', performance.now() - messageStart, {
+          messageType: extractParkMeta(body).messageType,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        msg.ack();
+      } catch (parkErr) {
+        // Parking failed (e.g., D1 unavailable) — retry so the message isn't lost.
+        console.error('[dlq] Failed to park message:', parkErr);
+        if (msg.attempts >= DLQ_MAX_ATTEMPTS) {
+          console.error(`[dlq] DROPPED unparkable message ${msg.id}:`, JSON.stringify(body).slice(0, 2000));
+          msg.ack();
+        } else {
+          msg.retry({ delaySeconds: 60 });
+        }
+      }
+    }
+  }
+}
+
 export default {
-  async queue(batch: MessageBatch, env: Env): Promise<void> {
+  async queue(batch: MessageBatch, _env: Env): Promise<void> {
+    if (batch.queue.endsWith(DLQ_QUEUE_SUFFIX)) {
+      await consumeDlqBatch(batch);
+      return;
+    }
+
     const batchStart = performance.now();
 
     for (const msg of batch.messages) {
       const messageStart = performance.now();
+      const body = msg.body as Record<string, unknown>;
       try {
-        const body = msg.body as Record<string, unknown>;
-
-        // Ensure federation dispatchers are registered before any handler runs.
-        // Legacy handlers (fetch_remote_account, fetch_remote_status) need
-        // ctx.getDocumentLoader({ identifier: '__instance__' }) for signed fetches,
-        // which requires the actor + key-pairs dispatcher to be set up.
-        ensureFedInitialized();
-
-        // ---- Fedify queued tasks (from WorkersMessageQueue / sendActivity) ----
-        if (isFedifyMessage(body)) {
-          try {
-            const fed = ensureFedInitialized();
-
-            const wmq = new WorkersMessageQueue(env.QUEUE_FEDERATION);
-            const result = await measureAsync('queue.fedify.processMessage', () => wmq.processMessage(body)) as ProcessMessageResult;
-            console.log('[queue] processMessage result:', JSON.stringify({
-              shouldProcess: result.shouldProcess,
-              messageType: result.message?.type,
-              messageKeys: Object.keys(result.message || {}),
-            }));
-            if (!result.shouldProcess) {
-              console.log('[queue] Fedify message deferred (ordering lock)');
-              msg.retry();
-              const deferDuration = performance.now() - messageStart;
-              logPerformance('queue.message.deferred', deferDuration, { messageType: 'fedify' });
-              continue;
-            }
-            try {
-              console.log('[queue] Calling processQueuedTask with message type:', result.message?.type);
-              await measureAsync(
-                'queue.fedify.processQueuedTask',
-                () => fed.processQueuedTask({ env }, result.message!),
-                { messageType: result.message?.type }
-              );
-              console.log('[queue] Fedify task processed successfully');
-              msg.ack();
-              const totalDuration = performance.now() - messageStart;
-              logPerformance('queue.message.processed', totalDuration, {
-                messageType: 'fedify',
-                taskType: result.message?.type
-              });
-            } catch (taskErr) {
-              console.error('[queue] Fedify processQueuedTask error:', taskErr);
-              msg.retry();
-            } finally {
-              await result.release?.();
-            }
-          } catch (fedifyErr) {
-            console.error('[queue] Fedify setup error:', fedifyErr);
-            msg.retry();
-          }
+        const outcome = await processMessageBody(body);
+        if (outcome === 'deferred') {
+          console.log('[queue] Fedify message deferred (ordering lock)');
+          msg.retry();
+          logPerformance('queue.message.deferred', performance.now() - messageStart, { messageType: 'fedify' });
           continue;
         }
-
-        // ---- Legacy messages (discriminated union on `type`) ----
-        if (!('type' in body) || typeof body.type !== 'string') {
-          console.warn('[queue] Unknown message format, skipping:', JSON.stringify(body).slice(0, 200));
-          msg.ack();
-          continue;
-        }
-        // body has been validated to have a string `type` field — safe to treat as QueueMessage
-        const legacyMsg = body as QueueMessage & Record<string, unknown>;
-        await measureAsync(
-          `queue.legacy.${legacyMsg.type}`,
-          async () => {
-            switch (legacyMsg.type) {
-              case 'deliver_activity':
-                await handleDeliverActivity(legacyMsg);
-                break;
-              case 'deliver_activity_fanout':
-                await handleDeliverActivityFanout(legacyMsg);
-                break;
-              case 'timeline_fanout':
-                await handleTimelineFanout(legacyMsg);
-                break;
-              case 'create_notification':
-                await handleCreateNotification(legacyMsg);
-                break;
-              case 'process_media':
-                await handleProcessMedia(legacyMsg);
-                break;
-              case 'fetch_remote_account':
-                await handleFetchRemoteAccount(legacyMsg);
-                break;
-              case 'fetch_remote_status':
-                await handleFetchRemoteStatus(legacyMsg);
-                break;
-              case 'send_web_push':
-                await handleSendWebPush(legacyMsg);
-                break;
-              case 'fetch_preview_card':
-                await handleFetchPreviewCard(legacyMsg);
-                break;
-              case 'forward_activity':
-                await handleForwardActivity(legacyMsg);
-                break;
-              case 'import_item':
-                await handleImportItem(legacyMsg);
-                break;
-              default:
-                console.warn('Unknown message type:', (legacyMsg as { type: string }).type);
-            }
-          },
-          { messageType: legacyMsg.type }
-        );
         msg.ack();
-        const totalDuration = performance.now() - messageStart;
-        logPerformance('queue.message.processed', totalDuration, { 
-          messageType: 'legacy',
-          legacyType: legacyMsg.type 
+        logPerformance('queue.message.processed', performance.now() - messageStart, {
+          messageType: isFedifyMessage(body) ? 'fedify' : 'legacy',
+          ...(typeof body?.type === 'string' ? { legacyType: body.type } : {}),
         });
       } catch (err) {
         const bodyType =
-          msg.body && typeof msg.body === 'object' && 'type' in (msg.body as Record<string, unknown>)
-            ? (msg.body as Record<string, unknown>).type
-            : 'fedify-task';
-        const errorDuration = performance.now() - messageStart;
-        logPerformance('queue.message.error', errorDuration, {
+          body && typeof body === 'object' && 'type' in body ? body.type : 'fedify-task';
+        logPerformance('queue.message.error', performance.now() - messageStart, {
           messageType: bodyType,
           error: err instanceof Error ? err.message : String(err),
           attempt: msg.attempts,
         });
         console.error(`Queue handler error for ${bodyType} (attempt ${msg.attempts}):`, err);
-        // Max retry reached — log and ack to prevent infinite loop
-        // (federation queue max_retries=5, internal queue max_retries=3)
-        const MAX_ATTEMPTS = isFedifyMessage(msg.body) ? 6 : 4; // max_retries + 1 (first attempt)
-        if (msg.attempts >= MAX_ATTEMPTS) {
-          console.error(`[queue] DROPPED after ${msg.attempts} attempts: ${bodyType}`, JSON.stringify(msg.body));
-          msg.ack();
+
+        if (batch.queue.endsWith(INTERNAL_QUEUE_SUFFIX)) {
+          // The internal queue has no DLQ — drop poison messages at max
+          // attempts to prevent an infinite retry loop.
+          if (msg.attempts >= INTERNAL_MAX_ATTEMPTS) {
+            console.error(`[queue] DROPPED after ${msg.attempts} attempts: ${bodyType}`, JSON.stringify(msg.body));
+            msg.ack();
+          } else {
+            msg.retry();
+          }
         } else {
+          // The federation queue is DLQ-backed: keep retrying so Cloudflare
+          // moves the message to the DLQ once max_retries is exhausted.
           msg.retry();
         }
       }
     }
-    
+
     const batchDuration = performance.now() - batchStart;
-    logPerformance('queue.batch.complete', batchDuration, { 
-      messageCount: batch.messages.length 
+    logPerformance('queue.batch.complete', batchDuration, {
+      messageCount: batch.messages.length
     });
   },
 };

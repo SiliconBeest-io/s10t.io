@@ -457,6 +457,10 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 			{
 				"queue": "${QUEUE_INTERNAL}",
 				"max_retries": 3
+			},
+			{
+				"queue": "${QUEUE_DLQ}",
+				"max_retries": 2
 			}
 		]
 	},

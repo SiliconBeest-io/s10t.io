@@ -52,7 +52,7 @@
 		}
 	],
 
-	// Queues (consume federation + internal, produce for re-enqueue/fanout)
+	// Queues (consume federation + internal + federation-dlq, produce for re-enqueue/fanout)
 	"queues": {
 		"consumers": [
 			{
@@ -63,6 +63,12 @@
 			{
 				"queue": "siliconbeest-internal",
 				"max_retries": 3
+			},
+			{
+				// Dead-lettered federation messages: reprocess once more, then
+				// park persistent failures into the federation_dlq_parked table.
+				"queue": "siliconbeest-federation-dlq",
+				"max_retries": 2
 			}
 		],
 		"producers": [

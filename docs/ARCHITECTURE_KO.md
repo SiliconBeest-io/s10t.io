@@ -154,6 +154,7 @@ SiliconBeest는 공유 데이터 저장소와 큐를 통해 협력하는 3개의
 **큐 설정:**
 - 연합 큐: 최대 5회 재시도, Dead Letter Queue (`siliconbeest-federation-dlq`)
 - 내부 큐: 최대 3회 재시도, DLQ 없음
+- DLQ: 컨슈머가 직접 소비 (최대 2회 재시도) — 한 번 더 재처리 후, 계속 실패하는 메시지는 `federation_dlq_parked` D1 테이블에 보관하고 관리자 API(`/api/v1/admin/federation/dlq`)로 조회/재전송/폐기
 
 ### Worker 3: `siliconbeest-vue` (프론트엔드)
 
@@ -1137,6 +1138,7 @@ Misskey, Calckey, Firefish 및 호환 구현에서 사용하는 `EmojiReact` 활
 |----|------|--------|-----|
 | `siliconbeest-federation` | 연합 관련 작업 (배달, 가져오기, 전달) | 5 | `siliconbeest-federation-dlq` |
 | `siliconbeest-internal` | 내부 작업 (타임라인, 알림, 미디어, 트렌드) | 3 | 없음 |
+| `siliconbeest-federation-dlq` | 재시도 소진 메시지 재처리 후 실패 시 `federation_dlq_parked` D1 테이블에 보관 | 2 | 없음 (D1 보관) |
 
 ### 메시지 타입 (15가지)
 

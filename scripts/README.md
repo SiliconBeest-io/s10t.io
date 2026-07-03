@@ -330,7 +330,7 @@ VAPID keys are stored in the D1 `settings` table (not env secrets).
 
 ### Check dead letter queue
 
-Failed federation deliveries go to the DLQ. Inspect via the Cloudflare dashboard (Queues tab).
+Federation messages that exhaust their retries go to the DLQ. The queue consumer reprocesses each dead-lettered message once more and parks persistent failures into the `federation_dlq_parked` D1 table. Inspect, replay, or discard parked messages via the admin API (`/api/v1/admin/federation/dlq`), or view the raw queue in the Cloudflare dashboard (Queues tab).
 
 ### Rotate OTP encryption key
 
