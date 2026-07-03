@@ -279,10 +279,10 @@ function handleReactionUpdate(updatedStatus: Status) {
   statusesStore.cacheStatus(updatedStatus)
 }
 
-// 액션 메뉴의 "이모지로 반응" → 리액션 이모지 피커 열기
+// 액션 메뉴의 "이모지로 반응" → 리액션 이모지 피커 열기 (좋아요 버튼을 앵커로 사용)
 const reactionsRef = ref<InstanceType<typeof StatusReactions> | null>(null)
-function handleReact() {
-  reactionsRef.value?.openPicker()
+function handleReact(_id: string, anchor?: HTMLElement) {
+  reactionsRef.value?.openPicker(anchor)
 }
 
 async function handleDelete() {

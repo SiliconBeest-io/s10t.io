@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
@@ -18,9 +18,7 @@ const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
 const showPicker = ref(false)
 const pickerRef = ref<HTMLElement | null>(null)
-const pickerBtnRef = ref<HTMLElement | null>(null)
-const pickerAnchorRef = ref<HTMLElement | null>(null)
-const pickerAbove = ref(true)
+const rootRef = ref<HTMLElement | null>(null)
 
 // 리액션이 있는지 확인
 const hasReactions = computed(() => reactions.value.length > 0)
@@ -87,28 +85,53 @@ async function handleEmojiSelect(emoji: string) {
   }
 }
 
-async function updatePickerPosition() {
-  await nextTick()
-  const anchor = pickerBtnRef.value ?? pickerAnchorRef.value
-  if (anchor) {
-    const rect = anchor.getBoundingClientRect()
-    // 피커 높이 약 300px. 위에 공간이 부족하면 아래로 표시
-    pickerAbove.value = rect.top > 320
-  }
-}
+// ---------------------------------------------------------------------------
+// 이모지 피커 — body로 Teleport + fixed 좌표라 overflow-hidden/스크롤 컨테이너에
+// 가려지지 않음. 앵커(좋아요 버튼 또는 리액션 칩 행) 기준으로 위/아래 배치를
+// 결정하고 뷰포트 안으로 클램프한다.
+// ---------------------------------------------------------------------------
+const PICKER_WIDTH = 288 // w-72
+const PICKER_HEIGHT = 320 // max-h-80
+const PICKER_MARGIN = 8
 
-function togglePicker() {
-  showPicker.value = !showPicker.value
-  if (showPicker.value) {
-    void updatePickerPosition()
+const pickerStyle = ref<Record<string, string>>({})
+let anchorEl: HTMLElement | null = null
+
+function computePickerPosition() {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const rect = anchorEl?.isConnected ? anchorEl.getBoundingClientRect() : null
+
+  let top: number
+  let left: number
+  if (rect) {
+    const spaceBelow = vh - rect.bottom - PICKER_MARGIN
+    const spaceAbove = rect.top - PICKER_MARGIN
+    if (spaceBelow >= PICKER_HEIGHT) {
+      top = rect.bottom + PICKER_MARGIN
+    } else if (spaceAbove >= PICKER_HEIGHT) {
+      top = rect.top - PICKER_MARGIN - PICKER_HEIGHT
+    } else {
+      top = (vh - PICKER_HEIGHT) / 2
+    }
+    left = rect.left
+  } else {
+    top = (vh - PICKER_HEIGHT) / 2
+    left = (vw - PICKER_WIDTH) / 2
   }
+
+  left = Math.max(PICKER_MARGIN, Math.min(left, vw - PICKER_WIDTH - PICKER_MARGIN))
+  top = Math.max(PICKER_MARGIN, Math.min(top, vh - PICKER_HEIGHT - PICKER_MARGIN))
+  pickerStyle.value = { top: `${top}px`, left: `${left}px` }
 }
 
 // 외부(액션 메뉴의 "이모지로 반응")에서 피커 열기
-function openPicker() {
+async function openPicker(anchor?: HTMLElement) {
   if (!authStore.isAuthenticated || loading.value) return
+  anchorEl = anchor ?? rootRef.value
   showPicker.value = true
-  void updatePickerPosition()
+  await nextTick()
+  computePickerPosition()
 }
 
 defineExpose({ openPicker })
@@ -116,12 +139,25 @@ defineExpose({ openPicker })
 // 피커 외부 클릭 시 닫기
 function handleClickOutside(e: MouseEvent) {
   const target = e.target as Node
-  if (
-    pickerRef.value && !pickerRef.value.contains(target) &&
-    (!pickerBtnRef.value || !pickerBtnRef.value.contains(target))
-  ) {
+  if (pickerRef.value && !pickerRef.value.contains(target)) {
     showPicker.value = false
   }
+}
+
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') showPicker.value = false
+}
+
+// 스크롤/리사이즈 시 앵커를 따라 재배치
+function handleWindowChange() {
+  computePickerPosition()
+}
+
+function removePickerListeners() {
+  document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('scroll', handleWindowChange, true)
+  window.removeEventListener('resize', handleWindowChange)
 }
 
 watch(showPicker, (val) => {
@@ -129,10 +165,16 @@ watch(showPicker, (val) => {
     setTimeout(() => {
       document.addEventListener('click', handleClickOutside)
     }, 0)
+    document.addEventListener('keydown', handleKeydown)
+    window.addEventListener('scroll', handleWindowChange, true)
+    window.addEventListener('resize', handleWindowChange)
   } else {
-    document.removeEventListener('click', handleClickOutside)
+    removePickerListeners()
+    anchorEl = null
   }
 })
+
+onUnmounted(removePickerListeners)
 
 // 커스텀 이모지인지 확인
 function isCustomEmoji(reaction: EmojiReaction): boolean {
@@ -153,8 +195,8 @@ function getShortcode(name: string): string {
 </script>
 
 <template>
-  <div v-if="hasReactions || showPicker" class="flex flex-wrap items-center gap-1.5">
-    <!-- 리액션 칩들 -->
+  <div v-if="hasReactions || showPicker" ref="rootRef" class="flex flex-wrap items-center gap-1.5">
+    <!-- 리액션 칩들 (추가는 액션 줄의 좋아요 메뉴 → "이모지로 반응"으로 통합) -->
     <TransitionGroup name="reaction">
       <button
         v-for="reaction in reactions"
@@ -187,35 +229,17 @@ function getShortcode(name: string): string {
       </button>
     </TransitionGroup>
 
-    <!-- + 버튼 (이모지 피커 열기) — 리액션이 있을 때만 표시, 없을 땐 액션 메뉴에서 열기 -->
-    <div v-if="authStore.isAuthenticated" ref="pickerAnchorRef" class="relative">
-      <button
-        v-if="hasReactions"
-        ref="pickerBtnRef"
-        @click.stop="togglePicker"
-        :disabled="loading"
-        class="inline-flex h-8 touch-manipulation items-center justify-center gap-0.5 rounded-full border border-dashed border-outline px-2 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:text-slate-500 dark:hover:border-brand-500 dark:hover:bg-brand-950/30 dark:hover:text-brand-400"
-        :class="loading ? 'opacity-60 cursor-wait' : 'cursor-pointer'"
-        title="리액션 추가"
-        aria-label="리액션 추가"
-      >
-        <svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
-        </svg>
-        <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4.5v15m7.5-7.5h-15" />
-        </svg>
-      </button>
-
-      <!-- 이모지 피커 팝오버 -->
+    <!-- 이모지 피커 — body에 고정 배치되어 어떤 컨테이너에도 잘리지 않음 -->
+    <Teleport to="body">
       <div
         v-if="showPicker"
         ref="pickerRef"
-        class="absolute left-0 z-50"
-        :class="pickerAbove ? 'bottom-full mb-2' : 'top-full mt-2'"
+        class="fixed z-[80] shadow-lift"
+        :style="pickerStyle"
+        @click.stop
       >
         <EmojiPicker @select="handleEmojiSelect" />
       </div>
-    </div>
+    </Teleport>
   </div>
 </template>

@@ -71,7 +71,8 @@ describe('StatusActions', () => {
     const menuItems = wrapper.findAll('[role="menu"] button');
     await menuItems[1].trigger('click');
     expect(wrapper.emitted('react')).toBeTruthy();
-    expect(wrapper.emitted('react')![0]).toEqual(['123']);
+    // Payload: status id + the favourite button as picker anchor
+    expect(wrapper.emitted('react')![0]![0]).toBe('123');
   });
 
   it('emits bookmark event on bookmark button click', async () => {

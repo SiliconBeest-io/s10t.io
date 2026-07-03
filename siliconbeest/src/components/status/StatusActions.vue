@@ -48,7 +48,7 @@ const emit = defineEmits<{
   reblog: [id: string]
   quote: [id: string]
   favourite: [id: string]
-  react: [id: string]
+  react: [id: string, anchor?: HTMLElement]
   bookmark: [id: string]
   share: [id: string]
   edit: [id: string]
@@ -62,6 +62,8 @@ const showMenu = ref(false)
 // Consolidated dropdowns: boost+quote and favourite+emoji-reaction
 const showBoostMenu = ref(false)
 const showFavMenu = ref(false)
+// Anchor for the emoji-reaction picker (teleported to body)
+const favBtnRef = ref<HTMLElement | null>(null)
 
 function closeAllMenus() {
   showMenu.value = false
@@ -108,7 +110,7 @@ function handleFavouriteItem() {
 
 function handleReact() {
   showFavMenu.value = false
-  emit('react', props.statusId)
+  emit('react', props.statusId, favBtnRef.value ?? undefined)
 }
 
 function handleEdit(id: string) {
@@ -235,6 +237,7 @@ function formatCount(n: number): string {
     <!-- Favourite / Emoji reaction (consolidated menu) -->
     <div class="relative" @focusout="onFavFocusOut">
       <button
+        ref="favBtnRef"
         @click="toggleFavMenu"
         class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
         :class="favourited
