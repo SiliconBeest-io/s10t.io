@@ -33,7 +33,7 @@ const emit = defineEmits<{
       </TransitionChild>
 
       <!-- Panel -->
-      <div class="fixed inset-0 flex items-start justify-center pt-[15vh] p-4">
+      <div class="fixed inset-0 flex items-start justify-center p-3 pt-[6dvh] sm:p-4 sm:pt-[15vh]">
         <TransitionChild
           enter="ease-out duration-200"
           enter-from="opacity-0 scale-95"
@@ -43,7 +43,7 @@ const emit = defineEmits<{
           leave-to="opacity-0 scale-95"
         >
           <DialogPanel
-            class="sb-card animate-rise-in w-[90vw] sm:w-[600px] lg:w-[640px] max-h-[85vh] p-6 shadow-lift overflow-y-auto"
+            class="sb-card animate-rise-in w-full sm:w-[600px] lg:w-[640px] max-h-[90dvh] sm:max-h-[85vh] p-4 sm:p-6 shadow-lift overflow-y-auto"
           >
             <div v-if="title" class="flex items-center justify-between mb-4">
               <DialogTitle class="sb-heading text-lg text-slate-900 dark:text-slate-50">

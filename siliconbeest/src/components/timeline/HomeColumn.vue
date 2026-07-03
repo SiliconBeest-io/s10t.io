@@ -16,6 +16,13 @@ const statusesStore = useStatusesStore()
 const auth = useAuthStore()
 const ui = useUiStore()
 
+withDefaults(defineProps<{
+  /** Hide the column header (mobile deck provides its own tab strip). */
+  hideHeader?: boolean
+}>(), {
+  hideHeader: false,
+})
+
 // View stack
 const activeView = ref<'timeline' | 'thread'>('timeline')
 const threadStatusId = ref<string | null>(null)
@@ -84,13 +91,16 @@ watch(
 <template>
   <div class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
     <template v-if="activeView === 'timeline'">
-      <header class="sb-glass sticky top-0 z-10 flex items-center justify-between border-b px-4 py-3">
-        <h2 class="sb-heading text-lg">{{ t('nav.home') }}</h2>
+      <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 flex flex-nowrap items-center justify-between gap-2 border-b px-4 py-3">
+        <h2 class="sb-heading min-w-0 truncate text-lg">{{ t('nav.home') }}</h2>
         <button
           v-if="auth.isAuthenticated"
           @click="ui.openComposeModal()"
-          class="sb-btn sb-btn-primary sb-btn-sm"
+          class="sb-btn sb-btn-primary sb-btn-sm shrink-0 whitespace-nowrap"
         >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+          </svg>
           {{ t('nav.compose') }}
         </button>
       </header>

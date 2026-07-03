@@ -76,6 +76,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
   ) {
     const key = getTimelineKey(type, opts?.tag);
     const timeline = getTimeline(type, opts?.tag);
+    if (timeline.loading) return;
     timeline.loading = true;
     timeline.error = null;
 

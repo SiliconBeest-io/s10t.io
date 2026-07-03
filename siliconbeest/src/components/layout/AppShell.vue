@@ -23,8 +23,8 @@ const gridClass = computed(() =>
 const mainClass = computed(() => [
   'overflow-x-hidden border-r border-outline dark:border-outline-dark w-full',
   props.containedMain
-    ? 'h-[calc(100dvh-4.75rem)] md:h-dvh overflow-hidden'
-    : 'min-h-dvh pb-24 md:pb-0',
+    ? 'h-[calc(100dvh-4rem-max(0.75rem,env(safe-area-inset-bottom)))] md:h-dvh overflow-hidden'
+    : 'min-h-dvh pb-[calc(5.25rem+max(0.75rem,env(safe-area-inset-bottom)))] md:pb-0',
 ])
 </script>
 

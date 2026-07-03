@@ -17,6 +17,8 @@ const props = defineProps<{
   title: string
   bannerStorageKey?: string
   bannerText?: string
+  /** Hide the column header (mobile deck provides its own tab strip). */
+  hideHeader?: boolean
 }>()
 
 const timelinesStore = useTimelinesStore()
@@ -85,7 +87,7 @@ watch(
   <div class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
     <!-- Timeline view -->
     <template v-if="activeView === 'timeline'">
-      <header class="sb-glass sticky top-0 z-10 border-b px-4 py-3">
+      <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 border-b px-4 py-3">
         <h2 class="sb-heading text-lg">{{ title }}</h2>
       </header>
 

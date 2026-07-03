@@ -12,6 +12,13 @@ const { t } = useI18n()
 const notificationsStore = useNotificationsStore()
 const auth = useAuthStore()
 
+withDefaults(defineProps<{
+  /** Hide the column header (mobile deck provides its own tab strip). */
+  hideHeader?: boolean
+}>(), {
+  hideHeader: false,
+})
+
 const notifications = computed(() => notificationsStore.items)
 const loading = computed(() => notificationsStore.loading)
 const loadingMore = computed(() => notificationsStore.loadingMore)
@@ -68,7 +75,7 @@ watch(
   <div class="h-full min-h-0 overflow-y-auto overscroll-contain">
     <!-- Notifications list view -->
     <template v-if="activeView === 'notifications'">
-      <header class="sb-glass sticky top-0 z-10 flex items-center justify-between border-b px-4 py-3">
+      <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 flex items-center justify-between border-b px-4 py-3">
         <h2 class="sb-heading text-lg">{{ t('nav.notifications') }}</h2>
         <button
           v-if="notificationsStore.unreadCount > 0"
@@ -78,6 +85,19 @@ watch(
           {{ t('notification.markAllRead') }}
         </button>
       </header>
+
+      <!-- Headerless (mobile deck): keep mark-all-read reachable in a slim bar -->
+      <div
+        v-else-if="notificationsStore.unreadCount > 0"
+        class="sb-glass sticky top-0 z-10 flex justify-end border-b px-3 py-1.5"
+      >
+        <button
+          @click="markAllRead"
+          class="sb-btn sb-btn-ghost sb-btn-sm text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+        >
+          {{ t('notification.markAllRead') }}
+        </button>
+      </div>
 
       <div v-if="error" class="mx-4 my-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center text-sm text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
         {{ error }}
