@@ -16,6 +16,9 @@ withDefaults(defineProps<{
   fluid: false,
 })
 
+// Alerts arrive over the user:notification websocket (see notifications store)
+const live = computed(() => !!notificationsStore.streamingClient)
+
 const notifications = computed(() => notificationsStore.items)
 const loading = computed(() => notificationsStore.loading)
 const loadingMore = computed(() => notificationsStore.loadingMore)
@@ -48,7 +51,11 @@ async function handleMarkRead(id: string) {
 watch(
   () => auth.token,
   (token) => {
-    if (token) void loadNotifications()
+    if (token) {
+      void loadNotifications()
+      // Ensure the alerts websocket is up (usually connected at app boot)
+      notificationsStore.connectStream(token)
+    }
   },
   { immediate: true },
 )
@@ -64,10 +71,14 @@ watch(
     <div class="dk-card flex flex-none items-center gap-2.5 rounded-[14px] px-3.5 py-2.5">
       <span class="text-base" aria-hidden="true">🔔</span>
       <span class="dk-mono dk-text text-[13.5px] font-semibold">{{ t('deck.col_notifications') }}</span>
+      <span class="dk-chip">{{ t('deck.scope_alerts') }}</span>
       <span v-if="notificationsStore.unreadCount > 0" class="dk-chip" style="color: var(--dk-acc); border-color: var(--dk-acc)">
         {{ notificationsStore.unreadCount > 99 ? '99+' : notificationsStore.unreadCount }}
       </span>
       <div class="flex-1" />
+      <span v-if="live" class="dk-live">
+        <span class="dk-dot !h-1.5 !w-1.5" aria-hidden="true" />{{ t('deck.live') }}
+      </span>
       <button
         v-if="notificationsStore.unreadCount > 0"
         type="button"

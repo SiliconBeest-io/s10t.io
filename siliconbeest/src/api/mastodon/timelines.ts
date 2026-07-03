@@ -11,6 +11,16 @@ export function getHomeTimeline(opts: PaginationOpts & { token: string }) {
   return apiFetch<Status[]>(`/v1/timelines/home${qs}`, { token: opts.token });
 }
 
+export function getSocialTimeline(opts: PaginationOpts & { token: string }) {
+  const qs = buildQueryString({
+    max_id: opts.max_id,
+    since_id: opts.since_id,
+    min_id: opts.min_id,
+    limit: opts.limit,
+  });
+  return apiFetch<Status[]>(`/v1/timelines/social${qs}`, { token: opts.token });
+}
+
 export function getPublicTimeline(
   opts?: PaginationOpts & { local?: boolean; remote?: boolean; only_media?: boolean },
 ) {

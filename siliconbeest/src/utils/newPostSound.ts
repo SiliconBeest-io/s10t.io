@@ -55,3 +55,23 @@ export function _resetNewPostSound() {
   recentlyPlayed.clear();
   audio = null;
 }
+
+// Extracted (lossless) from public/compose.mov, same reason as NEW_POST_SOUND_URL
+export const COMPOSE_SOUND_URL = '/compose.mp3';
+
+let composeAudio: HTMLAudioElement | null = null;
+
+/** Play the compose chime after the user publishes a post. */
+export function playComposeSound() {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
+  try {
+    if (!composeAudio) {
+      composeAudio = new Audio(COMPOSE_SOUND_URL);
+      composeAudio.preload = 'auto';
+    }
+    composeAudio.currentTime = 0;
+    void composeAudio.play().catch(() => {});
+  } catch {
+    // Audio unavailable — stay silent
+  }
+}

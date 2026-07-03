@@ -33,6 +33,7 @@ function onDeckWheel(event: WheelEvent) {
 
 const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
   home: 'deck.col_home',
+  social: 'deck.col_social',
   local: 'deck.col_local',
   federated: 'deck.col_federated',
   notifications: 'deck.col_notifications',

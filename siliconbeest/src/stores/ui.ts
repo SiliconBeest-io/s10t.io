@@ -5,6 +5,7 @@ import { getPreferences, updatePreferences } from '@/api/mastodon/preferences';
 export type Theme = 'light' | 'dark' | 'system';
 export type ColumnType =
   | 'home'
+  | 'social'
   | 'local'
   | 'federated'
   | 'notifications'

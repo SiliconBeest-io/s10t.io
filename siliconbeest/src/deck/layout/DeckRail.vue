@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useInstanceStore } from '@/stores/instance'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useDeckColumns } from '../composables/useDeckColumns'
 import type { ColumnType } from '@/stores/ui'
@@ -12,11 +13,15 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const instanceStore = useInstanceStore()
 const notifStore = useNotificationsStore()
+
+const instanceIcon = computed(() => instanceStore.instance?.thumbnail?.url || '/thumbnail.png')
 const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns()
 
 const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
   home: { emoji: '🏠', labelKey: 'nav.home' },
+  social: { emoji: '🫂', labelKey: 'nav.social_timeline' },
   local: { emoji: '🦬', labelKey: 'nav.local_timeline' },
   federated: { emoji: '📡', labelKey: 'nav.federated_timeline' },
   notifications: { emoji: '🔔', labelKey: 'nav.notifications' },
@@ -25,8 +30,9 @@ const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
 }
 
 // Single-timeline navigation entries (after the Deck entry)
-const timelineEntries: { type: 'home' | 'local' | 'federated'; emoji: string; labelKey: string }[] = [
+const timelineEntries: { type: 'home' | 'social' | 'local' | 'federated'; emoji: string; labelKey: string }[] = [
   { type: 'home', emoji: '🏠', labelKey: 'nav.home' },
+  { type: 'social', emoji: '🫂', labelKey: 'nav.social_timeline' },
   { type: 'local', emoji: '🦬', labelKey: 'nav.local_timeline' },
   { type: 'federated', emoji: '📡', labelKey: 'nav.federated_timeline' },
 ]
@@ -163,7 +169,14 @@ function isRouteActive(path: string): boolean {
               aria-hidden="true"
             >≡</span>
             <span v-else class="w-[13px]" aria-hidden="true" />
-            <span aria-hidden="true">{{ COLUMN_META[type].emoji }}</span>
+            <img
+              v-if="type === 'local'"
+              :src="instanceIcon"
+              alt=""
+              class="h-4 w-4 rounded object-contain"
+              aria-hidden="true"
+            />
+            <span v-else aria-hidden="true">{{ COLUMN_META[type].emoji }}</span>
             <span class="dk-text flex-1 truncate text-[13px]">{{ t(COLUMN_META[type].labelKey) }}</span>
             <template v-if="isEnabled(type)">
               <button
@@ -205,7 +218,14 @@ function isRouteActive(path: string): boolean {
       :title="t(entry.labelKey)"
       :aria-label="t(entry.labelKey)"
     >
-      <span class="text-[19px]" aria-hidden="true">{{ entry.emoji }}</span>
+      <img
+        v-if="entry.type === 'local'"
+        :src="instanceIcon"
+        alt=""
+        class="h-[19px] w-[19px] rounded-[5px] object-contain"
+        aria-hidden="true"
+      />
+      <span v-else class="text-[19px]" aria-hidden="true">{{ entry.emoji }}</span>
       <span class="dk-rail-label">{{ t(entry.labelKey) }}</span>
     </router-link>
 

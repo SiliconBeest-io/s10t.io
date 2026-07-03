@@ -4,13 +4,13 @@ import { useRoute } from 'vue-router'
 import DeckPageShell from '../layout/DeckPageShell.vue'
 import DeckColumn from '../components/DeckColumn.vue'
 
-type DeckTimelineColumnType = 'home' | 'local' | 'federated'
+type DeckTimelineColumnType = 'home' | 'social' | 'local' | 'federated'
 
 const route = useRoute()
 
 const type = computed<DeckTimelineColumnType>(() => {
   const param = String(route.params.type ?? 'home')
-  return param === 'local' || param === 'federated' ? param : 'home'
+  return param === 'social' || param === 'local' || param === 'federated' ? param : 'home'
 })
 </script>
 

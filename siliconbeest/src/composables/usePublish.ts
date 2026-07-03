@@ -3,6 +3,7 @@ import { useComposeStore } from '@/stores/compose';
 import { useStatusesStore } from '@/stores/statuses';
 import { useTimelinesStore } from '@/stores/timelines';
 import { useUiStore } from '@/stores/ui';
+import { playComposeSound } from '@/utils/newPostSound';
 import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
 
 export interface PublishPayload {
@@ -78,11 +79,15 @@ export function usePublish() {
     if (status) {
       statusesStore.cacheStatus(status);
       timelinesStore.prependStatus('home', status.id);
+      if (timelinesStore.timelines.has('social')) {
+        timelinesStore.prependStatus('social', status.id);
+      }
       if (status.visibility === 'public') {
         timelinesStore.prependStatus('public', status.id);
         timelinesStore.prependStatus('local', status.id);
       }
       ui.closeComposeModal();
+      playComposeSound();
     }
     return status;
   }

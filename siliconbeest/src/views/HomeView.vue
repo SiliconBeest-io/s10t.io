@@ -50,6 +50,7 @@ function getColumnTitle(type: ColumnType): string {
     local: t('nav.local_timeline'),
     federated: t('nav.federated_timeline'),
     notifications: t('nav.notifications'),
+    social: t('nav.social_timeline'),
     search: t('nav.search'),
     follow_requests: t('nav.follow_requests'),
   }

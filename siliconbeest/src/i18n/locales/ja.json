@@ -172,7 +172,8 @@
     "local_timeline": "ローカルタイムライン",
     "federated_timeline": "連合タイムライン",
     "main_navigation": "メインナビゲーション",
-    "mobile_navigation": "モバイルナビゲーション"
+    "mobile_navigation": "モバイルナビゲーション",
+    "social_timeline": "ソーシャルタイムライン"
   },
   "explore": {
     "trending": "トレンド",
@@ -978,9 +979,9 @@
     "password_mismatch": "パスワードが一致しません。"
   },
   "deck": {
-    "col_home": "~/home",
-    "col_local": "~/local",
-    "col_federated": "~/federated",
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
     "scope_following": "フォロー中",
     "scope_federated": "既知のネットワーク",
     "live": "LIVE",
@@ -993,7 +994,7 @@
     "deck": "デッキ",
     "columns_short": "カラム",
     "columns_title": "デッキのカラム",
-    "col_notifications": "~/alerts",
+    "col_notifications": "alerts",
     "move_up": "上へ移動",
     "move_down": "下へ移動",
     "drag_to_reorder": "ドラッグで並べ替え",
@@ -1002,8 +1003,13 @@
     "unboost": "ブースト解除",
     "unfavourite": "お気に入り解除",
     "remote_reaction_hint": "他のサーバーの絵文字",
-    "col_search": "~/search",
-    "col_requests": "~/requests",
-    "unbookmark": "ブックマーク解除"
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "ブックマーク解除",
+    "col_social": "social",
+    "scope_social": "ホーム + ローカル",
+    "scope_alerts": "アクティビティ",
+    "scope_requests": "フォローリクエスト",
+    "scope_search": "すべて"
   }
 }

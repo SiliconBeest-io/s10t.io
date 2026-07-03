@@ -36,6 +36,9 @@ export const useComposeStore = defineStore('compose', () => {
   const mediaAttachments = ref<MediaAttachment[]>([]);
   const uploading = ref(false);
   const publishing = ref(false);
+  // Incremented on each successful publish — composers watch this to clear
+  // their local drafts only once the post has really gone out
+  const publishedTick = ref(0);
   // Default language from browser/i18n locale
   const language = ref(
     typeof navigator === 'undefined' ? 'en' : (navigator.language?.split('-')[0] || 'en'),
@@ -194,6 +197,9 @@ export const useComposeStore = defineStore('compose', () => {
       if (!editingId.value) {
         const timelinesStore = useTimelinesStore();
         timelinesStore.prependStatus('home', data.id);
+        if (timelinesStore.timelines.has('social')) {
+          timelinesStore.prependStatus('social', data.id);
+        }
         if (data.visibility === 'public') {
           timelinesStore.prependStatus('public', data.id);
           timelinesStore.prependStatus('local', data.id);
@@ -201,6 +207,7 @@ export const useComposeStore = defineStore('compose', () => {
       }
 
       reset();
+      publishedTick.value++;
       return data;
     } finally {
       publishing.value = false;
@@ -226,6 +233,7 @@ export const useComposeStore = defineStore('compose', () => {
     mediaAttachments,
     uploading,
     publishing,
+    publishedTick,
     language,
     pollOptions,
     pollExpiresIn,

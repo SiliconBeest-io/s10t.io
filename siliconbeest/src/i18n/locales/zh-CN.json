@@ -172,7 +172,8 @@
     "local_timeline": "本站时间线",
     "federated_timeline": "跨站时间线",
     "main_navigation": "主导航",
-    "mobile_navigation": "移动端导航"
+    "mobile_navigation": "移动端导航",
+    "social_timeline": "社交时间线"
   },
   "explore": {
     "trending": "热门",
@@ -978,9 +979,9 @@
     "password_mismatch": "两次输入的密码不一致。"
   },
   "deck": {
-    "col_home": "~/home",
-    "col_local": "~/local",
-    "col_federated": "~/federated",
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
     "scope_following": "关注中",
     "scope_federated": "已知网络",
     "live": "LIVE",
@@ -993,7 +994,7 @@
     "deck": "面板",
     "columns_short": "栏目",
     "columns_title": "面板栏目",
-    "col_notifications": "~/alerts",
+    "col_notifications": "alerts",
     "move_up": "上移",
     "move_down": "下移",
     "drag_to_reorder": "拖动以重新排序",
@@ -1002,8 +1003,13 @@
     "unboost": "取消转发",
     "unfavourite": "取消收藏",
     "remote_reaction_hint": "来自其他服务器的表情",
-    "col_search": "~/search",
-    "col_requests": "~/requests",
-    "unbookmark": "移除书签"
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "移除书签",
+    "col_social": "social",
+    "scope_social": "主页 + 本站",
+    "scope_alerts": "动态",
+    "scope_requests": "关注请求",
+    "scope_search": "全部"
   }
 }

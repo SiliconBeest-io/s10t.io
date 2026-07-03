@@ -157,4 +157,35 @@ describe('Timelines Store', () => {
       expect(store.streamingClients.has('public')).toBe(false);
     });
   });
+
+  describe('social timeline live fan-in', () => {
+    it('queues home-stream updates into social when the social timeline is open', async () => {
+      const { StreamingClient } = await import('@/api/streaming');
+      const store = useTimelinesStore();
+      store.getTimeline('social'); // the social column is open
+
+      store.connectStream('token', 'user', 'home');
+      const callbacks = vi.mocked(StreamingClient).mock.calls.at(-1)![2] as {
+        onUpdate: (s: unknown) => void;
+      };
+      callbacks.onUpdate({ id: 'live-1', account: { id: 'acct-1' } });
+
+      expect(store.getTimeline('home').newStatusIds).toContain('live-1');
+      expect(store.getTimeline('social').newStatusIds).toContain('live-1');
+    });
+
+    it('does not create social queues when the social timeline is not open', async () => {
+      const { StreamingClient } = await import('@/api/streaming');
+      const store = useTimelinesStore();
+
+      store.connectStream('token', 'public:local', 'local');
+      const callbacks = vi.mocked(StreamingClient).mock.calls.at(-1)![2] as {
+        onUpdate: (s: unknown) => void;
+      };
+      callbacks.onUpdate({ id: 'live-2', account: { id: 'acct-2' } });
+
+      expect(store.getTimeline('local').newStatusIds).toContain('live-2');
+      expect(store.timelines.has('social')).toBe(false);
+    });
+  });
 });

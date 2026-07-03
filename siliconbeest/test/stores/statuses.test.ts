@@ -186,7 +186,8 @@ describe('Statuses Store', () => {
       store.cacheStatus(wrapper);
 
       const home = timelines.getTimeline('home');
-      home.statusIds = ['wrap', 'other'];
+      // The original itself is also on the timeline (e.g. local feed view)
+      home.statusIds = ['wrap', 'orig', 'other'];
 
       // The unreblog API returns the ORIGINAL status, not the wrapper
       vi.mocked(unreblogStatus).mockResolvedValue({
@@ -195,7 +196,8 @@ describe('Statuses Store', () => {
 
       await store.toggleReblog(original);
 
-      expect(home.statusIds).toEqual(['other']);
+      // Only the wrapper goes — the original must survive
+      expect(home.statusIds).toEqual(['orig', 'other']);
     });
   });
 });

@@ -172,7 +172,8 @@
     "local_timeline": "本站時間軸",
     "federated_timeline": "聯邦時間軸",
     "main_navigation": "主導覽",
-    "mobile_navigation": "行動版導覽"
+    "mobile_navigation": "行動版導覽",
+    "social_timeline": "社交時間軸"
   },
   "explore": {
     "trending": "熱門",
@@ -978,9 +979,9 @@
     "password_mismatch": "兩次輸入的密碼不一致。"
   },
   "deck": {
-    "col_home": "~/home",
-    "col_local": "~/local",
-    "col_federated": "~/federated",
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
     "scope_following": "追蹤中",
     "scope_federated": "已知網路",
     "live": "LIVE",
@@ -993,7 +994,7 @@
     "deck": "面板",
     "columns_short": "欄位",
     "columns_title": "面板欄位",
-    "col_notifications": "~/alerts",
+    "col_notifications": "alerts",
     "move_up": "上移",
     "move_down": "下移",
     "drag_to_reorder": "拖曳以重新排序",
@@ -1002,8 +1003,13 @@
     "unboost": "取消轉發",
     "unfavourite": "取消最愛",
     "remote_reaction_hint": "來自其他伺服器的表情符號",
-    "col_search": "~/search",
-    "col_requests": "~/requests",
-    "unbookmark": "移除書籤"
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "移除書籤",
+    "col_social": "social",
+    "scope_social": "首頁 + 本站",
+    "scope_alerts": "動態",
+    "scope_requests": "追蹤請求",
+    "scope_search": "全部"
   }
 }

@@ -108,15 +108,18 @@ export const useStatusesStore = defineStore('statuses', () => {
           timeline.statusIds.unshift(data.id);
         }
       } else if (wasReblogged && data.id) {
-        // Remove the old reblog wrapper from timelines. The unreblog API
-        // returns the ORIGINAL status, but timelines hold the wrapper (the
-        // boost entry authored by us) — removing data.id alone leaves the
-        // boost visible until a refresh.
+        // Remove ONLY our boost wrapper from timelines — never the original
+        // (the original may legitimately appear on local/federated feeds).
+        // The unreblog API returns the ORIGINAL status, so find the wrapper
+        // in the cache by its reblog target.
         const timelinesStore = useTimelinesStore();
-        timelinesStore.removeStatus(data.id);
+        if (data.reblog?.id) {
+          // Some responses return the wrapper itself — safe to remove
+          timelinesStore.removeStatus(data.id);
+        }
         const myAccountId = auth.currentUser?.id;
         for (const [id, cached] of cache.value) {
-          if (cached.reblog?.id === targetId && cached.account?.id === myAccountId) {
+          if (id !== targetId && cached.reblog?.id === targetId && cached.account?.id === myAccountId) {
             timelinesStore.removeStatus(id);
           }
         }

@@ -10,7 +10,7 @@ import { useInstanceStore } from '@/stores/instance'
 import InfiniteScroll from '@/components/common/InfiniteScroll.vue'
 import DeckStatusCard from './DeckStatusCard.vue'
 
-type DeckTimelineColumnType = 'home' | 'local' | 'federated'
+type DeckTimelineColumnType = 'home' | 'social' | 'local' | 'federated'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -26,16 +26,18 @@ const props = withDefaults(defineProps<{
   fluid: false,
 })
 
-const COLUMN_META: Record<DeckTimelineColumnType, { emoji: string; timelineType: TimelineType; streamKey: string }> = {
-  home: { emoji: '🏠', timelineType: 'home', streamKey: 'user' },
-  local: { emoji: '🦬', timelineType: 'local', streamKey: 'public:local' },
-  federated: { emoji: '📡', timelineType: 'public', streamKey: 'public' },
+const COLUMN_META: Record<DeckTimelineColumnType, { emoji: string; timelineType: TimelineType; streamKeys: string[] }> = {
+  home: { emoji: '🏠', timelineType: 'home', streamKeys: ['user'] },
+  social: { emoji: '🫂', timelineType: 'social', streamKeys: ['user', 'public:local'] },
+  local: { emoji: '🦬', timelineType: 'local', streamKeys: ['public:local'] },
+  federated: { emoji: '📡', timelineType: 'public', streamKeys: ['public'] },
 }
 
 const meta = computed(() => COLUMN_META[props.type])
 const title = computed(() => t(`deck.col_${props.type}`))
 const scope = computed(() => {
   if (props.type === 'home') return t('deck.scope_following')
+  if (props.type === 'social') return t('deck.scope_social')
   if (props.type === 'local') return instanceStore.instance?.domain || ''
   return t('deck.scope_federated')
 })
@@ -49,17 +51,19 @@ const statuses = computed(() => {
 })
 
 const hasNewPosts = computed(() => timeline.value.newStatusIds.length > 0)
-const livePaused = computed(() => timelinesStore.isStreamPaused(meta.value.streamKey))
-const live = computed(() => !livePaused.value && timelinesStore.streamingClients.has(meta.value.streamKey))
+const livePaused = computed(() => meta.value.streamKeys.some((k) => timelinesStore.isStreamPaused(k)))
+const live = computed(
+  () => !livePaused.value && meta.value.streamKeys.every((k) => timelinesStore.streamingClients.has(k)),
+)
 
 async function toggleLive() {
   if (livePaused.value) {
-    // Resume: refetch first so posts missed while paused aren't skipped
-    await timelinesStore.resumeStream(meta.value.streamKey, meta.value.timelineType, {
-      token: auth.token ?? undefined,
-    })
+    // Resume: refetch first so posts missed while paused aren't skipped,
+    // then fetchTimeline's auto-connect reopens every stream this feed uses
+    meta.value.streamKeys.forEach((k) => timelinesStore.unpauseStream(k))
+    await timelinesStore.fetchTimeline(meta.value.timelineType, { token: auth.token ?? undefined })
   } else {
-    timelinesStore.pauseStream(meta.value.streamKey)
+    meta.value.streamKeys.forEach((k) => timelinesStore.pauseStream(k))
   }
 }
 
@@ -108,7 +112,14 @@ function navigate(status: Status) {
   >
     <!-- Column header -->
     <div class="dk-card flex flex-none items-center gap-2.5 rounded-[14px] px-3.5 py-2.5">
-      <span class="text-base" aria-hidden="true">{{ meta.emoji }}</span>
+      <img
+        v-if="type === 'local'"
+        :src="instanceStore.instance?.thumbnail?.url || '/thumbnail.png'"
+        alt=""
+        class="h-[18px] w-[18px] flex-none rounded-[5px] object-contain"
+        aria-hidden="true"
+      />
+      <span v-else class="text-base" aria-hidden="true">{{ meta.emoji }}</span>
       <span class="dk-mono dk-text text-[13.5px] font-semibold">{{ title }}</span>
       <span v-if="scope" class="dk-chip">{{ scope }}</span>
       <div class="flex-1" />

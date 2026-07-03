@@ -13,10 +13,10 @@ describe('useDeckColumns', () => {
     expect(columns.value).toEqual(['home', 'local', 'federated']);
     // Disabled types follow the enabled region
     expect(configRows.value).toEqual([
-      'home', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+      'home', 'local', 'federated', 'social', 'notifications', 'search', 'follow_requests',
     ]);
     expect(DECK_COLUMN_TYPES).toEqual([
-      'home', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+      'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
     ]);
   });
 
@@ -67,7 +67,7 @@ describe('useDeckColumns', () => {
     const { columns, configRows } = useDeckColumns();
     expect(columns.value).toEqual(['home', 'notifications']);
     expect(configRows.value).toEqual([
-      'home', 'notifications', 'local', 'federated', 'search', 'follow_requests',
+      'home', 'notifications', 'social', 'local', 'federated', 'search', 'follow_requests',
     ]);
   });
 });

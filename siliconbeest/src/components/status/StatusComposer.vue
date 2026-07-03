@@ -511,12 +511,16 @@ function submit() {
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
   })
+  // Draft is NOT cleared here — publishing may still fail. The compose
+  // store bumps publishedTick only on success (its reset() clears media
+  // and quote state), and the watcher below clears the local fields then.
+}
+
+watch(() => compose.publishedTick, () => {
   content.value = ''
   spoilerText.value = ''
   showCw.value = false
-  compose.mediaAttachments.splice(0)
-  compose.clearQuote()
-}
+})
 </script>
 
 <template>

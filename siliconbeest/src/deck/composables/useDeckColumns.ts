@@ -12,6 +12,7 @@ export type DeckColumnType = ColumnType;
 /** Every column type the deck can host, in default order. */
 export const DECK_COLUMN_TYPES: ColumnType[] = [
   'home',
+  'social',
   'local',
   'federated',
   'notifications',

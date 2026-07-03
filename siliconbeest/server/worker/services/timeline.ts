@@ -126,6 +126,61 @@ export async function getHomeTimeline(
 }
 
 // ----------------------------------------------------------------
+// Social timeline (home ∪ local)
+// ----------------------------------------------------------------
+
+/**
+ * Fetch the merged "social" timeline: everything in the viewer's home
+ * timeline plus every local public status. A single cursor over s.id keeps
+ * pagination consistent across both sources (unlike home's rowid cursor).
+ */
+export async function getSocialTimeline(
+  accountId: string,
+  opts: TimelinePaginationOpts,
+): Promise<Record<string, unknown>[]> {
+  const pag = parsePaginationParams({
+    max_id: opts.maxId,
+    since_id: opts.sinceId,
+    min_id: opts.minId,
+    limit: opts.limit != null ? String(opts.limit) : undefined,
+  });
+
+  const { whereClause, limitValue, params } = buildPaginationQuery(pag, 's.id');
+  const orderClause = pag.minId ? 's.id ASC' : 's.id DESC';
+
+  const conditions: string[] = [
+    `(
+      EXISTS (
+        SELECT 1 FROM home_timeline_entries hte
+        WHERE hte.account_id = ? AND hte.status_id = s.id
+      )
+      OR (s.local = 1 AND s.visibility = 'public')
+    )`,
+    's.deleted_at IS NULL',
+  ];
+  const binds: (string | number)[] = [accountId];
+
+  if (whereClause) {
+    conditions.push(whereClause);
+    binds.push(...params);
+  }
+  addBlockMuteFilters(conditions, binds, accountId);
+
+  const sql = `
+    SELECT s.*, ${ACCOUNT_COLUMNS}
+    FROM statuses s
+    JOIN accounts a ON a.id = s.account_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ${orderClause}
+    LIMIT ?
+  `;
+  binds.push(limitValue);
+
+  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  return (results ?? []) as Record<string, unknown>[];
+}
+
+// ----------------------------------------------------------------
 // Public timeline
 // ----------------------------------------------------------------
 

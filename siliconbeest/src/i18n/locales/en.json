@@ -172,7 +172,8 @@
     "local_timeline": "Local Timeline",
     "federated_timeline": "Federated Timeline",
     "main_navigation": "Main navigation",
-    "mobile_navigation": "Mobile navigation"
+    "mobile_navigation": "Mobile navigation",
+    "social_timeline": "Social Timeline"
   },
   "explore": {
     "trending": "Trending",
@@ -978,9 +979,9 @@
     "password_mismatch": "Passwords do not match."
   },
   "deck": {
-    "col_home": "~/home",
-    "col_local": "~/local",
-    "col_federated": "~/federated",
+    "col_home": "home",
+    "col_local": "local",
+    "col_federated": "federated",
     "scope_following": "following",
     "scope_federated": "known network",
     "live": "LIVE",
@@ -993,7 +994,7 @@
     "deck": "deck",
     "columns_short": "cols",
     "columns_title": "Deck columns",
-    "col_notifications": "~/alerts",
+    "col_notifications": "alerts",
     "move_up": "Move up",
     "move_down": "Move down",
     "drag_to_reorder": "Drag to reorder",
@@ -1002,8 +1003,13 @@
     "unboost": "Undo boost",
     "unfavourite": "Remove favourite",
     "remote_reaction_hint": "Emoji from another server",
-    "col_search": "~/search",
-    "col_requests": "~/requests",
-    "unbookmark": "Remove bookmark"
+    "col_search": "search",
+    "col_requests": "follow requests",
+    "unbookmark": "Remove bookmark",
+    "col_social": "social",
+    "scope_social": "home + local",
+    "scope_alerts": "activity",
+    "scope_requests": "follow requests",
+    "scope_search": "everywhere"
   }
 }

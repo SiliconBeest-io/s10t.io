@@ -45,6 +45,7 @@ function columnLabel(type: ColumnType): string {
     local: t('settings.column_local'),
     federated: t('settings.column_federated'),
     notifications: t('settings.column_notifications'),
+    social: t('nav.social_timeline'),
     search: t('nav.search'),
     follow_requests: t('nav.follow_requests'),
   }

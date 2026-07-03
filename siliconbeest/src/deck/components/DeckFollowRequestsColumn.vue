@@ -54,7 +54,11 @@ async function handleAction(accountId: string, action: 'authorize' | 'reject') {
 watch(
   () => auth.token,
   (token) => {
-    if (token) void loadRequests()
+    if (token) {
+      void loadRequests()
+      // Follow requests arrive as notifications — ensure that socket is up
+      notifStore.connectStream(token)
+    }
   },
   { immediate: true },
 )
@@ -78,6 +82,7 @@ watch(
     <div class="dk-card flex flex-none items-center gap-2.5 rounded-[14px] px-3.5 py-2.5">
       <span class="text-base" aria-hidden="true">🤝</span>
       <span class="dk-mono dk-text text-[13.5px] font-semibold">{{ t('deck.col_requests') }}</span>
+      <span class="dk-chip">{{ t('deck.scope_requests') }}</span>
       <span v-if="requests.length" class="dk-chip" style="color: var(--dk-acc); border-color: var(--dk-acc)">
         {{ requests.length }}
       </span>

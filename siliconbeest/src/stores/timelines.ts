@@ -4,6 +4,7 @@ import type { Status } from '@/types/mastodon';
 import { parseLinkHeader } from '@/api/client';
 import {
   getHomeTimeline,
+  getSocialTimeline,
   getPublicTimeline,
   getTagTimeline,
 } from '@/api/mastodon/timelines';
@@ -12,7 +13,7 @@ import { playNewPostSound } from '@/utils/newPostSound';
 import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
 
-export type TimelineType = 'home' | 'public' | 'local' | 'tag';
+export type TimelineType = 'home' | 'social' | 'public' | 'local' | 'tag';
 
 interface TimelineState {
   statusIds: string[];
@@ -84,6 +85,9 @@ export const useTimelinesStore = defineStore('timelines', () => {
         case 'home':
           response = await getHomeTimeline({ token: opts?.token! });
           break;
+        case 'social':
+          response = await getSocialTimeline({ token: opts?.token! });
+          break;
         case 'public':
           response = await getPublicTimeline({ token: opts?.token });
           break;
@@ -106,14 +110,21 @@ export const useTimelinesStore = defineStore('timelines', () => {
 
       // Auto-connect streaming for each timeline type
       if (opts?.token) {
-        const streamMap: Record<string, string> = {
-          home: 'user',
-          public: 'public',
-          local: 'public:local',
-        };
-        const streamName = streamMap[type];
-        if (streamName) {
-          connectStream(opts.token, streamName, type);
+        if (type === 'social') {
+          // Social merges home + local: live updates arrive on both streams
+          // (onUpdate fans them into the social timeline as well)
+          connectStream(opts.token, 'user', 'home');
+          connectStream(opts.token, 'public:local', 'local');
+        } else {
+          const streamMap: Record<string, string> = {
+            home: 'user',
+            public: 'public',
+            local: 'public:local',
+          };
+          const streamName = streamMap[type];
+          if (streamName) {
+            connectStream(opts.token, streamName, type);
+          }
         }
       }
     } catch (e) {
@@ -140,6 +151,9 @@ export const useTimelinesStore = defineStore('timelines', () => {
       switch (type) {
         case 'home':
           response = await getHomeTimeline({ ...paginationOpts, token: opts?.token! });
+          break;
+        case 'social':
+          response = await getSocialTimeline({ ...paginationOpts, token: opts?.token! });
           break;
         case 'public':
           response = await getPublicTimeline(paginationOpts);
@@ -198,6 +212,11 @@ export const useTimelinesStore = defineStore('timelines', () => {
     disconnectStream(stream);
   }
 
+  /** Clear a stream's paused flag without fetching (multi-stream resumes). */
+  function unpauseStream(stream: string) {
+    pausedStreams.value = new Set([...pausedStreams.value].filter((s) => s !== stream));
+  }
+
   /**
    * LIVE toggle on: refetch the timeline first so posts missed while paused
    * aren't silently skipped, then reconnect (fetchTimeline auto-connects
@@ -235,6 +254,11 @@ export const useTimelinesStore = defineStore('timelines', () => {
         }
         // Add to new status IDs queue for the correct timeline
         prependStatus(timelineType, status.id);
+        // The social timeline merges home + local — fan their live updates
+        // in as well (prependStatus dedupes across streams)
+        if ((timelineType === 'home' || timelineType === 'local') && timelines.value.has('social')) {
+          prependStatus('social', status.id);
+        }
         // Chime once per post, even when several streams deliver it
         playNewPostSound(status.id);
       },
@@ -295,6 +319,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
     disconnectStream,
     isStreamPaused,
     pauseStream,
+    unpauseStream,
     resumeStream,
   };
 });

@@ -60,6 +60,7 @@ function navigate(status: Status) {
     <div class="dk-card flex flex-none items-center gap-2.5 rounded-[14px] px-3.5 py-2.5">
       <span class="text-base" aria-hidden="true">🔭</span>
       <span class="dk-mono dk-text text-[13.5px] font-semibold">{{ t('deck.col_search') }}</span>
+      <span class="dk-chip">{{ t('deck.scope_search') }}</span>
     </div>
 
     <!-- Search input -->
