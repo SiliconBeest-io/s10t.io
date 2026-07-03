@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { onBeforeRouteLeave, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useUiStore } from '@/stores/ui'
+import { useUiStore, ALL_COLUMNS, type ColumnType } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 
 const { t } = useI18n()
@@ -11,9 +11,45 @@ const auth = useAuthStore()
 const ui = useUiStore()
 const notifStore = useNotificationsStore()
 const router = useRouter()
+const route = useRoute()
 
 const menuOpen = ref(false)
 const navigating = ref(false)
+
+const isOnDeck = computed(() => route.path === '/home')
+
+// Heroicons 24 outline paths for the deck column picker
+const columnIcons: Record<ColumnType, string> = {
+  home: 'M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
+  local: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
+  federated: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m-18.432 0A8.959 8.959 0 013 12c0-.778.099-1.533.284-2.253',
+  notifications: 'M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0',
+}
+
+function getColumnTitle(type: ColumnType): string {
+  const map: Record<ColumnType, string> = {
+    home: t('nav.home'),
+    local: t('nav.local_timeline'),
+    federated: t('nav.federated_timeline'),
+    notifications: t('nav.notifications'),
+  }
+  return map[type]
+}
+
+// Tapping the deck (home) tab while already on the deck opens the column picker
+function handleHomeTab() {
+  menuOpen.value = false
+  if (isOnDeck.value) {
+    ui.toggleDeckMenu()
+  }
+}
+
+async function selectDeckColumn(type: ColumnType) {
+  ui.setMobileColumn(type)
+  if (!isOnDeck.value) {
+    await navigateTo('/home')
+  }
+}
 
 const profilePath = computed(() => {
   const acct = auth.currentUser?.acct
@@ -30,6 +66,7 @@ const tabs = computed(() => [
 ])
 
 function handleTab(tab: { path: string | null; action: (() => void) | null }) {
+  ui.closeDeckMenu()
   if (tab.action) {
     tab.action()
   }
@@ -37,6 +74,7 @@ function handleTab(tab: { path: string | null; action: (() => void) | null }) {
 
 async function navigateTo(path: string) {
   menuOpen.value = false
+  ui.closeDeckMenu()
   await nextTick()
 
   if (navigating.value || router.currentRoute.value.fullPath === path) return
@@ -58,10 +96,53 @@ async function signOut() {
 
 onBeforeRouteLeave(() => {
   menuOpen.value = false
+  ui.closeDeckMenu()
 })
 </script>
 
 <template>
+  <!-- Deck column picker (opens when the deck tab is tapped again) -->
+  <Teleport to="body">
+    <div
+      v-if="ui.deckMenuOpen"
+      class="fixed inset-0 bg-slate-950/40 backdrop-blur-sm z-[60] md:hidden"
+      @click="ui.closeDeckMenu()"
+    />
+    <div
+      v-if="ui.deckMenuOpen"
+      class="sb-card fixed inset-x-3 bottom-[calc(max(0.75rem,env(safe-area-inset-bottom))+4.5rem)] z-[61] max-h-[calc(100dvh-6.5rem)] overflow-y-auto overscroll-contain shadow-lift animate-rise-in md:hidden"
+      role="menu"
+      :aria-label="t('settings.columns')"
+    >
+      <div class="p-2 space-y-0.5">
+        <p class="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          {{ t('settings.columns') }}
+        </p>
+        <button
+          v-for="type in ALL_COLUMNS"
+          :key="type"
+          @click="selectDeckColumn(type)"
+          class="sb-menu-item touch-manipulation gap-3 py-3 text-left"
+          :class="ui.mobileColumn === type ? 'bg-brand-50 font-semibold text-brand-700 dark:bg-brand-950/50 dark:text-brand-300' : ''"
+          role="menuitemradio"
+          :aria-checked="ui.mobileColumn === type"
+        >
+          <svg class="h-5 w-5 shrink-0" :class="ui.mobileColumn === type ? 'text-brand-500 dark:text-brand-400' : 'text-slate-400 dark:text-slate-500'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="columnIcons[type]" />
+          </svg>
+          <span class="flex-1">{{ getColumnTitle(type) }}</span>
+          <span
+            v-if="type === 'notifications' && notifStore.unreadCount > 0"
+            class="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-linear-to-r from-brand-600 to-fuchsia-600 px-1 text-[10px] font-bold text-white dark:from-brand-500 dark:to-fuchsia-500"
+          >{{ notifStore.unreadCount > 99 ? '99+' : notifStore.unreadCount }}</span>
+          <svg v-if="ui.mobileColumn === type" class="h-5 w-5 shrink-0 text-brand-500 dark:text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </Teleport>
+
   <!-- Slide-up menu overlay -->
   <Teleport to="body">
     <div
@@ -71,7 +152,7 @@ onBeforeRouteLeave(() => {
     />
     <div
       v-if="menuOpen"
-      class="sb-card fixed inset-x-3 bottom-[5.25rem] z-[61] max-h-[calc(100dvh-6.5rem)] overflow-y-auto overscroll-contain shadow-lift animate-rise-in md:hidden"
+      class="sb-card fixed inset-x-3 bottom-[calc(max(0.75rem,env(safe-area-inset-bottom))+4.5rem)] z-[61] max-h-[calc(100dvh-6.5rem)] overflow-y-auto overscroll-contain shadow-lift animate-rise-in md:hidden"
     >
       <div class="p-2 space-y-0.5">
         <!-- User info -->
@@ -155,7 +236,7 @@ onBeforeRouteLeave(() => {
 
   <!-- Bottom tab bar — floating glass dock -->
   <nav
-    class="sb-glass fixed inset-x-3 bottom-3 z-50 rounded-2xl border shadow-lift md:hidden"
+    class="sb-glass fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-50 rounded-2xl border shadow-lift md:hidden"
     :aria-label="t('nav.mobile_navigation')"
   >
     <ul class="flex h-16 items-center justify-around px-1">
@@ -163,12 +244,22 @@ onBeforeRouteLeave(() => {
         <router-link
           v-if="tab.path"
           :to="tab.path"
-          class="relative flex h-14 w-14 flex-col items-center justify-center rounded-xl text-slate-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400"
+          class="relative flex h-14 w-14 touch-manipulation flex-col items-center justify-center rounded-xl text-slate-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400"
           active-class="text-brand-600 dark:text-brand-400"
           :aria-label="t(`nav.${tab.key}`)"
+          @click="tab.key === 'home' && handleHomeTab()"
         >
           <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" :d="tab.icon" />
+          </svg>
+          <!-- Hint that re-tapping the deck tab opens the column picker -->
+          <svg
+            v-if="tab.key === 'home' && isOnDeck"
+            class="absolute bottom-1 h-3 w-3"
+            :class="ui.deckMenuOpen ? 'rotate-180' : ''"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
           </svg>
           <span
             v-if="tab.key === 'notifications' && notifStore.unreadCount > 0"
@@ -178,7 +269,7 @@ onBeforeRouteLeave(() => {
         <button
           v-else
           @click="handleTab(tab)"
-          class="flex h-14 w-14 flex-col items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded-xl"
+          class="flex h-14 w-14 touch-manipulation flex-col items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 rounded-xl"
           :aria-label="t(`nav.${tab.key}`)"
         >
           <span class="flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-r from-brand-600 via-violet-600 to-fuchsia-600 text-white shadow-soft transition-all active:scale-95 dark:from-brand-500 dark:via-violet-500 dark:to-fuchsia-500" aria-hidden="true">
@@ -191,8 +282,8 @@ onBeforeRouteLeave(() => {
       <!-- More menu button -->
       <li>
         <button
-          @click="menuOpen = !menuOpen"
-          class="flex h-14 w-14 flex-col items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+          @click="ui.closeDeckMenu(); menuOpen = !menuOpen"
+          class="flex h-14 w-14 touch-manipulation flex-col items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           :class="menuOpen ? 'text-brand-600 dark:text-brand-400' : 'text-slate-500 dark:text-slate-400'"
           :aria-label="t('nav.more') || 'More'"
         >

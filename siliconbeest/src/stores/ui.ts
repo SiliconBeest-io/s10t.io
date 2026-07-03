@@ -6,7 +6,16 @@ export type Theme = 'light' | 'dark' | 'system';
 export type ColumnType = 'home' | 'local' | 'federated' | 'notifications';
 
 const THEME_KEY = 'siliconbeest_theme';
+const MOBILE_COLUMN_KEY = 'siliconbeest_mobile_column';
 const DEFAULT_COLUMNS: ColumnType[] = ['home', 'local', 'federated'];
+/** Every column type is always available on the mobile deck. */
+export const ALL_COLUMNS: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
+
+function loadMobileColumn(): ColumnType {
+  if (typeof localStorage === 'undefined') return 'home';
+  const stored = localStorage.getItem(MOBILE_COLUMN_KEY) as ColumnType | null;
+  return stored && ALL_COLUMNS.includes(stored) ? stored : 'home';
+}
 
 function persistTheme(theme: Theme) {
   if (typeof localStorage !== 'undefined') {
@@ -30,6 +39,9 @@ export const useUiStore = defineStore('ui', () => {
   const mediaViewerIndex = ref(0);
   const mediaViewerItems = ref<string[]>([]);
   const columns = ref<ColumnType[]>([...DEFAULT_COLUMNS]);
+  // Mobile deck: which column is shown, and whether the column picker sheet is open
+  const mobileColumn = ref<ColumnType>(loadMobileColumn());
+  const deckMenuOpen = ref(false);
   const showTrending = ref(true);
   const serverLoaded = ref(false);
   const saving = ref(false);
@@ -54,6 +66,22 @@ export const useUiStore = defineStore('ui', () => {
 
   function closeSidebar() {
     sidebarOpen.value = false;
+  }
+
+  function setMobileColumn(type: ColumnType) {
+    mobileColumn.value = type;
+    deckMenuOpen.value = false;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(MOBILE_COLUMN_KEY, type);
+    }
+  }
+
+  function toggleDeckMenu() {
+    deckMenuOpen.value = !deckMenuOpen.value;
+  }
+
+  function closeDeckMenu() {
+    deckMenuOpen.value = false;
   }
 
   function openComposeModal() {
@@ -183,6 +211,11 @@ export const useUiStore = defineStore('ui', () => {
     openMediaViewer,
     closeMediaViewer,
     columns,
+    mobileColumn,
+    deckMenuOpen,
+    setMobileColumn,
+    toggleDeckMenu,
+    closeDeckMenu,
     showTrending,
     serverLoaded,
     saving,

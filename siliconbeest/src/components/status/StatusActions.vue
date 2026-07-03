@@ -109,22 +109,22 @@ function formatCount(n: number): string {
 </script>
 
 <template>
-  <div class="-ml-2 flex max-w-md items-center justify-between" role="group" :aria-label="t('status.actions')">
+  <div class="-ml-2 flex items-center justify-between sm:max-w-md" role="group" :aria-label="t('status.actions')">
     <!-- Reply -->
     <button
       @click="emit('reply', statusId)"
-      class="group flex items-center gap-1.5 rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
+      class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
       :aria-label="t('status.reply')"
     >
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
-      <span class="text-xs font-medium tabular-nums">{{ formatCount(repliesCount) }}</span>
+      <svg class="h-6 w-6 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" /></svg>
+      <span class="text-[13px] font-semibold tabular-nums sm:text-xs sm:font-medium">{{ formatCount(repliesCount) }}</span>
     </button>
 
     <!-- Boost -->
     <button
       @click="canReblog && !loadingReblog && emit('reblog', statusId)"
       :disabled="!canReblog || loadingReblog"
-      class="group flex items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       :class="!canReblog
         ? 'cursor-not-allowed text-slate-300 dark:text-slate-600'
         : reblogged
@@ -134,73 +134,73 @@ function formatCount(n: number): string {
       :aria-pressed="reblogged"
       :title="!canReblog ? t('status.cannot_boost') : undefined"
     >
-      <svg v-if="loadingReblog" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-      <svg v-else class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l-3 3m3-3l3 3" /></svg>
-      <span class="text-xs font-medium tabular-nums">{{ formatCount(reblogsCount) }}</span>
+      <svg v-if="loadingReblog" class="h-6 w-6 animate-spin sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <svg v-else class="h-6 w-6 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l-3 3m3-3l3 3" /></svg>
+      <span class="text-[13px] font-semibold tabular-nums sm:text-xs sm:font-medium">{{ formatCount(reblogsCount) }}</span>
     </button>
 
     <!-- Quote -->
     <button
       @click="canQuote && emit('quote', statusId)"
       :disabled="!canQuote"
-      class="group flex items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       :class="canQuote
         ? 'text-slate-500 dark:text-slate-400 hover:bg-violet-50 hover:text-violet-600 dark:hover:bg-violet-500/10 dark:hover:text-violet-400'
         : 'cursor-not-allowed text-slate-300 dark:text-slate-600'"
       :aria-label="quoteTooltip"
       :title="quoteTooltip"
     >
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
+      <svg class="h-6 w-6 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 01.778-.332 48.294 48.294 0 005.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" /></svg>
     </button>
 
     <!-- Favourite -->
     <button
       @click="!loadingFavourite && emit('favourite', statusId)"
       :disabled="loadingFavourite"
-      class="group flex items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       :class="favourited
         ? 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10'
         : 'text-slate-500 dark:text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400'"
       :aria-label="t('status.favourite')"
       :aria-pressed="favourited"
     >
-      <svg v-if="loadingFavourite" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-      <svg v-else class="h-5 w-5" :fill="favourited ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
-      <span class="text-xs font-medium tabular-nums">{{ formatCount(favouritesCount) }}</span>
+      <svg v-if="loadingFavourite" class="h-6 w-6 animate-spin sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <svg v-else class="h-6 w-6 sm:h-5 sm:w-5" :fill="favourited ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" /></svg>
+      <span class="text-[13px] font-semibold tabular-nums sm:text-xs sm:font-medium">{{ formatCount(favouritesCount) }}</span>
     </button>
 
     <!-- Bookmark -->
     <button
       @click="!loadingBookmark && emit('bookmark', statusId)"
       :disabled="loadingBookmark"
-      class="group flex items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       :class="bookmarked
         ? 'text-amber-500 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10'
         : 'text-slate-500 dark:text-slate-400 hover:bg-amber-50 hover:text-amber-500 dark:hover:bg-amber-500/10 dark:hover:text-amber-400'"
       :aria-label="t('status.bookmark')"
       :aria-pressed="bookmarked"
     >
-      <svg v-if="loadingBookmark" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-      <svg v-else class="h-5 w-5" :fill="bookmarked ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17.593 3.322c.1.128.157.29.157.478V21L12 17.25 6.25 21V3.8c0-.187.057-.35.157-.478A48.62 48.62 0 0112 3c1.968 0 3.9.128 5.593.322z" /></svg>
+      <svg v-if="loadingBookmark" class="h-6 w-6 animate-spin sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      <svg v-else class="h-6 w-6 sm:h-5 sm:w-5" :fill="bookmarked ? 'currentColor' : 'none'" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M17.593 3.322c.1.128.157.29.157.478V21L12 17.25 6.25 21V3.8c0-.187.057-.35.157-.478A48.62 48.62 0 0112 3c1.968 0 3.9.128 5.593.322z" /></svg>
     </button>
 
     <!-- Share -->
     <button
       @click="emit('share', statusId)"
-      class="rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
+      class="touch-manipulation rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
       :aria-label="t('status.share')"
     >
-      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
+      <svg class="h-6 w-6 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" /></svg>
     </button>
 
     <!-- More menu -->
     <div class="relative" @focusout="onMenuFocusOut">
       <button
         @click="toggleMenu"
-        class="rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
+        class="touch-manipulation rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
         :aria-label="t('status.more_actions')"
       >
-        <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" /></svg>
+        <svg class="h-6 w-6 sm:h-5 sm:w-5" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.75" /><circle cx="12" cy="12" r="1.75" /><circle cx="19" cy="12" r="1.75" /></svg>
       </button>
 
       <!-- Dropdown -->

@@ -146,7 +146,7 @@ function getShortcode(name: string): string {
         :key="reaction.name"
         @click="!isRemoteCustomEmoji(reaction) && toggleReaction(reaction)"
         :disabled="loading || !authStore.isAuthenticated || isRemoteCustomEmoji(reaction)"
-        class="inline-flex select-none items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+        class="inline-flex touch-manipulation select-none items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 sm:text-xs"
         :class="[
           isRemoteCustomEmoji(reaction)
             ? 'cursor-not-allowed border-outline bg-surface-2/60 text-slate-400 opacity-70 dark:border-outline-dark dark:bg-surface-2-dark/60 dark:text-slate-500'
@@ -178,12 +178,16 @@ function getShortcode(name: string): string {
         ref="pickerBtnRef"
         @click.stop="togglePicker"
         :disabled="loading"
-        class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-outline text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:text-slate-500 dark:hover:border-brand-500 dark:hover:bg-brand-950/30 dark:hover:text-brand-400"
+        class="inline-flex h-8 touch-manipulation items-center justify-center gap-0.5 rounded-full border border-dashed border-outline px-2 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:text-slate-500 dark:hover:border-brand-500 dark:hover:bg-brand-950/30 dark:hover:text-brand-400"
         :class="loading ? 'opacity-60 cursor-wait' : 'cursor-pointer'"
         title="리액션 추가"
+        aria-label="리액션 추가"
       >
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        <svg class="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15.182 15.182a4.5 4.5 0 01-6.364 0M21 12a9 9 0 11-18 0 9 9 0 0118 0zM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75zm-.375 0h.008v.015h-.008V9.75zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75zm-.375 0h.008v.015h-.008V9.75z" />
+        </svg>
+        <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4.5v15m7.5-7.5h-15" />
         </svg>
       </button>
 

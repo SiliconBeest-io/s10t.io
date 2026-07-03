@@ -300,7 +300,7 @@ async function handleDelete() {
   >
     <!-- Reblog indicator -->
     <div v-if="isReblog" class="mb-2 ml-[3.25rem] flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-      <svg class="h-3.5 w-3.5 flex-shrink-0 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <svg class="h-4 w-4 flex-shrink-0 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017-.22.032-.441.046-.662M4.5 12l-3 3m3-3l3 3"/>
       </svg>
       <router-link :to="`/@${cachedStatus.account.acct}`" class="truncate font-semibold text-slate-600 transition-colors hover:text-brand-600 hover:underline dark:text-slate-300 dark:hover:text-brand-400" @click.stop>
@@ -311,7 +311,7 @@ async function handleDelete() {
 
     <!-- Reply indicator -->
     <div v-if="displayStatus.in_reply_to_id" class="mb-1.5 ml-[3.25rem] flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-      <svg class="h-3.5 w-3.5 flex-shrink-0 text-brand-500 dark:text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <svg class="h-4 w-4 flex-shrink-0 text-brand-500 dark:text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/>
       </svg>
       <router-link
