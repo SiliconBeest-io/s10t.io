@@ -248,6 +248,9 @@ export const useTimelinesStore = defineStore('timelines', () => {
           accountStore.cacheAccount(status.reblog.account);
         }
       },
+      onReaction(statusId: string) {
+        statusStore.pingReaction(statusId);
+      },
       onEmojiUpdate(emojis) {
         // Cache new emojis and re-render affected statuses
         if (!emojiCache.value) emojiCache.value = new Map();

@@ -6,6 +6,8 @@ import { useUiStore, type ColumnType } from '@/stores/ui'
 import DeckShell from '../layout/DeckShell.vue'
 import DeckColumn from '../components/DeckColumn.vue'
 import DeckNotificationsColumn from '../components/DeckNotificationsColumn.vue'
+import DeckSearchColumn from '../components/DeckSearchColumn.vue'
+import DeckFollowRequestsColumn from '../components/DeckFollowRequestsColumn.vue'
 import { useDeckColumns } from '../composables/useDeckColumns'
 
 const { t } = useI18n()
@@ -34,6 +36,8 @@ const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
   local: 'deck.col_local',
   federated: 'deck.col_federated',
   notifications: 'deck.col_notifications',
+  search: 'deck.col_search',
+  follow_requests: 'deck.col_requests',
 }
 
 // Mobile shows one column at a time
@@ -58,6 +62,8 @@ watch(columns, (cols) => {
     >
       <template v-for="key in columns" :key="key">
         <DeckNotificationsColumn v-if="key === 'notifications'" />
+        <DeckSearchColumn v-else-if="key === 'search'" />
+        <DeckFollowRequestsColumn v-else-if="key === 'follow_requests'" />
         <DeckColumn v-else :type="key" />
       </template>
 
@@ -87,6 +93,8 @@ watch(columns, (cols) => {
           {{ t('deck.columns_empty') }}
         </div>
         <DeckNotificationsColumn v-else-if="activeMobile === 'notifications'" :key="activeMobile" fluid />
+        <DeckSearchColumn v-else-if="activeMobile === 'search'" :key="activeMobile" fluid />
+        <DeckFollowRequestsColumn v-else-if="activeMobile === 'follow_requests'" :key="activeMobile" fluid />
         <DeckColumn v-else :key="activeMobile" :type="activeMobile" fluid />
       </div>
     </div>

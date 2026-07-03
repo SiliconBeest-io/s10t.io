@@ -122,11 +122,11 @@ function formatCount(n: number): string {
     <!-- Reply -->
     <button
       type="button"
-      class="dk-mono dk-dim-text inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-[12px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
+      class="dk-mono dk-dim-text inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
       :aria-label="t('status.reply')"
       @click="emit('reply', statusId)"
     >
-      <span aria-hidden="true">↩</span>
+      <span class="text-[17px] leading-none" aria-hidden="true">↩</span>
       <span class="tabular-nums">{{ formatCount(repliesCount) }}</span>
     </button>
 
@@ -134,14 +134,14 @@ function formatCount(n: number): string {
     <div class="relative">
       <button
         type="button"
-        class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-[12px] transition-colors hover:bg-[var(--dk-surface2)]"
+        class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)]"
         :style="reblogged ? 'color: var(--dk-acc)' : 'color: var(--dk-dim)'"
         :aria-label="t('status.boost')"
         :aria-expanded="showBoostMenu"
         :aria-pressed="reblogged"
         @click="openBoostMenu"
       >
-        <span aria-hidden="true">⇄</span>
+        <span class="text-[17px] leading-none" aria-hidden="true">⇄</span>
         <span class="tabular-nums">{{ formatCount(reblogsCount) }}</span>
       </button>
       <div v-if="showBoostMenu" class="dk-menu absolute bottom-full left-0 z-50 mb-1.5 w-48">
@@ -174,14 +174,14 @@ function formatCount(n: number): string {
     <div class="relative">
       <button
         type="button"
-        class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-[12px] transition-colors hover:bg-[var(--dk-surface2)]"
+        class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)]"
         :style="favourited ? 'color: var(--dk-acc)' : 'color: var(--dk-dim)'"
         :aria-label="t('status.favourite')"
         :aria-expanded="showStarMenu"
         :aria-pressed="favourited"
         @click="openStarMenu"
       >
-        <span aria-hidden="true">{{ favourited ? '★' : '☆' }}</span>
+        <span class="text-[17px] leading-none" aria-hidden="true">{{ favourited ? '★' : '☆' }}</span>
         <span class="tabular-nums">{{ formatCount(favouritesCount) }}</span>
       </button>
       <div v-if="showStarMenu" class="dk-menu absolute bottom-full left-0 z-50 mb-1.5 w-48">
@@ -205,33 +205,30 @@ function formatCount(n: number): string {
       </div>
     </div>
 
-    <!-- Bookmark -->
-    <button
-      type="button"
-      class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-[12px] transition-colors hover:bg-[var(--dk-surface2)]"
-      :style="bookmarked ? 'color: var(--dk-acc2)' : 'color: var(--dk-dim)'"
-      :disabled="loadingBookmark"
-      :aria-label="t('status.bookmark')"
-      :aria-pressed="bookmarked"
-      @click="emit('bookmark', statusId)"
-    >
-      <span aria-hidden="true">{{ bookmarked ? '🔖' : '🏷' }}</span>
-    </button>
-
     <div class="flex-1" />
 
     <!-- More: share + management -->
     <div class="relative">
       <button
         type="button"
-        class="dk-mono dk-dim-text inline-flex cursor-pointer items-center rounded-lg border-0 bg-transparent px-2.5 py-1.5 text-[12px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
+        class="dk-mono dk-dim-text inline-flex cursor-pointer items-center rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
         :aria-label="t('status.more_actions')"
         :aria-expanded="showMoreMenu"
         @click="openMoreMenu"
       >
         ⋯
       </button>
-      <div v-if="showMoreMenu" class="dk-menu absolute bottom-full right-0 z-50 mb-1.5 w-48">
+      <div v-if="showMoreMenu" class="dk-menu absolute bottom-full right-0 z-50 mb-1.5 w-52">
+        <button
+          type="button"
+          class="dk-menu-item"
+          :disabled="loadingBookmark"
+          :style="bookmarked ? 'color: var(--dk-acc)' : ''"
+          @click="pick(() => emit('bookmark', statusId))"
+        >
+          <span aria-hidden="true">🔖</span>
+          <span>{{ bookmarked ? t('deck.unbookmark') : t('status.bookmark') }}</span>
+        </button>
         <button type="button" class="dk-menu-item" @click="pick(() => emit('share', statusId))">
           <span aria-hidden="true">↗</span>
           <span>{{ t('status.share') }}</span>

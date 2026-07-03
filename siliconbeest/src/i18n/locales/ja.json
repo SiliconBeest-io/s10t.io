@@ -1001,6 +1001,9 @@
     "react": "絵文字でリアクション",
     "unboost": "ブースト解除",
     "unfavourite": "お気に入り解除",
-    "remote_reaction_hint": "他のサーバーの絵文字"
+    "remote_reaction_hint": "他のサーバーの絵文字",
+    "col_search": "~/search",
+    "col_requests": "~/requests",
+    "unbookmark": "ブックマーク解除"
   }
 }

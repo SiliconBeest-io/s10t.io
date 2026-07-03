@@ -9,6 +9,7 @@
 import { env } from 'cloudflare:workers';
 import type { APActivity } from '../../types/activitypub';
 import { generateUlid } from '../../utils/ulid';
+import { broadcastReactionEvent } from '../../services/streaming';
 import { BaseProcessor } from './BaseProcessor';
 import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
 
@@ -104,6 +105,9 @@ class EmojiReactProcessor extends BaseProcessor {
 		}
 
 		await this.notifyIfLocal('emoji_reaction', status.account_id, actorAccountId, status.id);
+
+		// Live-update connected clients viewing this status
+		await broadcastReactionEvent(status.id);
 	}
 }
 

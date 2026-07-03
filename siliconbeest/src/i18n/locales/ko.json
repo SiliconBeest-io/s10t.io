@@ -1001,6 +1001,9 @@
     "react": "이모지로 반응",
     "unboost": "부스트 취소",
     "unfavourite": "즐겨찾기 해제",
-    "remote_reaction_hint": "다른 서버의 이모지"
+    "remote_reaction_hint": "다른 서버의 이모지",
+    "col_search": "~/search",
+    "col_requests": "~/requests",
+    "unbookmark": "북마크 삭제"
   }
 }

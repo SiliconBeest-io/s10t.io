@@ -1001,6 +1001,9 @@
     "react": "React with emoji",
     "unboost": "Undo boost",
     "unfavourite": "Remove favourite",
-    "remote_reaction_hint": "Emoji from another server"
+    "remote_reaction_hint": "Emoji from another server",
+    "col_search": "~/search",
+    "col_requests": "~/requests",
+    "unbookmark": "Remove bookmark"
   }
 }

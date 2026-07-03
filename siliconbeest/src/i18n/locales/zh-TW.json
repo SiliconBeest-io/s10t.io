@@ -1001,6 +1001,9 @@
     "react": "用表情符號回應",
     "unboost": "取消轉發",
     "unfavourite": "取消最愛",
-    "remote_reaction_hint": "來自其他伺服器的表情符號"
+    "remote_reaction_hint": "來自其他伺服器的表情符號",
+    "col_search": "~/search",
+    "col_requests": "~/requests",
+    "unbookmark": "移除書籤"
   }
 }

@@ -8,6 +8,7 @@
 import type { APActivity, APObject } from '../../types/activitypub';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
+import { broadcastReactionEvent } from '../../services/streaming';
 
 /**
  * Determine the type and target of the activity being undone.
@@ -218,6 +219,9 @@ class UndoProcessor extends BaseProcessor {
 		)
 			.bind(actorAccountId, status.id, emoji)
 			.run();
+
+		// Live-update connected clients viewing this status
+		await broadcastReactionEvent(status.id);
 	}
 
 	private async undoBlock(

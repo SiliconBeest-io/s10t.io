@@ -11,7 +11,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 interface StreamEvent {
-  event: 'update' | 'notification' | 'delete' | 'status.update' | 'filters_changed';
+  event: 'update' | 'notification' | 'delete' | 'status.update' | 'filters_changed' | 'reaction';
   payload: string;
   stream?: string[];
 }

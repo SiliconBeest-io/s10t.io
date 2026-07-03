@@ -1001,6 +1001,9 @@
     "react": "用表情回应",
     "unboost": "取消转发",
     "unfavourite": "取消收藏",
-    "remote_reaction_hint": "来自其他服务器的表情"
+    "remote_reaction_hint": "来自其他服务器的表情",
+    "col_search": "~/search",
+    "col_requests": "~/requests",
+    "unbookmark": "移除书签"
   }
 }

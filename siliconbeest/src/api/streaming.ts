@@ -22,7 +22,8 @@ export type StreamEventType =
   | 'status.update'
   | 'filters_changed'
   | 'emoji_update'
-  | 'notifications_read';
+  | 'notifications_read'
+  | 'reaction';
 
 export interface StreamEvent {
   event: StreamEventType;
@@ -38,6 +39,8 @@ export interface StreamCallbacks {
   onFiltersChanged?: () => void;
   onEmojiUpdate?: (emojis: EmojiInfo[]) => void;
   onNotificationsRead?: (count: number) => void;
+  /** A status's emoji reactions changed — payload carries the status id. */
+  onReaction?: (statusId: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
 }
@@ -237,6 +240,15 @@ export class StreamingClient {
           try {
             const { count } = JSON.parse(data.payload) as { count: number };
             this.callbacks.onNotificationsRead(count);
+          } catch { /* ignore */ }
+        }
+        break;
+      }
+      case 'reaction': {
+        if (this.callbacks.onReaction) {
+          try {
+            const { status_id } = JSON.parse(data.payload) as { status_id: string };
+            if (status_id) this.callbacks.onReaction(status_id);
           } catch { /* ignore */ }
         }
         break;

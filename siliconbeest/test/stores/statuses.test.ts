@@ -162,5 +162,40 @@ describe('Statuses Store', () => {
       expect(cached?.reblogged).toBe(false);
       expect(cached?.reblogs_count).toBe(3);
     });
+
+    it('unboosting removes my boost wrapper from timelines immediately', async () => {
+      const { useAuthStore } = await import('@/stores/auth');
+      const { useTimelinesStore } = await import('@/stores/timelines');
+      const { unreblogStatus } = await import('@/api/mastodon/statuses');
+
+      const auth = useAuthStore();
+      auth.token = 'tok';
+      auth.currentUser = { id: 'me' } as never;
+
+      const store = useStatusesStore();
+      const timelines = useTimelinesStore();
+
+      const original = makeStatus({ id: 'orig', reblogged: true, reblogs_count: 1 });
+      // My boost of the original — this is what the home timeline shows
+      const wrapper = makeStatus({
+        id: 'wrap',
+        reblog: original,
+        account: { ...makeStatus().account, id: 'me' },
+      });
+      store.cacheStatus(original);
+      store.cacheStatus(wrapper);
+
+      const home = timelines.getTimeline('home');
+      home.statusIds = ['wrap', 'other'];
+
+      // The unreblog API returns the ORIGINAL status, not the wrapper
+      vi.mocked(unreblogStatus).mockResolvedValue({
+        data: { ...original, reblogged: false, reblogs_count: 0 },
+      } as never);
+
+      await store.toggleReblog(original);
+
+      expect(home.statusIds).toEqual(['other']);
+    });
   });
 });

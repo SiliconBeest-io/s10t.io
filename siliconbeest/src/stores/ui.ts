@@ -3,7 +3,13 @@ import { ref, computed, watchEffect } from 'vue';
 import { getPreferences, updatePreferences } from '@/api/mastodon/preferences';
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ColumnType = 'home' | 'local' | 'federated' | 'notifications';
+export type ColumnType =
+  | 'home'
+  | 'local'
+  | 'federated'
+  | 'notifications'
+  | 'search'
+  | 'follow_requests';
 
 const THEME_KEY = 'siliconbeest_theme';
 const DEFAULT_COLUMNS: ColumnType[] = ['home', 'local', 'federated'];

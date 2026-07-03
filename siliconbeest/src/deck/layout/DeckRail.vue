@@ -20,6 +20,8 @@ const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
   local: { emoji: '🦬', labelKey: 'nav.local_timeline' },
   federated: { emoji: '📡', labelKey: 'nav.federated_timeline' },
   notifications: { emoji: '🔔', labelKey: 'nav.notifications' },
+  search: { emoji: '🔭', labelKey: 'nav.search' },
+  follow_requests: { emoji: '🤝', labelKey: 'nav.follow_requests' },
 }
 
 // Single-timeline navigation entries (after the Deck entry)

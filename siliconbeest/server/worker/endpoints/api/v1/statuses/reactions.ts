@@ -20,6 +20,7 @@ import { Like, Undo, Emoji as APEmoji, Image as APImage } from '@fedify/fedify/v
 import { generateUlid } from '../../../../utils/ulid';
 import type { CustomEmojiRow } from '../../../../types/db';
 import { addReaction, removeReaction } from '../../../../services/status';
+import { broadcastReactionEvent } from '../../../../services/streaming';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
 const app = new Hono<HonoEnv>();
@@ -76,6 +77,9 @@ app.put('/:id/react/:emoji', authRequired, async (c) => {
 
 	await addReaction(currentAccountId, statusId, emoji, domain);
 
+	// Live-update connected clients
+	await broadcastReactionEvent(statusId);
+
 	// Federate the emoji reaction
 	const statusRow = row as Record<string, unknown>;
 	const authorDomain = statusRow.account_domain as string | null;
@@ -123,6 +127,9 @@ app.delete('/:id/react/:emoji', authRequired, async (c) => {
 	if (!row) throw new AppError(404, 'Record not found');
 
 	const { changes } = await removeReaction(currentAccountId, statusId, emoji);
+
+	// Live-update connected clients
+	if (changes > 0) await broadcastReactionEvent(statusId);
 
 	// Federate Undo(Like) for emoji reaction removal
 	const statusRow = row as Record<string, unknown>;

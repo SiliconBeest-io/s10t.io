@@ -4,20 +4,17 @@ import { useI18n } from 'vue-i18n'
 import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
-import { useTimelinesStore } from '@/stores/timelines'
 import logoUrl from '@/assets/logo.svg'
 
 const { t } = useI18n()
 const ui = useUiStore()
 const auth = useAuthStore()
 const instanceStore = useInstanceStore()
-const timelinesStore = useTimelinesStore()
 
 const logoFailed = ref(false)
 const logoSrc = computed(() =>
   logoFailed.value ? logoUrl : instanceStore.instance?.thumbnail?.url || logoUrl,
 )
-const streaming = computed(() => timelinesStore.streamingClients.size > 0)
 
 function toggleTheme() {
   ui.setTheme(ui.isDark ? 'light' : 'dark')
@@ -39,11 +36,6 @@ function toggleTheme() {
     </router-link>
 
     <div class="flex-1" />
-
-    <div v-if="streaming" class="dk-pill-btn dk-dim-text hidden cursor-default sm:inline-flex">
-      <span class="dk-dot" aria-hidden="true" />
-      <span>{{ t('deck.streaming') }}</span>
-    </div>
 
     <button type="button" class="dk-pill-btn" :aria-label="t('settings.theme')" @click="toggleTheme">
       <span aria-hidden="true">{{ ui.isDark ? '☀' : '☾' }}</span>

@@ -9,6 +9,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
+import { useStatusesStore } from '@/stores/statuses'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
 
@@ -24,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const statusesStore = useStatusesStore()
 const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
 const showPicker = ref(false)
@@ -51,6 +53,14 @@ onMounted(() => {
 watch(() => props.status.id, () => {
   fetchReactions()
 })
+
+// Live updates: the `reaction` websocket event pings the statuses store
+watch(
+  () => statusesStore.reactionPings.get(props.status.id),
+  () => {
+    void fetchReactions()
+  },
+)
 
 async function toggleReaction(reaction: EmojiReaction) {
   if (!authStore.token || loading.value) return

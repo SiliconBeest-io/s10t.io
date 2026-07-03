@@ -10,7 +10,14 @@ import { useUiStore, type ColumnType } from '@/stores/ui';
 export type DeckColumnType = ColumnType;
 
 /** Every column type the deck can host, in default order. */
-export const DECK_COLUMN_TYPES: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
+export const DECK_COLUMN_TYPES: ColumnType[] = [
+  'home',
+  'local',
+  'federated',
+  'notifications',
+  'search',
+  'follow_requests',
+];
 
 export function useDeckColumns() {
   const ui = useUiStore();

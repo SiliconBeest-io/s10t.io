@@ -12,8 +12,12 @@ describe('useDeckColumns', () => {
     const { columns, configRows } = useDeckColumns();
     expect(columns.value).toEqual(['home', 'local', 'federated']);
     // Disabled types follow the enabled region
-    expect(configRows.value).toEqual(['home', 'local', 'federated', 'notifications']);
-    expect(DECK_COLUMN_TYPES).toEqual(['home', 'local', 'federated', 'notifications']);
+    expect(configRows.value).toEqual([
+      'home', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+    ]);
+    expect(DECK_COLUMN_TYPES).toEqual([
+      'home', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+    ]);
   });
 
   it('toggle adds a column at the end and removes it preserving order', () => {
@@ -62,6 +66,8 @@ describe('useDeckColumns', () => {
     ui.columns = ['home', 'home', 'bogus', 'notifications'] as never;
     const { columns, configRows } = useDeckColumns();
     expect(columns.value).toEqual(['home', 'notifications']);
-    expect(configRows.value).toEqual(['home', 'notifications', 'local', 'federated']);
+    expect(configRows.value).toEqual([
+      'home', 'notifications', 'local', 'federated', 'search', 'follow_requests',
+    ]);
   });
 });

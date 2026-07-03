@@ -18,10 +18,11 @@ function buttonByText(wrapper: ReturnType<typeof mountWithPlugins>, text: string
 }
 
 describe('DeckStatusActions', () => {
-  it('renders a compact row: reply, boost chooser, star chooser, bookmark, more', () => {
+  it('renders a compact row: reply, boost chooser, star chooser, more', () => {
     const wrapper = mountWithPlugins(DeckStatusActions, { props: baseProps });
-    // 5 visible buttons — repost/quote and favourite/react are collapsed into choosers
-    expect(wrapper.findAll('button').length).toBe(5);
+    // 4 visible buttons — repost/quote and favourite/react are choosers,
+    // bookmark and share live in the ⋯ menu
+    expect(wrapper.findAll('button').length).toBe(4);
   });
 
   it('emits reply directly', async () => {
@@ -62,13 +63,13 @@ describe('DeckStatusActions', () => {
     expect(wrapper.emitted('react')![0]).toEqual(['123']);
   });
 
-  it('bookmark emits directly; share lives in the more menu', async () => {
+  it('bookmark and share live in the more menu with text labels', async () => {
     const wrapper = mountWithPlugins(DeckStatusActions, { props: baseProps });
-    const buttons = wrapper.findAll('button');
-    await buttons[3]!.trigger('click');
+    await wrapper.findAll('button')[3]!.trigger('click');
+    await buttonByText(wrapper, 'Bookmark')!.trigger('click');
     expect(wrapper.emitted('bookmark')![0]).toEqual(['123']);
 
-    await buttons[4]!.trigger('click');
+    await wrapper.findAll('button')[3]!.trigger('click');
     await buttonByText(wrapper, 'Share')!.trigger('click');
     expect(wrapper.emitted('share')![0]).toEqual(['123']);
   });
