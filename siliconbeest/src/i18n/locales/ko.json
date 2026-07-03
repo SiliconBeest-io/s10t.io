@@ -1042,83 +1042,162 @@
     "section_timelines": "타임라인"
   },
   "airport": {
-    "pageTitle": "공항 — 이 서버의 실시간 지도",
-    "title": "공항",
-    "subtitle": "이 서버의 지난 24시간을 공항 풍경으로 그렸어요. 모든 경로는 실제 배선과 일치하고, 숫자는 전부 진짜예요.",
-    "backHome": "홈으로",
-    "updatedAt": "{time} 기준",
-    "window24h": "지난 24시간",
-    "fetchError": "숫자를 지금 가져오지 못했어요. 공항 모양은 그대로예요.",
-    "honesty": "이 지도의 모든 경로는 서버의 실제 배선과 1:1로 대응해요.",
-    "sceneLabel": "이 서버의 지난 24시간 활동을 나타낸 공항 그림",
-    "board": {
+    "pageTitle": "{name} 공항 — 이 서버의 실시간 지도",
+    "title": "{name} 공항",
+    "subtitle": "이 서버의 지난 24시간을 실제로 돌아가는 공항으로 그렸어요. 모든 경로는 실제 배선과 일치하고, 숫자는 전부 진짜예요.",
+    "asOf": "{time} 기준",
+    "status": {
+      "live": "실시간",
+      "lastKnown": "마지막 값",
+      "connecting": "연결 중"
+    },
+    "sceneLabel": "서버 파이프라인을 나타낸 실시간 공항 시뮬레이션",
+    "cards": {
       "departures": "출발 승객",
       "arrivals": "도착 승객",
       "transfers": "환승",
       "cargoOut": "화물 출발",
       "cargoIn": "화물 도착",
-      "registrations": "여권 발급"
-    },
-    "delays": {
-      "title": "지연·결항 안내",
-      "none": "모든 노선이 정상 운항 중이에요. 좋은 일이에요.",
-      "failures": "배달 실패 {count}회"
+      "passports": "여권 발급",
+      "items": "{count}개"
     },
     "scene": {
+      "sky": "연합 하늘",
+      "runwayDep": "출발 활주로",
+      "runwayDepSub": "(연합 발신)",
+      "runwayArr": "도착 활주로",
+      "runwayArrSub": "(inbox)",
+      "tower": "관제탑",
+      "towerSub": "(운영 · 큐)",
+      "towerLine": "이착륙 {movements}회 · DLQ {dlq}",
+      "dlqClear": "없음",
+      "cargo": "화물터미널 (R2)",
+      "cargoSub": "벨리 카고 · 미디어",
+      "city": "시내",
+      "landsideDep": "출발 · 랜드사이드",
+      "landsideArr": "도착 · 랜드사이드",
       "cloudflare": "Cloudflare 게이트",
-      "checkin": "발권 카운터",
-      "passport": "여권 데스크",
-      "security": "보안검색대",
-      "gate": "탑승구",
-      "runwayDep": "출발 활주로 (연합 발신)",
-      "runwayArr": "도착 활주로 (inbox)",
-      "immigration": "입국심사 (서명 검증)",
+      "checkin": "체크인",
+      "security": "보안검색",
+      "passport": "여권 심사",
+      "boarding": "탑승 ↑",
+      "arrivalsDown": "↓ 도착",
+      "announce": "안내 방송",
+      "announceSub": "(스트리밍)",
+      "today": "오늘",
+      "exit": "출구",
       "baggage": "짐 찾기",
-      "cargoTerminal": "화물터미널 (R2)",
-      "tower": "관제탑 (스트리밍)",
-      "destinations": "연합 하늘",
-      "dlq": "결항 화물 보관소"
+      "immigration": "입국심사",
+      "immigrationSub": "(서명)",
+      "dlqHolding": "DLQ 대기 계류장",
+      "gateA1": "A1 · 출발",
+      "gateA2": "A2 · 도착"
     },
-    "ops": {
-      "title": "운행 상황",
+    "info": {
+      "default": {
+        "title": "{name} 공항",
+        "body": "이 지도의 모든 시설은 이 서버 연합 파이프라인의 실제 구성요소예요. 마우스를 올리면 어떤 부분인지 알려드려요.",
+        "stat": "24시간 · 실시간"
+      },
+      "cloudflare": {
+        "title": "Cloudflare 게이트",
+        "body": "엣지예요. 연합우주와 브라우저에서 오는 모든 HTTP 요청이 Cloudflare 네트워크를 거쳐 가장 먼저 여기로 들어와요.",
+        "stat": "엣지"
+      },
+      "checkin": {
+        "title": "체크인",
+        "body": "레이트 리미터예요. 한 클라이언트가 API를 두드릴 수 있는 빈도를 제한해서, 폭주가 서버를 덮치지 않게 해요.",
+        "stat": "레이트 리밋"
+      },
+      "security": {
+        "title": "보안검색",
+        "body": "봇 방어(Turnstile)예요. AI 크롤러와 스팸 봇은 여기서 돌려보내고, 진짜 사람은 그대로 통과해요.",
+        "stat": "봇 차단"
+      },
+      "passport": {
+        "title": "여권 심사",
+        "body": "인증이에요. 로그인 세션이나 앱의 OAuth 토큰을 여기서 확인한 뒤에야 서버에 쓰기가 가능해요.",
+        "stat": "인증"
+      },
       "gate": {
-        "title": "정문·여객터미널",
-        "status": "운영 중",
-        "desc": "나와 {title}을(를) 잇는 정문이에요. 이 페이지도 이 문을 지나 여기까지 왔어요. 새 글(출발 승객), 지난 하루 {departures}명."
+        "title": "항공기 스탠드",
+        "body": "연합 큐예요. 방금 발행된 글이 배달 작업(QUEUE_FEDERATION)으로 여기서 대기하다가, 큐 소비자가 실어 날라요.",
+        "stat": "큐"
       },
-      "federation": {
-        "title": "국제선 (연합 노선)",
-        "statusOk": "운항 중",
-        "statusDelayed": "일부 지연",
-        "desc": "지난 하루 {arrivals}명이 {destinations}곳의 공항에서 도착했어요. 새 글은 여기서 연합 하늘로 출발 수속을 밟아요.",
-        "delayedNote": "아래 노선에 배달 실패가 쌓여 있어요:"
+      "immigration": {
+        "title": "입국심사",
+        "body": "인바운드 HTTP 서명 검증이에요. inbox에 도착한 모든 액티비티가 정말 그 서버에서 왔는지 여기서 확인해요.",
+        "stat": "{arrivals}명 통과"
       },
-      "transfer": {
-        "title": "환승 통로",
-        "status": "운영 중",
-        "desc": "지난 하루 {transfers}명이 도착 후 환승 통로를 지나 다시 출발편에 올랐어요. 부스트가 이 통로를 써요."
+      "baggage": {
+        "title": "짐 찾기",
+        "body": "원격 미디어예요. 연합 글에 실려 온 첨부파일을 미디어 프록시가 받아와서 보여줘요.",
+        "stat": "첨부파일"
+      },
+      "exit": {
+        "title": "출구",
+        "body": "타임라인이에요. 검증을 마친 원격 글이 파이프라인을 벗어나 로컬 피드에 등장하는 지점이에요.",
+        "stat": "타임라인"
       },
       "cargo": {
         "title": "화물터미널 (R2)",
-        "status": "가동 중",
-        "desc": "지난 하루 위탁 화물 {out}개({bytes})가 창고로 들어갔고, 도착 화물 {in}개가 짐 찾는 곳에 나왔어요."
+        "body": "오브젝트 스토리지(R2 MEDIA_BUCKET)예요. 업로드된 이미지·영상·오디오가 전부 여기 살아요 — 미디어는 글 본문과 함께 이동하지 않아요.",
+        "stat": "도착 {cargoIn} · 출발 {cargoOut}"
       },
-      "passport": {
-        "title": "여권 데스크",
-        "status": "운영 중",
-        "desc": "지난 하루 {count}명이 새 여권을 발급받았어요. 새 계정이 곧 새 여권이에요."
+      "announce": {
+        "title": "안내 방송 (스트리밍)",
+        "body": "스트리밍 서비스(Durable Object)예요. 접속 중인 모든 클라이언트에 WebSocket으로 새 글과 알림을 실시간으로 밀어 보내요.",
+        "stat": "오늘 {announceN}건"
       },
       "tower": {
-        "title": "관제탑 방송",
-        "status": "방송 중",
-        "desc": "새 글이 생기면 접속 중인 화면으로 곧바로 안내 방송을 해요. 지난 하루 방송 거리는 {total}건이었어요."
+        "title": "관제탑 (운영)",
+        "body": "큐 소비자(queue-consumer) 워커예요. 연합 큐를 순서대로 처리하면서 액티비티에 서명해 배달하고, 서버별 성공·실패를 기록해요.",
+        "stat": "이착륙 {movements}회"
       },
       "dlq": {
-        "title": "결항 화물 보관소",
-        "statusEmpty": "비어 있음",
-        "statusParked": "결항 {count}건",
-        "emptyDesc": "보관소는 텅 비어 있어요. 좋은 일이에요.",
-        "parkedDesc": "{count}건의 화물이 끝내 배달되지 못하고 보관소에 서 있어요. 관리자 화면에서 재발송하거나 정리할 수 있어요."
+        "title": "DLQ 대기 계류장",
+        "body": "데드레터 보관소(federation_dlq_parked)예요. 재시도를 모두 소진한 배달이 여기 서서 관리자의 재발송이나 정리를 기다려요 — 빨간불은 무언가 착륙하지 못하고 있다는 뜻이에요.",
+        "statEmpty": "비어 있음 · 좋아요",
+        "statWaiting": "{dlq}건 대기"
+      },
+      "deprwy": {
+        "title": "출발 활주로 09L",
+        "body": "연합 발신이에요. 큐 소비자가 ActivityPub 액티비티에 서명해서 상대 서버의 inbox로 직접 POST해요 — Cloudflare를 되돌아가지 않고 곧장 나가요.",
+        "stat": "{departures}편 출발"
+      },
+      "arrrwy": {
+        "title": "도착 활주로 09R",
+        "body": "연합 수신 — 이 서버의 공용 inbox예요. 다른 서버가 보낸 액티비티가 여기로 착륙해요.",
+        "stat": "{arrivals}편 착륙"
+      },
+      "beaconBody": "이 서버와 연합하는 다른 페디버스 서버예요. 비콘 크기는 지난 24시간 동안 그곳에서 도착한 글의 양이에요.",
+      "beaconStat": "{count}건 도착"
+    },
+    "story": {
+      "title": "공항은 이렇게 돌아가요",
+      "p1": {
+        "lead": "모든 시설이 실제 구성요소예요.",
+        "body": "이 지도는 서버의 실제 파이프라인을 공항으로 그린 거예요. 실제 배선에 없는 시설은 그리지 않았고, 실제로 있는 경로는 빠짐없이 그렸어요. 비행기는 분위기지만, 숫자는 아니에요."
+      },
+      "p2": {
+        "lead": "랜드사이드는 요청 파이프라인이에요.",
+        "body": "모든 요청은 Cloudflare 엣지로 들어와 레이트 리미터(체크인), 봇 방어(보안검색), 인증(여권 심사)을 차례로 지나야 뭔가를 할 수 있어요 — 실제 미들웨어와 순서까지 같아요."
+      },
+      "p3": {
+        "lead": "화물은 미디어예요.",
+        "body": "이미지와 영상은 글 안에 실려 다니지 않아요. R2 오브젝트 스토리지(화물터미널)에 살면서 따로 움직여요 — 나갈 때는 업로드로, 들어올 때는 미디어 프록시로 받아와요."
+      },
+      "p4": {
+        "lead": "도착은 연합 수신이에요.",
+        "body": "다른 서버의 글은 공용 inbox(09R)에 착륙해서 HTTP 서명 검증(입국심사)을 통과한 뒤에야 로컬 타임라인(출구)에 들어와요."
+      },
+      "p5": {
+        "lead": "안내 방송은 스트리밍 서비스예요.",
+        "body": "Durable Object 하나가 열려 있는 모든 클라이언트와 WebSocket을 붙들고, 새 글과 알림을 생기는 즉시 밀어 보내요."
+      },
+      "p6": {
+        "lead": "관제탑과 DLQ.",
+        "body": "관제탑은 큐 소비자예요. 연합 큐를 순서대로 처리하고 서버별 배달 성공·실패를 기록해요. 재시도를 모두 소진한 배달은 데드레터 테이블(DLQ 대기 계류장)에 서서 관리자의 재발송을 기다려요. 숫자는 약 1분마다 갱신되고, 계정·수신자·본문은 포함되지 않아요."
       }
     }
   }

@@ -1042,83 +1042,162 @@
     "section_timelines": "時間軸"
   },
   "airport": {
-    "pageTitle": "機場 — 本伺服器的即時地圖",
-    "title": "機場",
-    "subtitle": "把本伺服器最近24小時畫成一座機場。每條路線都與真實架構一致，每個數字都是真的。",
-    "backHome": "返回首頁",
-    "updatedAt": "截至 {time}",
-    "window24h": "最近24小時",
-    "fetchError": "暫時無法取得數字。機場的樣子保持不變。",
-    "honesty": "這張地圖上的每條路線都與伺服器的真實架構一一對應。",
-    "sceneLabel": "展示本伺服器最近24小時活動的機場示意圖",
-    "board": {
+    "pageTitle": "{name} 機場 — 本伺服器的即時地圖",
+    "title": "{name} 機場",
+    "subtitle": "把本伺服器最近24小時畫成一座真正運轉的機場。每條路線都與真實架構一致，每個數字都是真的。",
+    "asOf": "截至 {time}",
+    "status": {
+      "live": "即時",
+      "lastKnown": "最近值",
+      "connecting": "連線中"
+    },
+    "sceneLabel": "展示伺服器管線的即時機場模擬",
+    "cards": {
       "departures": "出發旅客",
       "arrivals": "抵達旅客",
       "transfers": "轉機",
       "cargoOut": "貨物(出境)",
       "cargoIn": "貨物(入境)",
-      "registrations": "護照簽發"
-    },
-    "delays": {
-      "title": "延誤·取消資訊",
-      "none": "所有航線運作正常。這是好消息。",
-      "failures": "投遞失敗 {count} 次"
+      "passports": "護照簽發",
+      "items": "{count} 件"
     },
     "scene": {
+      "sky": "聯邦天空",
+      "runwayDep": "出發跑道",
+      "runwayDepSub": "(聯邦送出)",
+      "runwayArr": "抵達跑道",
+      "runwayArrSub": "(inbox)",
+      "tower": "塔台",
+      "towerSub": "(營運 · 佇列)",
+      "towerLine": "起降 {movements} 次 · DLQ {dlq}",
+      "dlqClear": "無",
+      "cargo": "貨運站 (R2)",
+      "cargoSub": "腹艙貨物 · 媒體",
+      "city": "市區",
+      "landsideDep": "出發 · 陸側",
+      "landsideArr": "抵達 · 陸側",
       "cloudflare": "Cloudflare 閘口",
-      "checkin": "報到櫃檯",
-      "passport": "護照櫃檯",
+      "checkin": "報到",
       "security": "安檢",
-      "gate": "登機門",
-      "runwayDep": "出發跑道(聯邦送出)",
-      "runwayArr": "抵達跑道(inbox)",
-      "immigration": "入境審查(簽章驗證)",
+      "passport": "證照查驗",
+      "boarding": "登機 ↑",
+      "arrivalsDown": "↓ 抵達",
+      "announce": "廣播",
+      "announceSub": "(串流)",
+      "today": "今日",
+      "exit": "出口",
       "baggage": "行李提領",
-      "cargoTerminal": "貨運站(R2)",
-      "tower": "塔台(串流)",
-      "destinations": "聯邦天空",
-      "dlq": "滯留貨物停放區"
+      "immigration": "入境審查",
+      "immigrationSub": "(簽章)",
+      "dlqHolding": "DLQ 停機坪",
+      "gateA1": "A1 · 出發",
+      "gateA2": "A2 · 抵達"
     },
-    "ops": {
-      "title": "營運狀況",
-      "gate": {
-        "title": "正門·航廈",
-        "status": "營運中",
-        "desc": "連接你與{title}的正門——這個頁面也是從這扇門進來的。新貼文(出發旅客),最近一天 {departures} 人。"
+    "info": {
+      "default": {
+        "title": "{name} 機場",
+        "body": "這張地圖上的每個設施都是本伺服器聯邦管線的真實元件。把游標懸停在任何地方，就能看到它是哪個部分。",
+        "stat": "24小時 · 即時"
       },
-      "federation": {
-        "title": "國際航線(聯邦)",
-        "statusOk": "營運中",
-        "statusDelayed": "部分誤點",
-        "desc": "最近一天有 {arrivals} 人從 {destinations} 座機場抵達。新貼文在這裡辦理飛向聯邦天空的手續。",
-        "delayedNote": "以下航線累積了投遞失敗:"
+      "cloudflare": {
+        "title": "Cloudflare 閘口",
+        "body": "邊緣節點。來自聯邦宇宙和瀏覽器的所有 HTTP 請求都先經 Cloudflare 網路進入這台伺服器。",
+        "stat": "邊緣"
       },
-      "transfer": {
-        "title": "轉機通道",
-        "status": "營運中",
-        "desc": "最近一天有 {transfers} 人抵達後經轉機通道再次登上出發航班。轉發走的就是這條路。"
+      "checkin": {
+        "title": "報到",
+        "body": "限流器。限制單一用戶端存取 API 的頻率，突發流量不會壓垮伺服器。",
+        "stat": "限流"
       },
-      "cargo": {
-        "title": "貨運站(R2)",
-        "status": "運轉中",
-        "desc": "最近一天有 {out} 件託運貨物({bytes})進入倉庫,{in} 件抵達貨物送到了行李提領處。"
+      "security": {
+        "title": "安檢",
+        "body": "反機器人防線(Turnstile)。AI 爬蟲和垃圾機器人在這裡被攔下，真人直接通過。",
+        "stat": "反爬蟲"
       },
       "passport": {
-        "title": "護照櫃檯",
-        "status": "營運中",
-        "desc": "最近一天簽發了 {count} 本新護照。新帳號就是新護照。"
+        "title": "證照查驗",
+        "body": "認證。登入工作階段或應用程式的 OAuth 權杖在這裡核驗之後，才能對伺服器寫入。",
+        "stat": "認證"
+      },
+      "gate": {
+        "title": "停機位",
+        "body": "聯邦佇列。剛發布的貼文作為投遞任務(QUEUE_FEDERATION)在這裡排隊,等佇列消費者把它運出去。",
+        "stat": "佇列"
+      },
+      "immigration": {
+        "title": "入境審查",
+        "body": "入站 HTTP 簽章驗證。抵達 inbox 的每條活動都要在這裡證明確實來自它聲稱的伺服器。",
+        "stat": "{arrivals} 人通過"
+      },
+      "baggage": {
+        "title": "行李提領",
+        "body": "遠端媒體。隨聯邦貼文而來的附件由媒體代理取回並顯示。",
+        "stat": "附件"
+      },
+      "exit": {
+        "title": "出口",
+        "body": "時間軸。通過驗證的遠端貼文在這裡離開管線，出現在本地資訊流中。",
+        "stat": "時間軸"
+      },
+      "cargo": {
+        "title": "貨運站 (R2)",
+        "body": "物件儲存(R2 MEDIA_BUCKET)。上傳的圖片、影片、音訊都存放在這裡 — 媒體從不隨貼文本體一起移動。",
+        "stat": "進 {cargoIn} · 出 {cargoOut}"
+      },
+      "announce": {
+        "title": "廣播 (串流)",
+        "body": "串流服務(Durable Object)。它透過 WebSocket 向所有線上用戶端即時推送新貼文和通知。",
+        "stat": "今日 {announceN} 則"
       },
       "tower": {
-        "title": "塔台廣播",
-        "status": "播報中",
-        "desc": "有新貼文時,塔台會立刻向線上的螢幕播報。最近一天播報了 {total} 則。"
+        "title": "塔台 (營運)",
+        "body": "佇列消費者 worker。它依序處理聯邦佇列，為活動簽章並投遞，逐伺服器記錄成功或失敗。",
+        "stat": "起降 {movements} 次"
       },
       "dlq": {
-        "title": "滯留貨物停放區",
-        "statusEmpty": "空",
-        "statusParked": "滯留 {count} 件",
-        "emptyDesc": "停放區空空如也。這是好消息。",
-        "parkedDesc": "有 {count} 件貨物始終未能送達,停在停放區。管理員可以重發或清理。"
+        "title": "DLQ 停機坪",
+        "body": "死信積壓(federation_dlq_parked)。耗盡所有重試的投遞停在這裡，等管理員重發或清理 — 紅色表示有東西沒能落地。",
+        "statEmpty": "空 · 很好",
+        "statWaiting": "{dlq} 件等待"
+      },
+      "deprwy": {
+        "title": "出發跑道 09L",
+        "body": "聯邦送出。佇列消費者為每條 ActivityPub 活動簽章並直接 POST 到目標伺服器的 inbox — 直接飛出，不再經過 Cloudflare。",
+        "stat": "{departures} 班出發"
+      },
+      "arrrwy": {
+        "title": "抵達跑道 09R",
+        "body": "聯邦接收 — 本伺服器的共享 inbox。其他伺服器發來的活動在這裡降落。",
+        "stat": "{arrivals} 班降落"
+      },
+      "beaconBody": "與本伺服器聯邦的另一台 Fediverse 伺服器。信標大小是最近24小時從那裡抵達的貼文數量。",
+      "beaconStat": "{count} 件抵達"
+    },
+    "story": {
+      "title": "機場是這樣運轉的",
+      "p1": {
+        "lead": "每個設施都是真實元件。",
+        "body": "這張地圖是把伺服器的真實管線畫成機場：真實架構裡沒有的設施一概不畫，真實存在的路線一條不漏。飛機是氛圍，數字不是。"
+      },
+      "p2": {
+        "lead": "陸側就是請求管線。",
+        "body": "每個請求都從 Cloudflare 邊緣進入，依序通過限流器(報到)、反機器人(安檢)、認證(證照查驗)才能做任何事 — 順序與真實中介層完全一致。"
+      },
+      "p3": {
+        "lead": "貨物就是媒體。",
+        "body": "圖片和影片從不裝在貼文裡移動。它們住在 R2 物件儲存(貨運站)裡，單獨運輸 — 出境走上傳，入境由媒體代理取回。"
+      },
+      "p4": {
+        "lead": "抵達就是聯邦接收。",
+        "body": "其他伺服器的貼文降落在共享 inbox(09R)，通過 HTTP 簽章驗證(入境審查)後才進入本地時間軸(出口)。"
+      },
+      "p5": {
+        "lead": "廣播就是串流服務。",
+        "body": "一個 Durable Object 與所有開啟的用戶端保持 WebSocket 連線，新貼文和通知一產生就立即推送。"
+      },
+      "p6": {
+        "lead": "塔台與 DLQ。",
+        "body": "塔台是佇列消費者：依序處理聯邦佇列，逐伺服器記錄投遞成敗。耗盡重試的投遞停進死信表(DLQ 停機坪)等管理員重發。數字約每分鐘更新一次，不包含帳號、收件者或內容。"
       }
     }
   }

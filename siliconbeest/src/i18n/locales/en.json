@@ -1042,83 +1042,162 @@
     "section_timelines": "timelines"
   },
   "airport": {
-    "pageTitle": "Airport — a live map of this server",
-    "title": "Airport",
-    "subtitle": "The last 24 hours of this server, drawn as an airport. Every path matches the real wiring, and every number is real.",
-    "backHome": "Back home",
-    "updatedAt": "as of {time}",
-    "window24h": "Last 24 hours",
-    "fetchError": "We couldn't fetch the numbers right now. The airport layout is still accurate.",
-    "honesty": "Every route on this map corresponds 1:1 to the server's real wiring.",
-    "sceneLabel": "An airport diagram showing this server's activity in the last 24 hours",
-    "board": {
+    "pageTitle": "{name} Airport — a live map of this server",
+    "title": "{name} Airport",
+    "subtitle": "The last 24 hours of this server, run as a working airport. Every path matches the real wiring, and every number is real.",
+    "asOf": "as of {time}",
+    "status": {
+      "live": "live feed",
+      "lastKnown": "last-known",
+      "connecting": "connecting"
+    },
+    "sceneLabel": "Live airport simulation of the server pipeline",
+    "cards": {
       "departures": "Departures",
       "arrivals": "Arrivals",
       "transfers": "Transfers",
       "cargoOut": "Cargo out",
       "cargoIn": "Cargo in",
-      "registrations": "New passports"
-    },
-    "delays": {
-      "title": "Delays & cancellations",
-      "none": "All routes are operating normally. That's good news.",
-      "failures": "{count} failed deliveries"
+      "passports": "New passports",
+      "items": "{count} items"
     },
     "scene": {
+      "sky": "Federated sky",
+      "runwayDep": "Departure runway",
+      "runwayDepSub": "(federation out)",
+      "runwayArr": "Arrival runway",
+      "runwayArrSub": "(inbox)",
+      "tower": "Control tower",
+      "towerSub": "(ops · queue)",
+      "towerLine": "{movements} movements · dlq {dlq}",
+      "dlqClear": "clear",
+      "cargo": "Cargo terminal (R2)",
+      "cargoSub": "belly cargo · media",
+      "city": "CITY",
+      "landsideDep": "DEPARTURES · landside",
+      "landsideArr": "ARRIVALS · landside",
       "cloudflare": "Cloudflare gate",
       "checkin": "Check-in",
-      "passport": "Passport desk",
       "security": "Security",
-      "gate": "Gate",
-      "runwayDep": "Departure runway (federation out)",
-      "runwayArr": "Arrival runway (inbox)",
-      "immigration": "Immigration (signature check)",
+      "passport": "Passport control",
+      "boarding": "Boarding ↑",
+      "arrivalsDown": "↓ Arrivals",
+      "announce": "Announcements",
+      "announceSub": "(streaming)",
+      "today": "today",
+      "exit": "Exit",
       "baggage": "Baggage claim",
-      "cargoTerminal": "Cargo terminal (R2)",
-      "tower": "Control tower (streaming)",
-      "destinations": "Federated sky",
-      "dlq": "Grounded cargo yard"
+      "immigration": "Immigration",
+      "immigrationSub": "(signature)",
+      "dlqHolding": "DLQ holding",
+      "gateA1": "A1 · departures",
+      "gateA2": "A2 · arrivals"
     },
-    "ops": {
-      "title": "Operations",
+    "info": {
+      "default": {
+        "title": "{name} Airport",
+        "body": "Every facility on this map is a real part of this server's fediverse pipeline. Hover anything to see which part it is.",
+        "stat": "24h · live"
+      },
+      "cloudflare": {
+        "title": "Cloudflare gate",
+        "body": "The edge. Every HTTP request from the fediverse and from browsers reaches this server through Cloudflare's network first.",
+        "stat": "edge"
+      },
+      "checkin": {
+        "title": "Check-in",
+        "body": "The rate limiter. It caps how often a single client can hit the API, so bursts never crush the server.",
+        "stat": "rate limit"
+      },
+      "security": {
+        "title": "Security",
+        "body": "Bot defense (Turnstile). AI crawlers and spam bots are turned away here; real people pass straight through.",
+        "stat": "anti-bot"
+      },
+      "passport": {
+        "title": "Passport control",
+        "body": "Authentication. Your login session or app's OAuth token is verified here before any write reaches the server.",
+        "stat": "auth"
+      },
       "gate": {
-        "title": "Front gate & terminal",
-        "status": "Open",
-        "desc": "The front door between you and {title} — this very page came through it. New posts (departing passengers): {departures} in the last day."
+        "title": "Aircraft stands",
+        "body": "The federation queue. A freshly published post waits here as a delivery job (QUEUE_FEDERATION) until the queue-consumer flies it out.",
+        "stat": "queue"
       },
-      "federation": {
-        "title": "International routes (federation)",
-        "statusOk": "Operating",
-        "statusDelayed": "Partial delays",
-        "desc": "{arrivals} passengers arrived from {destinations} airports in the last day. New posts check in here for departure into the federated sky.",
-        "delayedNote": "These routes have accumulated delivery failures:"
+      "immigration": {
+        "title": "Immigration",
+        "body": "Inbound HTTP-signature verification. Every activity that arrives in the inbox is checked to prove it really came from the server it claims.",
+        "stat": "{arrivals} cleared"
       },
-      "transfer": {
-        "title": "Transfer corridor",
-        "status": "Open",
-        "desc": "{transfers} arriving passengers took the transfer corridor back to a departure gate in the last day. Boosts travel this way."
+      "baggage": {
+        "title": "Baggage claim",
+        "body": "Remote media. Attachments that ride along with federated posts are fetched and served through the media proxy.",
+        "stat": "attachments"
+      },
+      "exit": {
+        "title": "Exit",
+        "body": "The timeline. A verified remote post leaves the pipeline here and appears in local feeds.",
+        "stat": "timeline"
       },
       "cargo": {
         "title": "Cargo terminal (R2)",
-        "status": "Operating",
-        "desc": "{out} checked bags ({bytes}) entered the warehouse and {in} arriving bags reached baggage claim in the last day."
+        "body": "Object storage (R2 MEDIA_BUCKET). Every uploaded image, video, and audio file lives here — media never travels with the post itself.",
+        "stat": "in {cargoIn} · out {cargoOut}"
       },
-      "passport": {
-        "title": "Passport desk",
-        "status": "Open",
-        "desc": "{count} new passports were issued in the last day. A new account is a new passport."
+      "announce": {
+        "title": "Announcements (streaming)",
+        "body": "The streaming service (a Durable Object). It pushes new posts and notifications over WebSocket to every connected client in real time.",
+        "stat": "{announceN} today"
       },
       "tower": {
-        "title": "Control tower broadcast",
-        "status": "On air",
-        "desc": "When a new post lands, the tower announces it straight to connected screens. {total} announcements in the last day."
+        "title": "Control tower (ops)",
+        "body": "The queue-consumer worker. It processes the federation queue in order, signs activities, delivers them, and records success or failure per server.",
+        "stat": "{movements} movements"
       },
       "dlq": {
-        "title": "Grounded cargo yard",
-        "statusEmpty": "Empty",
-        "statusParked": "{count} grounded",
-        "emptyDesc": "The yard is completely empty. That's good news.",
-        "parkedDesc": "{count} deliveries never made it and are parked in the yard. An admin can replay or clear them."
+        "title": "DLQ holding apron",
+        "body": "The dead-letter backlog (federation_dlq_parked). Deliveries that exhausted every retry park here until an admin replays or clears them — red means something is not landing.",
+        "statEmpty": "empty · good",
+        "statWaiting": "{dlq} waiting"
+      },
+      "deprwy": {
+        "title": "Departure runway 09L",
+        "body": "Federation out. The queue-consumer signs each ActivityPub activity and POSTs it to the destination server's inbox — straight out, not back through Cloudflare.",
+        "stat": "{departures} departed"
+      },
+      "arrrwy": {
+        "title": "Arrival runway 09R",
+        "body": "Federation in — this server's shared inbox. Activities that other servers send land here.",
+        "stat": "{arrivals} landed"
+      },
+      "beaconBody": "Another fediverse server this one federates with. Beacon size is how many posts arrived from it in the last 24 hours.",
+      "beaconStat": "{count} arrived"
+    },
+    "story": {
+      "title": "How the airport runs",
+      "p1": {
+        "lead": "Every facility is a real component.",
+        "body": "This is the server's actual pipeline drawn as an airport: nothing on the map exists that isn't real wiring, and every real path is drawn. The aircraft are ambience; the numbers are not."
+      },
+      "p2": {
+        "lead": "Landside is the request pipeline.",
+        "body": "Every request enters through the Cloudflare edge, then passes the rate limiter (check-in), bot defense (security), and authentication (passport control) before it can do anything — the exact order of the real middleware."
+      },
+      "p3": {
+        "lead": "Cargo is media.",
+        "body": "Images and videos never travel inside a post. They live in R2 object storage (the cargo terminal) and move separately — uploads on the way out, remote attachments fetched through the media proxy on the way in."
+      },
+      "p4": {
+        "lead": "Arrivals are federation in.",
+        "body": "Posts from other servers land in the shared inbox (09R), have their HTTP signatures verified (immigration), and only then enter local timelines (the exit)."
+      },
+      "p5": {
+        "lead": "Announcements are the streaming service.",
+        "body": "A Durable Object holds a WebSocket to every open client and pushes new posts and notifications the moment they happen."
+      },
+      "p6": {
+        "lead": "Tower & DLQ.",
+        "body": "The control tower is the queue-consumer: it works through the federation queue and logs delivery success or failure per server. Deliveries that exhaust all retries park in the dead-letter table (DLQ holding) for the admin to replay. Counts refresh about once a minute; no accounts, recipients, or content included."
       }
     }
   }

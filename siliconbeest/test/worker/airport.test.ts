@@ -4,7 +4,7 @@ import { encodeTime } from 'ulid';
 import { applyMigration, createTestUser } from './helpers';
 
 const BASE = 'https://test.siliconbeest.local';
-const CACHE_KEY = 'airport:stats:v2';
+const CACHE_KEY = 'airport:stats:v3';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -219,6 +219,7 @@ describe('GET /api/airport', () => {
     expect(typeof body.cargo.outCount).toBe('number');
     expect(typeof body.cargo.outBytes).toBe('number');
     expect(typeof body.cargo.inCount).toBe('number');
+    expect(typeof body.cargo.inBytes).toBe('number');
     expect(typeof body.passport.registrations).toBe('number');
     expect(typeof body.dlq.parked).toBe('number');
     expect(Array.isArray(body.destinations)).toBe(true);
@@ -242,6 +243,7 @@ describe('GET /api/airport', () => {
     expect(body.cargo.outCount).toBe(1);
     expect(body.cargo.outBytes).toBe(1000);
     expect(body.cargo.inCount).toBe(1);
+    expect(body.cargo.inBytes).toBe(2000);
   });
 
   it('lists top origin domains but never suspended ones', async () => {

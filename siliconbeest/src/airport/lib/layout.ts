@@ -6,15 +6,6 @@
  * on the client, and both must produce identical markup for the same data.
  */
 
-/**
- * Digit-based vehicle scaling (from the reference train-map article):
- * 1–9 → 1 vehicle, 10–99 → 2, … capped at `max`. Log scaling keeps the
- * scene calm — it only changes when a number gains a digit.
- */
-export function vehicles(n: number, max = 4): number {
-	return n <= 0 ? 0 : Math.min(max, Math.floor(Math.log10(n)) + 1);
-}
-
 export function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	const units = ['KB', 'MB', 'GB', 'TB'];
@@ -27,97 +18,63 @@ export function formatBytes(bytes: number): string {
 	return `${value >= 10 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
-/** djb2 string hash — stable across runs and platforms. */
-export function hashDomain(domain: string): number {
-	let h = 5381;
-	for (let i = 0; i < domain.length; i++) {
-		h = ((h << 5) + h + domain.charCodeAt(i)) >>> 0;
+export interface BeaconInput {
+	domain: string;
+	arrivals: number;
+}
+
+export interface Beacon {
+	idx: number;
+	label: string;
+	arrivals: number;
+	cx: number;
+	cy: number;
+	/** Dot radius — grows with the digit count of arrivals. */
+	r: number;
+	glow: number;
+	/** Label baseline y, just above the dot. */
+	ty: number;
+	/** Only the top-5 busiest beacons carry a visible domain label. */
+	labeled: boolean;
+}
+
+/** FNV-1a — matches the hash used by the approved Claude Design layout. */
+function fnv1a(s: string): number {
+	let h = 2166136261 >>> 0;
+	for (let i = 0; i < s.length; i++) {
+		h ^= s.charCodeAt(i);
+		h = Math.imul(h, 16777619) >>> 0;
 	}
 	return h;
 }
 
-export interface Rect {
-	x: number;
-	y: number;
-	w: number;
-	h: number;
-}
-
-export interface DestinationInput {
-	domain: string;
-	arrivals: number;
-	delayed: boolean;
-}
-
-export interface DestinationSpot extends DestinationInput {
-	x: number;
-	y: number;
-	/** 1..3 — digit count of arrivals, used for the airport glyph size. */
-	size: number;
-}
-
-const GOLDEN_ANGLE = 2.39996322972865332;
-
 /**
- * Place destination airports deterministically inside `region`.
- * The base position comes from the domain hash, so the same domain always
- * lands on the same spot; overlapping spots step outward along a spiral
- * whose start angle also derives from the hash. Same domains → same sky.
+ * Place federation beacons in the sky band of the 1600×1000 scene.
+ * Position derives from the domain hash, so the same domain always shines
+ * in the same spot; size follows the digit count of its 24h arrivals.
  */
-export function placeDestinations(
-	destinations: DestinationInput[],
-	region: Rect,
-	minDist = 95,
-): DestinationSpot[] {
-	const placed: DestinationSpot[] = [];
-	// Placement order is sorted by domain so the result does not depend on
-	// the (traffic-ranked) API ordering.
-	const sorted = [...destinations].sort((a, b) => a.domain.localeCompare(b.domain));
+export function computeBeacons(peers: BeaconInput[]): Beacon[] {
+	const top = [...peers]
+		.sort((a, b) => b.arrivals - a.arrivals)
+		.slice(0, 5)
+		.map((p) => p.domain);
 
-	const wrap = (v: number, size: number) => ((v % size) + size) % size;
-
-	for (const dest of sorted) {
-		const h = hashDomain(dest.domain);
-		const baseX = ((h % 997) / 997) * region.w;
-		const baseY = ((Math.floor(h / 997) % 613) / 613) * region.h;
-		const startAngle = ((h % 360) * Math.PI) / 180;
-
-		let x = region.x + baseX;
-		let y = region.y + baseY;
-		let step = 0;
-		while (
-			placed.some((p) => Math.hypot(p.x - x, p.y - y) < minDist) &&
-			step < 64
-		) {
-			step++;
-			const angle = startAngle + step * GOLDEN_ANGLE;
-			const radius = 16 * step;
-			x = region.x + wrap(baseX + radius * Math.cos(angle), region.w);
-			y = region.y + wrap(baseY + radius * Math.sin(angle), region.h);
-		}
-		placed.push({ ...dest, x, y, size: vehicles(dest.arrivals, 3) });
-	}
-
-	return placed;
-}
-
-export interface FleetEntry {
-	/** Negative begin offset — the vehicle was "already flying" on load. */
-	begin: string;
-	dur: string;
-	/** Path fraction where the vehicle parks under prefers-reduced-motion. */
-	freeze: string;
-}
-
-/**
- * Spread `count` vehicles evenly along a looped path of `durSeconds`.
- * Negative begins avoid the SMIL pitfall where a positive offset leaves the
- * vehicle sitting at the SVG origin until its start time.
- */
-export function makeFleet(count: number, durSeconds: number): FleetEntry[] {
-	return Array.from({ length: count }, (_, i) => ({
-		begin: `-${((i * durSeconds) / count).toFixed(1)}s`,
-		dur: `${durSeconds}s`,
-		freeze: ((i + 0.5) / count).toFixed(3),
-	}));
+	return peers.map((p, idx) => {
+		const h = fnv1a(p.domain);
+		const cx = 130 + (((h >>> 3) % 1000) / 1000) * 1340;
+		const cy = 56 + (((h >>> 13) % 1000) / 1000) * 148;
+		const digits = String(Math.max(0, p.arrivals)).length;
+		const r = 2.5 + digits * 1.6;
+		return {
+			idx,
+			label: p.domain,
+			arrivals: p.arrivals,
+			cx: +cx.toFixed(1),
+			cy: +cy.toFixed(1),
+			r: +r.toFixed(1),
+			glow: +(r + 7).toFixed(1),
+			ty: +(cy - r - 6).toFixed(1),
+			labeled: top.indexOf(p.domain) >= 0,
+		};
+	});
 }

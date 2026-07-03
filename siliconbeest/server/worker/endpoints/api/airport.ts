@@ -20,7 +20,7 @@ import { ulidLowerBound } from '../../utils/ulid';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-const CACHE_KEY = 'airport:stats:v2';
+const CACHE_KEY = 'airport:stats:v3';
 const CACHE_TTL = 60; // seconds
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const MAX_DESTINATIONS = 8;
@@ -38,6 +38,7 @@ export interface AirportStats {
 		outCount: number; // locally uploaded media attachments in window
 		outBytes: number;
 		inCount: number; // remote media attachments in window
+		inBytes: number;
 	};
 	passport: {
 		registrations: number; // new local users in window
@@ -188,6 +189,7 @@ async function computeStats(): Promise<AirportStats> {
 			outCount: cargoOutRow?.cnt ?? 0,
 			outBytes: cargoOutRow?.bytes ?? 0,
 			inCount: cargoInRow?.cnt ?? 0,
+			inBytes: cargoInRow?.bytes ?? 0,
 		},
 		passport: {
 			registrations: registrationsRow?.cnt ?? 0,
