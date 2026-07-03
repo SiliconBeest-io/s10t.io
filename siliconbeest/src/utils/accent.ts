@@ -9,7 +9,7 @@
  *    relative luminance so the ＋ Note button stays readable for any accent.
  */
 
-export const DEFAULT_ACCENT = '#c6f24e';
+export const DEFAULT_ACCENT = '#6366f1';
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 

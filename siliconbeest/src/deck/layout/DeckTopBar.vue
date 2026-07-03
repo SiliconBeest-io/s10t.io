@@ -34,7 +34,7 @@ function toggleTheme() {
         style="background: var(--dk-acc)"
       >
         <img v-if="logoSrc" :src="logoSrc" alt="" class="h-7 w-7 object-contain" @error="onLogoError" />
-        <span v-else class="text-[18px] font-extrabold" style="color: var(--dk-acc-ink, #181322)">
+        <span v-else class="text-[18px] font-extrabold" style="color: var(--dk-acc-ink, #ffffff)">
           {{ (instanceStore.instance?.title || 'S').slice(0, 1) }}
         </span>
       </span>

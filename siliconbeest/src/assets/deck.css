@@ -18,7 +18,7 @@
   --dk-border: oklch(0.865 0.015 95);
   --dk-text: oklch(0.24 0.02 300);
   --dk-dim: oklch(0.5 0.02 300);
-  --dk-acc: color-mix(in oklab, var(--dk-acc-raw, #c6f24e) 86%, black);
+  --dk-acc: color-mix(in oklab, var(--dk-acc-raw, #6366f1) 86%, black);
   --dk-acc2: oklch(0.58 0.18 305);
 
   --dk-pad: 16px;
@@ -49,7 +49,7 @@
   --dk-border: oklch(0.32 0.03 300);
   --dk-text: oklch(0.95 0.01 300);
   --dk-dim: oklch(0.68 0.02 300);
-  --dk-acc: var(--dk-acc-raw, #c6f24e);
+  --dk-acc: var(--dk-acc-raw, #6366f1);
   --dk-acc2: oklch(0.74 0.17 305);
 }
 
@@ -133,7 +133,7 @@
   justify-content: center;
   gap: 6px;
   background: var(--dk-acc);
-  color: var(--dk-acc-ink, #181322);
+  color: var(--dk-acc-ink, #ffffff);
   border: none;
   border-radius: 999px;
   padding: 9px 17px;
@@ -390,7 +390,7 @@
 .dk-app .sb-btn-primary {
   background-image: none;
   background-color: var(--dk-acc);
-  color: var(--dk-acc-ink, #181322);
+  color: var(--dk-acc-ink, #ffffff);
 }
 .dk-app .sb-btn-primary:hover {
   filter: none;

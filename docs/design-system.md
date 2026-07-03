@@ -103,7 +103,7 @@ and `dk-*` recipes in the same component.
 ## Design language
 
 Dark-first, terminal-flavored fediverse deck: TweetDeck-style columns, an
-admin-selectable accent (default `#c6f24e` lime), a fixed violet second
+admin-selectable accent (default `#6366f1` indigo), a fixed violet second
 accent, Bricolage Grotesque for UI text and JetBrains Mono for metadata
 (handles, timestamps, chips, labels). Chips and buttons are pills; cards are
 rounded-16 with hairline borders; the page backdrop is two radial accent
