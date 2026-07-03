@@ -28,10 +28,10 @@ function isActive(path: string): boolean {
       to="/home"
       class="dk-dim-text relative flex flex-col items-center gap-0.5 rounded-xl px-3 py-1 no-underline"
       :class="{ 'dk-text': isActive('/home') }"
-      :aria-label="t('nav.home')"
+      :aria-label="t('deck.deck')"
     >
-      <span class="text-lg" aria-hidden="true">🏠</span>
-      <span class="dk-rail-label">{{ t('nav.home') }}</span>
+      <span class="text-lg" aria-hidden="true">🗂️</span>
+      <span class="dk-rail-label">{{ t('deck.deck') }}</span>
     </router-link>
 
     <router-link

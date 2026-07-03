@@ -989,6 +989,13 @@
     "columns_empty": "모든 컬럼이 숨겨져 있습니다. 왼쪽 레일에서 타임라인을 다시 켜세요.",
     "toggle_column": "{name} 컬럼 표시/숨기기",
     "design_aurora": "Aurora UI",
-    "design_classic": "클래식 UI"
+    "design_classic": "클래식 UI",
+    "deck": "덱",
+    "columns_short": "컬럼",
+    "columns_title": "덱 컬럼",
+    "col_notifications": "~/alerts",
+    "move_up": "위로 이동",
+    "move_down": "아래로 이동",
+    "drag_to_reorder": "끌어서 순서 변경"
   }
 }

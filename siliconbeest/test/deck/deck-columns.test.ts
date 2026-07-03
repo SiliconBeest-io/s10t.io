@@ -1,63 +1,67 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { nextTick } from 'vue';
-import {
-  useDeckColumns,
-  _reloadDeckColumns,
-  DECK_COLUMN_ORDER,
-} from '@/deck/composables/useDeckColumns';
-
-const STORAGE_KEY = 'siliconbeest_deck_columns';
+import { createPinia, setActivePinia } from 'pinia';
+import { useUiStore } from '@/stores/ui';
+import { useDeckColumns, DECK_COLUMN_TYPES } from '@/deck/composables/useDeckColumns';
 
 beforeEach(() => {
-  localStorage.clear();
-  _reloadDeckColumns();
+  setActivePinia(createPinia());
 });
 
 describe('useDeckColumns', () => {
-  it('shows all three columns by default in fixed order', () => {
-    const { visibleColumns } = useDeckColumns();
-    expect(visibleColumns.value).toEqual(['home', 'local', 'federated']);
-    expect(DECK_COLUMN_ORDER).toEqual(['home', 'local', 'federated']);
+  it('defaults to home/local/federated from the ui store, in order', () => {
+    const { columns, configRows } = useDeckColumns();
+    expect(columns.value).toEqual(['home', 'local', 'federated']);
+    // Disabled types follow the enabled region
+    expect(configRows.value).toEqual(['home', 'local', 'federated', 'notifications']);
+    expect(DECK_COLUMN_TYPES).toEqual(['home', 'local', 'federated', 'notifications']);
   });
 
-  it('toggle hides and re-shows a column', () => {
-    const { visibleColumns, toggle, isVisible } = useDeckColumns();
+  it('toggle adds a column at the end and removes it preserving order', () => {
+    const { columns, toggle, isEnabled } = useDeckColumns();
+    toggle('notifications');
+    expect(columns.value).toEqual(['home', 'local', 'federated', 'notifications']);
+    expect(isEnabled('notifications')).toBe(true);
+
     toggle('local');
-    expect(isVisible('local')).toBe(false);
-    expect(visibleColumns.value).toEqual(['home', 'federated']);
-    toggle('local');
-    expect(visibleColumns.value).toEqual(['home', 'local', 'federated']);
+    expect(columns.value).toEqual(['home', 'federated', 'notifications']);
+    expect(isEnabled('local')).toBe(false);
   });
 
-  it('show makes a hidden column visible and keeps order fixed', () => {
-    const { visibleColumns, toggle, show } = useDeckColumns();
-    toggle('home');
-    toggle('federated');
-    expect(visibleColumns.value).toEqual(['local']);
-    show('home');
-    show('home'); // idempotent
-    expect(visibleColumns.value).toEqual(['home', 'local']);
-  });
-
-  it('persists to localStorage and reloads from it', async () => {
+  it('toggle persists through the ui store setColumns (server-synced path)', () => {
+    const ui = useUiStore();
     const { toggle } = useDeckColumns();
-    toggle('federated');
-    await nextTick();
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual({
-      home: true,
-      local: true,
-      federated: false,
-    });
-
-    _reloadDeckColumns();
-    const { visibleColumns } = useDeckColumns();
-    expect(visibleColumns.value).toEqual(['home', 'local']);
+    toggle('home');
+    expect(ui.columns).toEqual(['local', 'federated']);
   });
 
-  it('ignores corrupted storage', () => {
-    localStorage.setItem(STORAGE_KEY, '{not json');
-    _reloadDeckColumns();
-    const { visibleColumns } = useDeckColumns();
-    expect(visibleColumns.value).toEqual(['home', 'local', 'federated']);
+  it('move shifts a column up/down within bounds', () => {
+    const { columns, move } = useDeckColumns();
+    move('federated', -1);
+    expect(columns.value).toEqual(['home', 'federated', 'local']);
+    move('home', -1); // already first — no-op
+    expect(columns.value).toEqual(['home', 'federated', 'local']);
+    move('local', 1); // already last — no-op
+    expect(columns.value).toEqual(['home', 'federated', 'local']);
+    move('home', 1);
+    expect(columns.value).toEqual(['federated', 'home', 'local']);
+  });
+
+  it('reorder moves rows within the enabled region only', () => {
+    const { columns, reorder } = useDeckColumns();
+    reorder(0, 2);
+    expect(columns.value).toEqual(['local', 'federated', 'home']);
+    // Row 3 is the disabled notifications row — not a valid target
+    reorder(0, 3);
+    expect(columns.value).toEqual(['local', 'federated', 'home']);
+    reorder(2, 0);
+    expect(columns.value).toEqual(['home', 'local', 'federated']);
+  });
+
+  it('dedupes and drops unknown values coming from server prefs', () => {
+    const ui = useUiStore();
+    ui.columns = ['home', 'home', 'bogus', 'notifications'] as never;
+    const { columns, configRows } = useDeckColumns();
+    expect(columns.value).toEqual(['home', 'notifications']);
+    expect(configRows.value).toEqual(['home', 'notifications', 'local', 'federated']);
   });
 });

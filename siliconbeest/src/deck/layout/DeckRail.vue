@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
-import { useDeckColumns, type DeckColumnKey } from '../composables/useDeckColumns'
+import { useDeckColumns } from '../composables/useDeckColumns'
+import type { ColumnType } from '@/stores/ui'
 import Avatar from '@/components/common/Avatar.vue'
 
 const { t } = useI18n()
@@ -12,23 +13,26 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const notifStore = useNotificationsStore()
-const { isVisible, toggle, show } = useDeckColumns()
+const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns()
 
-const timelineEntries: { key: DeckColumnKey; emoji: string; labelKey: string }[] = [
-  { key: 'home', emoji: '🏠', labelKey: 'nav.home' },
-  { key: 'local', emoji: '🦬', labelKey: 'nav.local_timeline' },
-  { key: 'federated', emoji: '📡', labelKey: 'nav.federated_timeline' },
+const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
+  home: { emoji: '🏠', labelKey: 'nav.home' },
+  local: { emoji: '🦬', labelKey: 'nav.local_timeline' },
+  federated: { emoji: '📡', labelKey: 'nav.federated_timeline' },
+  notifications: { emoji: '🔔', labelKey: 'nav.notifications' },
+}
+
+// Single-timeline navigation entries (after the Deck entry)
+const timelineEntries: { type: 'home' | 'local' | 'federated'; emoji: string; labelKey: string }[] = [
+  { type: 'home', emoji: '🏠', labelKey: 'nav.home' },
+  { type: 'local', emoji: '🦬', labelKey: 'nav.local_timeline' },
+  { type: 'federated', emoji: '📡', labelKey: 'nav.federated_timeline' },
 ]
 
 const onDeck = computed(() => route.name === 'home')
 
-function onTimelineClick(key: DeckColumnKey) {
-  if (onDeck.value) {
-    toggle(key)
-  } else {
-    show(key)
-    void router.push('/home')
-  }
+function isTimelineActive(type: string): boolean {
+  return route.name === 'timeline' && route.params.type === type
 }
 
 const unreadBadge = computed(() => {
@@ -36,15 +40,47 @@ const unreadBadge = computed(() => {
   return n > 99 ? '99+' : n > 0 ? String(n) : ''
 })
 
+const showColumnConfig = ref(false)
 const showMore = ref(false)
 const showAccount = ref(false)
 
 function closeMenus() {
+  showColumnConfig.value = false
   showMore.value = false
   showAccount.value = false
 }
 
 watch(() => route.fullPath, closeMenus)
+
+function openColumnConfig() {
+  showMore.value = false
+  showAccount.value = false
+  showColumnConfig.value = !showColumnConfig.value
+}
+
+// Drag & drop reordering inside the column-config popover
+const dragRow = ref<number | null>(null)
+
+function onDragStart(row: number, event: DragEvent) {
+  dragRow.value = row
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    // Firefox needs data for the drag to start
+    event.dataTransfer.setData('text/plain', String(row))
+  }
+}
+
+function onDragOver(row: number, event: DragEvent) {
+  event.preventDefault()
+  if (dragRow.value === null || dragRow.value === row) return
+  if (row >= columns.value.length) return // disabled region is not a drop target
+  reorder(dragRow.value, row)
+  dragRow.value = row
+}
+
+function onDragEnd() {
+  dragRow.value = null
+}
 
 const moreEntries = computed(() => [
   { path: '/bookmarks', label: t('nav.bookmarks'), emoji: '🔖' },
@@ -77,25 +113,101 @@ function isRouteActive(path: string): boolean {
     class="dk-hairline-r w-[78px] flex-none flex-col items-center gap-1.5 px-2.5 py-3.5"
     :aria-label="t('nav.main_navigation')"
   >
-    <!-- Timeline column toggles -->
-    <button
-      v-for="entry in timelineEntries"
-      :key="entry.key"
-      type="button"
-      class="dk-rail-item"
-      :class="{ 'dk-rail-item-active': onDeck && isVisible(entry.key) }"
-      :title="t(entry.labelKey)"
-      :aria-label="t('deck.toggle_column', { name: t(entry.labelKey) })"
-      :aria-pressed="onDeck ? isVisible(entry.key) : undefined"
-      @click="onTimelineClick(entry.key)"
-    >
-      <span class="text-[19px]" aria-hidden="true">{{ entry.emoji }}</span>
-      <span class="dk-rail-label">{{ t(entry.labelKey) }}</span>
-    </button>
+    <!-- Deck (multi-column) + column configuration -->
+    <div class="relative flex flex-col items-center">
+      <router-link
+        to="/home"
+        class="dk-rail-item no-underline"
+        :class="{ 'dk-rail-item-active': onDeck }"
+        :title="t('deck.deck')"
+        :aria-label="t('deck.deck')"
+      >
+        <span class="text-[19px]" aria-hidden="true">🗂️</span>
+        <span class="dk-rail-label">{{ t('deck.deck') }}</span>
+      </router-link>
+      <button
+        type="button"
+        class="dk-mono dk-dim-text mt-0.5 cursor-pointer rounded-full border-0 bg-transparent px-2 py-0.5 text-[9px] hover:underline"
+        :aria-label="t('deck.columns_title')"
+        :aria-expanded="showColumnConfig"
+        @click="openColumnConfig"
+      >
+        ⚏ {{ t('deck.columns_short') }}
+      </button>
+
+      <div v-if="showColumnConfig" class="fixed inset-0 z-10" aria-hidden="true" @click="closeMenus" />
+      <div v-if="showColumnConfig" class="dk-menu absolute left-full top-0 z-20 ml-2 w-64 p-2.5">
+        <div class="dk-mono dk-dim-text mb-2 px-1 text-[10.5px] uppercase tracking-wide">
+          {{ t('deck.columns_title') }}
+        </div>
+        <ul class="flex list-none flex-col gap-1 p-0">
+          <li
+            v-for="(type, row) in configRows"
+            :key="type"
+            class="flex items-center gap-2 rounded-[10px] px-2 py-1.5"
+            :style="{
+              background: row === dragRow ? 'color-mix(in oklab, var(--dk-acc) 18%, transparent)' : 'var(--dk-surface2)',
+              opacity: isEnabled(type) ? 1 : 0.55,
+            }"
+            :draggable="isEnabled(type)"
+            @dragstart="onDragStart(row, $event)"
+            @dragover="onDragOver(row, $event)"
+            @dragend="onDragEnd"
+          >
+            <span
+              v-if="isEnabled(type)"
+              class="dk-dim-text cursor-grab select-none text-[13px]"
+              :title="t('deck.drag_to_reorder')"
+              aria-hidden="true"
+            >≡</span>
+            <span v-else class="w-[13px]" aria-hidden="true" />
+            <span aria-hidden="true">{{ COLUMN_META[type].emoji }}</span>
+            <span class="dk-text flex-1 truncate text-[13px]">{{ t(COLUMN_META[type].labelKey) }}</span>
+            <template v-if="isEnabled(type)">
+              <button
+                type="button"
+                class="dk-dim-text cursor-pointer rounded border-0 bg-transparent px-1 text-[12px] hover:opacity-70 disabled:opacity-30"
+                :disabled="row === 0"
+                :aria-label="t('deck.move_up')"
+                @click="move(type, -1)"
+              >↑</button>
+              <button
+                type="button"
+                class="dk-dim-text cursor-pointer rounded border-0 bg-transparent px-1 text-[12px] hover:opacity-70 disabled:opacity-30"
+                :disabled="row === columns.length - 1"
+                :aria-label="t('deck.move_down')"
+                @click="move(type, 1)"
+              >↓</button>
+            </template>
+            <input
+              type="checkbox"
+              class="h-4 w-4 cursor-pointer accent-[var(--dk-acc)]"
+              :checked="isEnabled(type)"
+              :aria-label="t('deck.toggle_column', { name: t(COLUMN_META[type].labelKey) })"
+              @change="toggle(type)"
+            />
+          </li>
+        </ul>
+      </div>
+    </div>
 
     <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
 
-    <!-- Notifications -->
+    <!-- Single timelines: Home | Local | Federated -->
+    <router-link
+      v-for="entry in timelineEntries"
+      :key="entry.type"
+      :to="`/timelines/${entry.type}`"
+      class="dk-rail-item no-underline"
+      :class="{ 'dk-rail-item-active': isTimelineActive(entry.type) }"
+      :title="t(entry.labelKey)"
+      :aria-label="t(entry.labelKey)"
+    >
+      <span class="text-[19px]" aria-hidden="true">{{ entry.emoji }}</span>
+      <span class="dk-rail-label">{{ t(entry.labelKey) }}</span>
+    </router-link>
+
+    <!-- Alerts (notifications) -->
     <router-link
       v-if="auth.isAuthenticated"
       to="/notifications"
@@ -130,7 +242,7 @@ function isRouteActive(path: string): boolean {
         :title="t('nav.more')"
         :aria-label="t('nav.more')"
         :aria-expanded="showMore"
-        @click="showAccount = false; showMore = !showMore"
+        @click="showAccount = false; showColumnConfig = false; showMore = !showMore"
       >
         <span class="text-[19px]" aria-hidden="true">⋯</span>
         <span class="dk-rail-label">{{ t('nav.more') }}</span>
@@ -187,7 +299,7 @@ function isRouteActive(path: string): boolean {
         :title="auth.currentUser?.display_name || auth.currentUser?.username"
         :aria-label="t('nav.profile')"
         :aria-expanded="showAccount"
-        @click="showMore = false; showAccount = !showAccount"
+        @click="showMore = false; showColumnConfig = false; showAccount = !showAccount"
       >
         <Avatar :src="auth.currentUser?.avatar" :alt="auth.currentUser?.display_name || ''" size="sm" />
       </button>

@@ -989,6 +989,13 @@
     "columns_empty": "所有欄位皆已隱藏。請從左側欄重新開啟時間軸。",
     "toggle_column": "切換 {name} 欄位",
     "design_aurora": "Aurora 介面",
-    "design_classic": "經典介面"
+    "design_classic": "經典介面",
+    "deck": "面板",
+    "columns_short": "欄位",
+    "columns_title": "面板欄位",
+    "col_notifications": "~/alerts",
+    "move_up": "上移",
+    "move_down": "下移",
+    "drag_to_reorder": "拖曳以重新排序"
   }
 }

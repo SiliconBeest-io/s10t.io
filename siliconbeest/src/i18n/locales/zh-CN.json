@@ -989,6 +989,13 @@
     "columns_empty": "所有栏目均已隐藏。请从左侧栏重新打开时间线。",
     "toggle_column": "切换 {name} 栏目",
     "design_aurora": "Aurora 界面",
-    "design_classic": "经典界面"
+    "design_classic": "经典界面",
+    "deck": "面板",
+    "columns_short": "栏目",
+    "columns_title": "面板栏目",
+    "col_notifications": "~/alerts",
+    "move_up": "上移",
+    "move_down": "下移",
+    "drag_to_reorder": "拖动以重新排序"
   }
 }

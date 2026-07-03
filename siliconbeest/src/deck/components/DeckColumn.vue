@@ -9,7 +9,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import InfiniteScroll from '@/components/common/InfiniteScroll.vue'
 import DeckStatusCard from './DeckStatusCard.vue'
-import type { DeckColumnKey } from '../composables/useDeckColumns'
+
+type DeckTimelineColumnType = 'home' | 'local' | 'federated'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -19,13 +20,13 @@ const auth = useAuthStore()
 const instanceStore = useInstanceStore()
 
 const props = withDefaults(defineProps<{
-  type: DeckColumnKey
+  type: DeckTimelineColumnType
   fluid?: boolean
 }>(), {
   fluid: false,
 })
 
-const COLUMN_META: Record<DeckColumnKey, { emoji: string; timelineType: TimelineType; streamKey: string }> = {
+const COLUMN_META: Record<DeckTimelineColumnType, { emoji: string; timelineType: TimelineType; streamKey: string }> = {
   home: { emoji: '🏠', timelineType: 'home', streamKey: 'user' },
   local: { emoji: '🦬', timelineType: 'local', streamKey: 'public:local' },
   federated: { emoji: '📡', timelineType: 'public', streamKey: 'public' },
