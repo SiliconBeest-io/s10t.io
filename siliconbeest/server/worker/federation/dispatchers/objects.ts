@@ -74,7 +74,10 @@ export function setupObjectDispatchers(
         `SELECT s.*, a.username, a.domain AS account_domain
          FROM statuses s
          JOIN accounts a ON a.id = s.account_id
-         WHERE s.id = ?1 AND a.username = ?2 AND a.domain IS NULL`,
+         WHERE s.id = ?1
+           AND a.username = ?2
+           AND a.domain IS NULL
+           AND s.visibility IN ('public', 'unlisted')`,
       )
         .bind(id, identifier)
         .first<StatusRow & { username: string; account_domain: string | null }>();
@@ -156,7 +159,10 @@ export async function handleActivityRequest(
     `SELECT s.*, a.username, a.domain AS account_domain
      FROM statuses s
      JOIN accounts a ON a.id = s.account_id
-     WHERE s.id = ?1 AND a.username = ?2 AND a.domain IS NULL`,
+     WHERE s.id = ?1
+       AND a.username = ?2
+       AND a.domain IS NULL
+       AND s.visibility IN ('public', 'unlisted')`,
   )
     .bind(id, identifier)
     .first<StatusRow & { username: string; account_domain: string | null }>();
@@ -325,6 +331,7 @@ export async function handleStatusCollectionRequest(
        AND a.username = ?2
        AND a.domain IS NULL
        AND s.deleted_at IS NULL
+       AND s.visibility IN ('public', 'unlisted')
        AND s.reblog_of_id IS NULL
      LIMIT 1`,
   ).bind(id, identifier).first<{
