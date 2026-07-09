@@ -218,8 +218,11 @@ success "VAPID keys generated"
 
 info "Generating OTP encryption key..."
 OTP_ENCRYPTION_KEY=$(openssl rand -hex 32)
-SETUP_SECRET=$(openssl rand -hex 32)
 success "OTP encryption key generated"
+
+info "Generating first-run setup secret..."
+SETUP_SECRET=$(openssl rand -hex 32)
+success "Setup secret generated"
 
 # ---------------------------------------------------------------------------
 # Clone repo temporarily for migrations & admin seeding
