@@ -18,11 +18,9 @@ import {
   Endpoints,
   PropertyValue,
   Emoji,
-  CryptographicKey,
-  Multikey,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
-import type { Federation } from '@fedify/fedify';
+import type { Context, Federation } from '@fedify/fedify';
 import type { Link as WebFingerLink } from '@fedify/webfinger';
 import type { FedifyContextData } from '../fedify';
 import type { AccountRow, ActorKeyRow, CustomEmojiRow } from '../../types/db';
@@ -32,7 +30,7 @@ import {
   importEd25519PublicKey,
   importEd25519PrivateKey,
 } from '../../../../../packages/shared/crypto/keys';
-import { encodeEd25519PublicKeyMultibase, generateEd25519KeyPair } from '../../utils/crypto';
+import { generateEd25519KeyPair } from '../../utils/crypto';
 import { getInstanceTitle } from '../../services/instance';
 import { env } from 'cloudflare:workers';
 
@@ -63,7 +61,7 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
 
       // ---- Instance actor (special case) ----
       if (identifier === '__instance__') {
-        return buildInstanceActor(domain);
+        return buildInstanceActor(ctx, domain);
       }
 
       // ---- Regular user actors ----
@@ -84,13 +82,14 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
       // the Hono Tombstone fallback route at /users/:username.
       if (account.suspended_at) return null;
 
-      const actorKey = await env.DB.prepare(
-        `SELECT * FROM actor_keys WHERE account_id = ?1 ORDER BY created_at DESC LIMIT 1`,
-      )
-        .bind(account.id)
-        .first<ActorKeyRow>();
-
-      if (!actorKey) return null;
+      // Fedify-managed key pairs (RSA first, then Ed25519; lazily generated
+      // by the key-pairs dispatcher below).  Serving fedify's own
+      // CryptographicKey/Multikey objects keeps the published key IDs
+      // (#main-key, #multikey-N) aligned with the keyIds fedify uses for
+      // outbound HTTP signatures and FEP-8b32 integrity proofs — remote
+      // servers resolve proof verificationMethods against this document.
+      const keys = await ctx.getActorKeyPairs(identifier);
+      if (keys.length === 0) return null;
 
       const actorUri = `https://${domain}/users/${account.username}`;
       const actorUrl = `https://${domain}/@${account.username}`;
@@ -163,34 +162,6 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
         }
       }
 
-      // --- RSA public key for publicKey field ---
-      const rsaPubCryptoKey = await importRsaPublicKey(actorKey.public_key);
-
-      // --- Ed25519 assertionMethod (generate if missing) ---
-      let ed25519PubBase64 = actorKey.ed25519_public_key as string | null;
-      if (!ed25519PubBase64) {
-        // Lazy-generate Ed25519 key pair on first actor fetch
-        try {
-          const generated = await generateEd25519KeyPair();
-          await env.DB.prepare(
-            'UPDATE actor_keys SET ed25519_public_key = ?1, ed25519_private_key = ?2 WHERE account_id = ?3',
-          ).bind(generated.publicKey, generated.privateKey, account.id).run();
-          ed25519PubBase64 = generated.publicKey;
-          console.log(`[actor] Generated Ed25519 key for ${account.username}`);
-        } catch (e) {
-          console.error(`[actor] Failed to generate Ed25519 key:`, e);
-        }
-      }
-      let assertionMethod: Multikey | undefined;
-      if (ed25519PubBase64) {
-        const ed25519PubCryptoKey = await importEd25519PublicKey(ed25519PubBase64, true);
-        assertionMethod = new Multikey({
-          id: new URL(`${actorUri}#ed25519-key`),
-          controller: new URL(actorUri),
-          publicKey: ed25519PubCryptoKey,
-        });
-      }
-
       // --- Determine actor type ---
       const ActorClass = account.bot ? Service : Person;
 
@@ -206,12 +177,8 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
         following: new URL(`${actorUri}/following`),
         featured: new URL(`${actorUri}/collections/featured`),
         featuredTags: new URL(`${actorUri}/collections/tags`),
-        publicKey: new CryptographicKey({
-          id: new URL(actorKey.key_id),
-          owner: new URL(actorUri),
-          publicKey: rsaPubCryptoKey,
-        }),
-        ...(assertionMethod ? { assertionMethod } : {}),
+        publicKey: keys[0].cryptographicKey,
+        assertionMethods: keys.map((key) => key.multikey),
         endpoints: new Endpoints({
           sharedInbox: new URL(`https://${domain}/inbox`),
         }),
@@ -343,36 +310,23 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
  * Build the instance-level Application actor.
  */
 async function buildInstanceActor(
+  ctx: Context<FedifyContextData>,
   domain: string,
 ): Promise<Application | null> {
-  // Look up existing instance actor key
-  const actorKey = await env.DB.prepare(
-    "SELECT * FROM actor_keys WHERE account_id = '__instance__'",
-  ).first<ActorKeyRow>();
-
-  if (!actorKey) {
-    // Instance actor not initialised yet; let the old endpoint handle lazy-init.
-    return null;
-  }
+  // Fedify-managed key pairs (dispatched by the key-pairs dispatcher, which
+  // also lazy-generates the Ed25519 key).  Empty means the instance actor is
+  // not initialised yet; let the old endpoint handle lazy-init.
+  const keys = await ctx.getActorKeyPairs('__instance__');
+  if (keys.length === 0) return null;
 
   // The instance actor's `id` MUST equal Fedify's route URL
-  // (`/users/__instance__`) so that the keyId Fedify generates for outbound
-  // signatures (`${actorUri}#main-key`) matches the `publicKey.id` we serve.
+  // (`/users/__instance__`) so that the keyIds Fedify generates for outbound
+  // signatures and proofs (`#main-key`, `#multikey-N`) match the
+  // `publicKey`/`assertionMethod` IDs we serve.
   // The legacy `/actor` Hono endpoint keeps serving its own self-consistent
   // actor doc (with `id: /actor`) so existing relay subscriptions that point
   // there continue to verify successfully; same private key, different keyId.
   const actorId = `https://${domain}/users/__instance__`;
-  const rsaPubCryptoKey = await importRsaPublicKey(actorKey.public_key);
-
-  let assertionMethod: Multikey | undefined;
-  if (actorKey.ed25519_public_key) {
-    const ed25519PubCryptoKey = await importEd25519PublicKey(actorKey.ed25519_public_key, true);
-    assertionMethod = new Multikey({
-      id: new URL(`${actorId}#ed25519-key`),
-      controller: new URL(actorId),
-      publicKey: ed25519PubCryptoKey,
-    });
-  }
 
   return new Application({
     id: new URL(actorId),
@@ -383,12 +337,8 @@ async function buildInstanceActor(
     outbox: new URL(`https://${domain}/outbox`),
     url: new URL(`https://${domain}/about`),
     manuallyApprovesFollowers: true,
-    publicKey: new CryptographicKey({
-      id: new URL(`${actorId}#main-key`),
-      owner: new URL(actorId),
-      publicKey: rsaPubCryptoKey,
-    }),
-    ...(assertionMethod ? { assertionMethod } : {}),
+    publicKey: keys[0].cryptographicKey,
+    assertionMethods: keys.map((key) => key.multikey),
     endpoints: new Endpoints({
       sharedInbox: new URL(`https://${domain}/inbox`),
     }),

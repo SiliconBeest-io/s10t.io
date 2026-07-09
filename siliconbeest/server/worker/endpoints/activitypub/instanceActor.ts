@@ -148,10 +148,12 @@ app.get('/', async (c) => {
 		endpoints: { sharedInbox: `https://${domain}/inbox` },
 	};
 
-	// Include Ed25519 assertionMethod if available
+	// Include Ed25519 assertionMethod if available.  The fragment follows
+	// fedify's Multikey naming (#multikey-N, Ed25519 is the 2nd key) so it
+	// stays consistent with the fedify-dispatched actor documents.
 	if (actorKey.ed25519_public_key) {
 		actorDoc.assertionMethod = [{
-			id: `${actorId}#ed25519-key`,
+			id: `${actorId}#multikey-2`,
 			type: 'Multikey',
 			controller: actorId,
 			publicKeyMultibase: encodeEd25519PublicKeyMultibase(actorKey.ed25519_public_key),

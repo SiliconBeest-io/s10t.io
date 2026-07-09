@@ -60,6 +60,27 @@ describe('ActivityPub Endpoints', () => {
       });
       expect(res.status).toBe(404);
     });
+
+    it('publishes assertionMethod keys under fedify keyId naming', async () => {
+      // Outbound FEP-8b32 integrity proofs reference `#multikey-2`
+      // (fedify's positional Multikey naming); the actor document must
+      // publish that exact id or remote servers cannot verify our proofs.
+      const res = await SELF.fetch(`${BASE}/users/apuser`, {
+        headers: { Accept: 'application/activity+json' },
+      });
+      const body = await res.json<Record<string, any>>();
+
+      const methods = Array.isArray(body.assertionMethod)
+        ? body.assertionMethod
+        : [body.assertionMethod];
+      const ids = methods.filter(Boolean).map((m: any) => (typeof m === 'string' ? m : m.id));
+      expect(ids).toContain(`https://${DOMAIN}/users/apuser#multikey-2`);
+      for (const m of methods.filter((m: any) => m && typeof m !== 'string')) {
+        expect(m.type).toBe('Multikey');
+        expect(m.controller).toBe(`https://${DOMAIN}/users/apuser`);
+        expect(m.publicKeyMultibase).toBeDefined();
+      }
+    });
   });
 
   // -------------------------------------------------------------------
