@@ -34,7 +34,7 @@
     var email = getString(formData, 'email').trim();
     var password = getString(formData, 'password');
     var confirmPassword = getString(formData, 'confirmPassword');
-    var setupSecret = getString(formData, 'setup_secret');
+    var setupSecret = getString(formData, 'setup_secret').trim();
 
     if (!username) return '사용자 이름을 입력해 주세요.';
     if (!/^[a-zA-Z0-9_]+$/.test(username)) return '사용자 이름은 영문, 숫자, 밑줄만 사용할 수 있습니다.';
