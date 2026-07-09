@@ -68,7 +68,12 @@ app.get('/', async (c) => {
 
 app.post('/', async (c) => {
   const body = await readSetupCreateBody(c);
-  const setupSecret = body.setup_secret || c.req.header('X-Setup-Secret');
+  const beforeCount = await getUserCount();
+  if (beforeCount !== 0) {
+    throw new AppError(403, 'Initial setup is no longer available');
+  }
+
+  const setupSecret = (c.req.header('X-Setup-Secret') ?? body.setup_secret)?.trim();
 
   if (!getSetupSecret()) {
     throw new AppError(503, 'Initial setup is not configured');
@@ -80,11 +85,6 @@ app.post('/', async (c) => {
 
   if (!body.username || !body.email || !body.password) {
     throw new AppError(422, 'Validation failed', 'Username, email, and password are required');
-  }
-
-  const beforeCount = await getUserCount();
-  if (beforeCount !== 0) {
-    throw new AppError(403, 'Initial setup is no longer available');
   }
 
   const now = new Date().toISOString();
