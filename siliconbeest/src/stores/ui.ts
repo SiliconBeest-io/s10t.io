@@ -158,6 +158,8 @@ export const useUiStore = defineStore('ui', () => {
 
   /** Token stored externally — only passed when calling server-synced setters */
   let _token: string | null = null;
+  /** Account whose preferences are currently represented by store state. */
+  let _loadedToken: string | null = null;
   // Invalidates preference requests that finish after logout, account changes,
   // or a newer SSR/client hydration has already supplied authoritative state.
   let preferenceLoadGeneration = 0;
@@ -214,6 +216,7 @@ export const useUiStore = defineStore('ui', () => {
    */
   function applyServerPreferences(token: string, data: ServerUiPreferences | null) {
     _token = token;
+    _loadedToken = token;
     columns.value = parseServerColumns(data?.['ui:columns']);
     showTrending.value = true;
 
@@ -231,6 +234,10 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   async function loadFromServer(token: string) {
+    // Set the token before starting I/O so local changes made while this
+    // request is pending can still be persisted. The generation check below
+    // keeps the older server response from overwriting those changes.
+    _token = token;
     const generation = ++preferenceLoadGeneration;
     try {
       const { data } = await getPreferences(token);
@@ -240,7 +247,7 @@ export const useUiStore = defineStore('ui', () => {
       if (generation !== preferenceLoadGeneration) return;
       // A successful SSR bootstrap may already hold the correct selection.
       // Do not erase it if the client's background refresh fails later.
-      const alreadyLoadedForToken = serverLoaded.value && _token === token;
+      const alreadyLoadedForToken = serverLoaded.value && _loadedToken === token;
       if (!alreadyLoadedForToken) {
         applyServerPreferences(token, null);
       }
@@ -250,6 +257,7 @@ export const useUiStore = defineStore('ui', () => {
   function resetToDefaults() {
     preferenceLoadGeneration += 1;
     _token = null;
+    _loadedToken = null;
     columns.value = [...DEFAULT_COLUMNS];
     showTrending.value = true;
     serverLoaded.value = false;

@@ -137,7 +137,11 @@ export const useAuthStore = defineStore('auth', () => {
       currentUser.value = data;
       // Load server-synced UI preferences
       const uiStore = useUiStore();
-      uiStore.loadFromServer(requestToken);
+      await uiStore.loadFromServer(requestToken);
+      if (
+        token.value !== requestToken ||
+        currentUserRequestGeneration !== requestGeneration
+      ) return;
       // Timeline views connect their own streams when they are mounted. Keep
       // only notifications global so an empty desktop deck loads no timeline.
       connectAuthenticatedNotificationStream(requestToken);

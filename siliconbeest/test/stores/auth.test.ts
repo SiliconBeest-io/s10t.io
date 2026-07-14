@@ -99,6 +99,26 @@ describe('Auth Store', () => {
     expect(connectNotifications).toHaveBeenCalledWith('test-token');
   });
 
+  it('waits for server UI preferences before resolving the current-user request', async () => {
+    const preferenceLoad = deferred<void>();
+    const store = useAuthStore();
+    const ui = useUiStore();
+    const loadFromServer = vi.spyOn(ui, 'loadFromServer')
+      .mockReturnValueOnce(preferenceLoad.promise);
+    store.setToken('test-token');
+
+    let resolved = false;
+    const currentUserRequest = store.fetchCurrentUser().then(() => {
+      resolved = true;
+    });
+    await vi.waitFor(() => expect(loadFromServer).toHaveBeenCalledWith('test-token'));
+    expect(resolved).toBe(false);
+
+    preferenceLoad.resolve();
+    await currentUserRequest;
+    expect(resolved).toBe(true);
+  });
+
   it('resets per-account state when the cookie token changes or disappears', () => {
     const store = useAuthStore();
     const ui = useUiStore();

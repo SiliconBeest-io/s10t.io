@@ -12,6 +12,7 @@ definePageMeta({ name: 'home' });
 const auth = useAuthStore();
 const ui = useUiStore();
 const nuxtApp = useNuxtApp();
+const requestFetch = useRequestFetch();
 
 interface HomeUiPreferencesState {
   tokenFingerprint: string;
@@ -45,7 +46,6 @@ if (requestToken) {
     !nuxtApp.isHydrating ||
     initialUiPreferences.value?.tokenFingerprint !== requestTokenFingerprint;
   if (shouldFetch) {
-    const requestFetch = useRequestFetch();
     try {
       const preferences = await requestFetch<Preferences>('/api/v1/preferences', {
         headers: { Authorization: `Bearer ${requestToken}` },

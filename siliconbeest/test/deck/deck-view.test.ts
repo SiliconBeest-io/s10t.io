@@ -88,6 +88,38 @@ describe('DeckView', () => {
     expect(html).not.toContain('data-column-type="federated"');
   });
 
+  it('uses the desktop sound scope while SSR still renders desktop markup on mobile', async () => {
+    const ui = useUiStore();
+    ui.isMobile = true;
+    ui.setMobileColumn('home');
+    ui.hydrateFromServer('token', {
+      'ui:columns': '["local"]',
+      'ui:show_trending': null,
+    });
+    const timelines = useTimelinesStore();
+    const soundScope = vi.spyOn(timelines, 'setAudibleTimelineScope');
+
+    const html = await renderDeck(pinia);
+
+    expect(html).toContain('data-column-type="local"');
+    expect(soundScope.mock.calls.at(-1)?.[1]).toEqual(['local']);
+  });
+
+  it('keeps social audible and excludes non-timeline desktop columns', () => {
+    const ui = useUiStore();
+    ui.isMobile = false;
+    ui.hydrateFromServer('token', {
+      'ui:columns': '["social","search","follow_requests"]',
+      'ui:show_trending': null,
+    });
+    const timelines = useTimelinesStore();
+    const soundScope = vi.spyOn(timelines, 'setAudibleTimelineScope');
+
+    mountDeck(pinia);
+
+    expect(soundScope.mock.calls.at(-1)?.[1]).toEqual(['social']);
+  });
+
   it('shows a left-pointing column-picker prompt when desktop selection is empty', () => {
     const ui = useUiStore();
     ui.isMobile = false;

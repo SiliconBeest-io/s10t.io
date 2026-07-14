@@ -8,6 +8,10 @@ import { useDeckColumns } from '../composables/useDeckColumns'
 import type { ColumnType } from '@/stores/ui'
 import Avatar from '@/components/common/Avatar.vue'
 
+defineProps<{
+  showMobileDeck?: boolean
+}>()
+
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -138,7 +142,7 @@ function isRouteActive(path: string): boolean {
         type="button"
         class="dk-mono dk-dim-text mt-0.5 cursor-pointer rounded-full border-0 bg-transparent px-2 py-0.5 text-[9px] hover:underline"
         :aria-label="t('deck.columns_title')"
-        :aria-describedby="onDeck && columns.length === 0 ? 'deck-empty-columns-guidance' : undefined"
+        :aria-describedby="onDeck && columns.length === 0 && !showMobileDeck ? 'deck-empty-columns-guidance' : undefined"
         :aria-expanded="showColumnConfig"
         @click="openColumnConfig"
       >

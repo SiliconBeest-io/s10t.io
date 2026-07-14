@@ -26,7 +26,7 @@ const hydrated = ref(false)
 onMounted(() => {
   hydrated.value = true
 })
-const showMobile = computed(() => hydrated.value && ui.isMobile)
+const showMobileDeck = computed(() => hydrated.value && ui.isMobile)
 
 /**
  * Plain vertical mouse wheels have no horizontal axis; when the pointer is
@@ -75,7 +75,7 @@ function toTimelineType(column: ColumnType): TimelineType | null {
 // On desktop every configured deck column is considered visible, including
 // columns currently outside the horizontal scroll viewport.
 const audibleTimelineTypes = computed<TimelineType[]>(() => {
-  const visibleColumns = ui.isMobile ? [activeMobile.value] : columns.value
+  const visibleColumns = showMobileDeck.value ? [activeMobile.value] : columns.value
   return visibleColumns
     .map(toTimelineType)
     .filter((type): type is TimelineType => type !== null)
@@ -101,10 +101,10 @@ watch(activeMobile, async (col) => {
 </script>
 
 <template>
-  <DeckShell>
+  <DeckShell :show-mobile-deck="showMobileDeck">
     <!-- Desktop: horizontal multi-column deck, ordered by the user's config -->
     <div
-      v-if="!showMobile"
+      v-if="!showMobileDeck"
       ref="deckEl"
       class="hidden h-full min-h-0 gap-3.5 overflow-x-auto overflow-y-hidden px-[18px] pb-2.5 pt-3.5 md:flex"
       tabindex="0"

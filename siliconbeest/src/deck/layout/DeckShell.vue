@@ -2,13 +2,17 @@
 import DeckTopBar from './DeckTopBar.vue'
 import DeckRail from './DeckRail.vue'
 import DeckMobileNav from './DeckMobileNav.vue'
+
+defineProps<{
+  showMobileDeck?: boolean
+}>()
 </script>
 
 <template>
   <div class="dk-app flex h-dvh flex-col overflow-hidden">
     <DeckTopBar />
     <div class="flex min-h-0 flex-1">
-      <DeckRail class="hidden md:flex" />
+      <DeckRail class="hidden md:flex" :show-mobile-deck="showMobileDeck" />
       <main class="min-h-0 min-w-0 flex-1">
         <slot />
       </main>

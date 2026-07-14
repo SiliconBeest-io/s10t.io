@@ -124,6 +124,25 @@ describe('UI Store', () => {
       expect(store.columns).toEqual(['local']);
     });
 
+    it('persists a local change made before the initial preference load finishes', async () => {
+      const store = useUiStore();
+      let resolveRequest!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences).mockReturnValueOnce(new Promise((resolve) => {
+        resolveRequest = resolve;
+      }));
+
+      const pending = store.loadFromServer('current-token');
+      store.setColumns(['local']);
+
+      expect(updatePreferences).toHaveBeenCalledWith('current-token', {
+        'ui:columns': '["local"]',
+      });
+
+      resolveRequest(preferenceResponse('["home"]'));
+      await pending;
+      expect(store.columns).toEqual(['local']);
+    });
+
     it('keeps a local trending change when an older refresh finishes later', async () => {
       const store = useUiStore();
       store.hydrateFromServer('current-token', {
