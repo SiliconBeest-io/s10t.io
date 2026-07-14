@@ -1,6 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "siliconbeest",
+	"preview_urls": true,
 	"compatibility_date": "2026-06-16",
 	"main": ".output/server/index.mjs",
 	"assets": {
