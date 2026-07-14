@@ -134,9 +134,11 @@ function isRouteActive(path: string): boolean {
         <span class="dk-rail-label">{{ t('deck.deck') }}</span>
       </router-link>
       <button
+        id="deck-column-picker-button"
         type="button"
         class="dk-mono dk-dim-text mt-0.5 cursor-pointer rounded-full border-0 bg-transparent px-2 py-0.5 text-[9px] hover:underline"
         :aria-label="t('deck.columns_title')"
+        :aria-describedby="onDeck && columns.length === 0 ? 'deck-empty-columns-guidance' : undefined"
         :aria-expanded="showColumnConfig"
         @click="openColumnConfig"
       >

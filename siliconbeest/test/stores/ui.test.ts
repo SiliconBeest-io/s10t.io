@@ -1,11 +1,240 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useUiStore } from '@/stores/ui';
+import { getPreferences, updatePreferences } from '@/api/mastodon/preferences';
+
+vi.mock('@/api/mastodon/preferences', () => ({
+  getPreferences: vi.fn(),
+  updatePreferences: vi.fn(async () => ({ data: {}, headers: new Headers() })),
+}));
+
+type PreferenceResponse = Awaited<ReturnType<typeof getPreferences>>;
+
+function preferenceResponse(
+  columns: string,
+  showTrending: string | boolean | null = null,
+): PreferenceResponse {
+  return {
+    data: {
+      'posting:default:visibility': 'public',
+      'posting:default:sensitive': false,
+      'posting:default:language': null,
+      'reading:expand:media': 'default',
+      'reading:expand:spoilers': false,
+      'ui:columns': columns,
+      'ui:show_trending': showTrending,
+    },
+    headers: new Headers(),
+  };
+}
 
 describe('UI Store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.removeItem("siliconbeest_token"); localStorage.removeItem("siliconbeest_theme");
+    vi.clearAllMocks();
+  });
+
+  describe('Server-synced columns', () => {
+    it('starts with no desktop columns selected', () => {
+      const store = useUiStore();
+      expect(store.columns).toEqual([]);
+    });
+
+    it('hydrates selected columns in server order and records the token for saves', () => {
+      const store = useUiStore();
+
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["notifications","home","local"]',
+        'ui:show_trending': false,
+      });
+
+      expect(store.columns).toEqual(['notifications', 'home', 'local']);
+      expect(store.showTrending).toBe(false);
+      expect(store.serverLoaded).toBe(true);
+
+      store.setColumns(['local']);
+      expect(updatePreferences).toHaveBeenCalledWith('server-token', {
+        'ui:columns': '["local"]',
+      });
+    });
+
+    it.each([
+      ['missing response', null],
+      ['null preference', { 'ui:columns': null, 'ui:show_trending': null }],
+      ['empty selection', { 'ui:columns': '[]', 'ui:show_trending': null }],
+      ['malformed JSON', { 'ui:columns': '[not-json', 'ui:show_trending': null }],
+      ['non-array JSON', { 'ui:columns': '{"home":true}', 'ui:show_trending': null }],
+    ])('hydrates %s as no selected columns', (_label, preferences) => {
+      const store = useUiStore();
+      store.columns = ['home'];
+
+      store.hydrateFromServer('server-token', preferences);
+
+      expect(store.columns).toEqual([]);
+      expect(store.serverLoaded).toBe(true);
+    });
+
+    it('drops unknown and duplicate server column values', () => {
+      const store = useUiStore();
+
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["home","bogus","home","search"]',
+        'ui:show_trending': null,
+      });
+
+      expect(store.columns).toEqual(['home', 'search']);
+    });
+
+    it('keeps SSR-hydrated columns when a later client refresh fails', async () => {
+      const store = useUiStore();
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["notifications","home"]',
+        'ui:show_trending': null,
+      });
+      vi.mocked(getPreferences).mockRejectedValueOnce(new Error('offline'));
+
+      await store.loadFromServer('server-token');
+
+      expect(store.columns).toEqual(['notifications', 'home']);
+      expect(store.serverLoaded).toBe(true);
+    });
+
+    it('keeps a local column change when an older refresh finishes later', async () => {
+      const store = useUiStore();
+      store.hydrateFromServer('current-token', {
+        'ui:columns': '["home"]',
+        'ui:show_trending': true,
+      });
+      let resolveRequest!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences).mockReturnValueOnce(new Promise((resolve) => {
+        resolveRequest = resolve;
+      }));
+
+      const pending = store.loadFromServer('current-token');
+      store.setColumns(['local']);
+
+      expect(updatePreferences).toHaveBeenCalledWith('current-token', {
+        'ui:columns': '["local"]',
+      });
+
+      resolveRequest(preferenceResponse('["federated"]'));
+      await pending;
+
+      expect(store.columns).toEqual(['local']);
+    });
+
+    it('keeps a local trending change when an older refresh finishes later', async () => {
+      const store = useUiStore();
+      store.hydrateFromServer('current-token', {
+        'ui:columns': '["home"]',
+        'ui:show_trending': true,
+      });
+      let resolveRequest!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences).mockReturnValueOnce(new Promise((resolve) => {
+        resolveRequest = resolve;
+      }));
+
+      const pending = store.loadFromServer('current-token');
+      store.setShowTrending(false);
+
+      expect(updatePreferences).toHaveBeenCalledWith('current-token', {
+        'ui:show_trending': 'false',
+      });
+
+      resolveRequest(preferenceResponse('["federated"]', true));
+      await pending;
+
+      expect(store.showTrending).toBe(false);
+      expect(store.columns).toEqual(['home']);
+    });
+
+    it('does not leak hydrated columns to a different token after a failed refresh', async () => {
+      const store = useUiStore();
+      store.hydrateFromServer('first-token', {
+        'ui:columns': '["notifications","home"]',
+        'ui:show_trending': null,
+      });
+      vi.mocked(getPreferences).mockRejectedValueOnce(new Error('offline'));
+
+      await store.loadFromServer('second-token');
+
+      expect(store.columns).toEqual([]);
+    });
+
+    it('ignores a preference response that finishes after logout reset', async () => {
+      const store = useUiStore();
+      let resolveRequest!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences).mockReturnValueOnce(new Promise((resolve) => {
+        resolveRequest = resolve;
+      }));
+
+      const pending = store.loadFromServer('old-token');
+      store.resetToDefaults();
+      resolveRequest(preferenceResponse('["notifications","home"]'));
+      await pending;
+
+      expect(store.columns).toEqual([]);
+      store.setColumns(['local']);
+      expect(updatePreferences).not.toHaveBeenCalled();
+    });
+
+    it('lets only the newest overlapping account request apply', async () => {
+      const store = useUiStore();
+      let resolveFirst!: (value: PreferenceResponse) => void;
+      let resolveSecond!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences)
+        .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+        .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+
+      const first = store.loadFromServer('first-token');
+      const second = store.loadFromServer('second-token');
+      resolveSecond(preferenceResponse('["local"]'));
+      await second;
+      resolveFirst(preferenceResponse('["home"]'));
+      await first;
+
+      expect(store.columns).toEqual(['local']);
+      store.setColumns(['federated']);
+      expect(updatePreferences).toHaveBeenCalledWith('second-token', {
+        'ui:columns': '["federated"]',
+      });
+    });
+
+    it('keeps the older response stale even when it finishes first', async () => {
+      const store = useUiStore();
+      let resolveFirst!: (value: PreferenceResponse) => void;
+      let resolveSecond!: (value: PreferenceResponse) => void;
+      vi.mocked(getPreferences)
+        .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+        .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
+
+      const first = store.loadFromServer('first-token');
+      const second = store.loadFromServer('second-token');
+      resolveFirst(preferenceResponse('["home"]'));
+      await first;
+      expect(store.columns).toEqual([]);
+
+      resolveSecond(preferenceResponse('["federated"]'));
+      await second;
+
+      expect(store.columns).toEqual(['federated']);
+    });
+
+    it('reset clears columns and the server token', () => {
+      const store = useUiStore();
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["home"]',
+        'ui:show_trending': null,
+      });
+
+      store.resetToDefaults();
+      store.setColumns(['local']);
+
+      expect(store.columns).toEqual(['local']);
+      expect(store.serverLoaded).toBe(false);
+      expect(updatePreferences).not.toHaveBeenCalled();
+    });
   });
 
   describe('Theme', () => {

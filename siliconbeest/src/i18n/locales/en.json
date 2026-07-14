@@ -1011,7 +1011,7 @@
     "live": "LIVE",
     "streaming": "streaming",
     "note": "Note",
-    "columns_empty": "All columns are hidden. Toggle a timeline back on from the rail.",
+    "columns_empty": "No columns are selected. Use the Columns button in the upper-left to choose what to load.",
     "toggle_column": "Toggle {name} column",
     "design_aurora": "Aurora UI",
     "design_classic": "Classic UI",

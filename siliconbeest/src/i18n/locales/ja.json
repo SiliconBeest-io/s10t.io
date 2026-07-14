@@ -1011,7 +1011,7 @@
     "live": "LIVE",
     "streaming": "ストリーミング",
     "note": "ノート",
-    "columns_empty": "すべてのカラムが非表示です。レールからタイムラインを再表示してください。",
+    "columns_empty": "選択されているカラムはありません。左上の「カラム」ボタンから読み込むカラムを選択してください。",
     "toggle_column": "{name} カラムの表示切替",
     "design_aurora": "Aurora UI",
     "design_classic": "クラシック UI",

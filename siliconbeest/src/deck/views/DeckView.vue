@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUiStore, type ColumnType } from '@/stores/ui'
+import type { TimelineType } from '@/stores/timelines'
+import { useAudibleTimelineScope } from '@/composables/useAudibleTimelineScope'
 
 import DeckShell from '../layout/DeckShell.vue'
 import DeckColumn from '../components/DeckColumn.vue'
@@ -16,11 +18,10 @@ const { columns, configRows } = useDeckColumns()
 
 const deckEl = ref<HTMLElement | null>(null)
 
-// SSR always renders the desktop deck (isMobile is false on the server).
-// Swapping v-if branches during hydration leaves the desktop branch's
-// attributes on reused DOM nodes (Vue doesn't patch attributes while
-// hydrating), which mangled the mobile layout — so only switch to the
-// mobile branch after mount.
+// SSR always renders the desktop deck (isMobile is false on the server). CSS
+// hides that branch below md, and we only switch markup after mount: swapping
+// v-if branches during hydration leaves desktop attributes on reused DOM
+// nodes because Vue does not patch those attributes while hydrating.
 const hydrated = ref(false)
 onMounted(() => {
   hydrated.value = true
@@ -61,6 +62,27 @@ const activeMobile = computed<ColumnType>(() =>
   mobileColumns.value.includes(ui.mobileColumn) ? ui.mobileColumn : (mobileColumns.value[0] ?? 'home'),
 )
 
+const SOUND_SCOPE = 'deck-home'
+
+function toTimelineType(column: ColumnType): TimelineType | null {
+  if (column === 'federated') return 'public'
+  if (column === 'home' || column === 'social' || column === 'local') return column
+  return null
+}
+
+// Streams stay connected after a mobile column has been visited. Register the
+// feeds that are actually visible so hidden columns cannot trigger the chime.
+// On desktop every configured deck column is considered visible, including
+// columns currently outside the horizontal scroll viewport.
+const audibleTimelineTypes = computed<TimelineType[]>(() => {
+  const visibleColumns = ui.isMobile ? [activeMobile.value] : columns.value
+  return visibleColumns
+    .map(toTimelineType)
+    .filter((type): type is TimelineType => type !== null)
+})
+
+useAudibleTimelineScope(SOUND_SCOPE, () => audibleTimelineTypes.value)
+
 // Columns mount lazily on first visit and stay mounted (v-show) so
 // switching is instant and scroll position is preserved.
 const visitedMobile = ref<Set<ColumnType>>(new Set([activeMobile.value]))
@@ -84,7 +106,7 @@ watch(activeMobile, async (col) => {
     <div
       v-if="!showMobile"
       ref="deckEl"
-      class="flex h-full min-h-0 gap-3.5 overflow-x-auto overflow-y-hidden px-[18px] pb-2.5 pt-3.5"
+      class="hidden h-full min-h-0 gap-3.5 overflow-x-auto overflow-y-hidden px-[18px] pb-2.5 pt-3.5 md:flex"
       tabindex="0"
       @wheel="onDeckWheel"
     >
@@ -95,8 +117,17 @@ watch(activeMobile, async (col) => {
         <DeckColumn v-else :type="key" />
       </template>
 
-      <div v-if="columns.length === 0" class="dk-card dk-dim-text m-auto max-w-md px-6 py-8 text-center text-[13.5px]">
-        {{ t('deck.columns_empty') }}
+      <div v-if="columns.length === 0" class="relative h-full min-w-full">
+        <div class="dk-card dk-dim-text absolute left-2 top-8 flex max-w-sm items-start gap-2.5 px-4 py-3 text-[13.5px]">
+          <span
+            class="dk-mono select-none text-2xl leading-5"
+            style="color: var(--dk-acc)"
+            aria-hidden="true"
+          >←</span>
+          <p id="deck-empty-columns-guidance" class="m-0 leading-relaxed">
+            {{ t('deck.columns_empty') }}
+          </p>
+        </div>
       </div>
     </div>
 

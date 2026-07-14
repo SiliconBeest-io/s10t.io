@@ -5,6 +5,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiStore, ALL_COLUMNS, type ColumnType } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useInstanceStore } from '@/stores/instance'
+import type { TimelineType } from '@/stores/timelines'
+import { useAudibleTimelineScope } from '@/composables/useAudibleTimelineScope'
 import AppShell from '@/components/layout/AppShell.vue'
 import TimelineColumn from '@/components/timeline/TimelineColumn.vue'
 import NotificationsColumn from '@/components/timeline/NotificationsColumn.vue'
@@ -58,6 +60,14 @@ const mobileColumns = ALL_COLUMNS
 const activeMobileColumn = computed<ColumnType>(() =>
   mobileColumns.includes(ui.mobileColumn) ? ui.mobileColumn : 'home',
 )
+const audibleTimelineTypes = computed<TimelineType[]>(() => {
+  const displayedColumns = ui.isMobile ? [activeMobileColumn.value] : visibleColumns.value
+  return displayedColumns
+    .filter((column) => column !== 'notifications')
+    .map(getTimelineType)
+})
+useAudibleTimelineScope('aurora-home', () => audibleTimelineTypes.value)
+
 const visitedMobileColumns = ref<Set<ColumnType>>(new Set([activeMobileColumn.value]))
 const tabStrip = ref<HTMLElement | null>(null)
 

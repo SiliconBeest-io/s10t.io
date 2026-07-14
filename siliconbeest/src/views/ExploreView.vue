@@ -7,6 +7,7 @@ import { useTimelinesStore } from '@/stores/timelines'
 import { useStatusesStore } from '@/stores/statuses'
 import { useAuthStore } from '@/stores/auth'
 import type { TimelineType } from '@/stores/timelines'
+import { useAudibleTimelineScope } from '@/composables/useAudibleTimelineScope'
 import AppShell from '@/components/layout/AppShell.vue'
 import TimelineFeed from '@/components/timeline/TimelineFeed.vue'
 import DismissibleBanner from '@/components/common/DismissibleBanner.vue'
@@ -27,6 +28,8 @@ const activeTab = computed<ExploreTab>(() =>
 const timelineType = computed<TimelineType>(() =>
   activeTab.value === 'federated' ? 'public' : 'local'
 )
+
+useAudibleTimelineScope('aurora-explore', () => [timelineType.value])
 
 const timeline = computed(() => timelinesStore.getTimeline(timelineType.value))
 

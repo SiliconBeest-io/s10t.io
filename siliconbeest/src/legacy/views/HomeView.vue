@@ -3,6 +3,8 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore, type ColumnType } from '@/stores/ui'
+import type { TimelineType } from '@/stores/timelines'
+import { useAudibleTimelineScope } from '@/composables/useAudibleTimelineScope'
 import AppShell from '@/legacy/components/layout/AppShell.vue'
 import TimelineColumn from '@/legacy/components/timeline/TimelineColumn.vue'
 import NotificationsColumn from '@/legacy/components/timeline/NotificationsColumn.vue'
@@ -27,6 +29,13 @@ const maxVisibleCount = computed(() => {
 const visibleColumns = computed(() => {
   return columns.value.slice(0, maxVisibleCount.value)
 })
+
+const audibleTimelineTypes = computed<TimelineType[]>(() =>
+  visibleColumns.value
+    .filter((column) => column !== 'notifications')
+    .map(getTimelineType),
+)
+useAudibleTimelineScope('classic-home', () => audibleTimelineTypes.value)
 
 onMounted(() => {
   if (gridContainer.value) {

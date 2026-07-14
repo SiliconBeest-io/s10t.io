@@ -1,6 +1,10 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watchEffect } from 'vue';
-import { getPreferences, updatePreferences } from '@/api/mastodon/preferences';
+import {
+  getPreferences,
+  updatePreferences,
+  type Preferences,
+} from '@/api/mastodon/preferences';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type ColumnType =
@@ -14,7 +18,7 @@ export type ColumnType =
 
 const THEME_KEY = 'siliconbeest_theme';
 const MOBILE_COLUMN_KEY = 'siliconbeest_mobile_column';
-const DEFAULT_COLUMNS: ColumnType[] = ['home', 'local', 'federated'];
+const DEFAULT_COLUMNS: ColumnType[] = [];
 /** Column types the Aurora design's mobile deck can render. */
 export const ALL_COLUMNS: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
 /** Every column type (superset — the deck design supports them all). */
@@ -27,6 +31,29 @@ const VALID_MOBILE_COLUMNS: ColumnType[] = [
   'search',
   'follow_requests',
 ];
+
+export type ServerUiPreferences = Pick<
+  Preferences,
+  'ui:columns' | 'ui:show_trending'
+>;
+
+function parseServerColumns(value: string | null | undefined): ColumnType[] {
+  if (!value) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (column, index): column is ColumnType =>
+        typeof column === 'string' &&
+        VALID_MOBILE_COLUMNS.includes(column as ColumnType) &&
+        parsed.indexOf(column) === index,
+    );
+  } catch {
+    return [];
+  }
+}
 
 function loadMobileColumn(): ColumnType {
   if (typeof localStorage === 'undefined') return 'home';
@@ -131,6 +158,9 @@ export const useUiStore = defineStore('ui', () => {
 
   /** Token stored externally — only passed when calling server-synced setters */
   let _token: string | null = null;
+  // Invalidates preference requests that finish after logout, account changes,
+  // or a newer SSR/client hydration has already supplied authoritative state.
+  let preferenceLoadGeneration = 0;
 
   async function saveToServer(prefs: Record<string, string>) {
     if (!_token) return;
@@ -143,11 +173,17 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function setShowTrending(show: boolean) {
+    // A local choice made after a refresh started is newer than that refresh.
+    // Invalidate its response before updating state or persisting the choice.
+    preferenceLoadGeneration += 1;
     showTrending.value = show;
     saveToServer({ 'ui:show_trending': String(show) });
   }
 
   function setColumns(newColumns: ColumnType[]) {
+    // Prevent an in-flight preference refresh from restoring the selection the
+    // user just replaced locally.
+    preferenceLoadGeneration += 1;
     columns.value = newColumns;
     saveToServer({ 'ui:columns': JSON.stringify(newColumns) });
   }
@@ -171,27 +207,48 @@ export const useUiStore = defineStore('ui', () => {
     }
   }
 
-  async function loadFromServer(token: string) {
+  /**
+   * Apply server-provided UI preferences synchronously. The SSR /home page
+   * uses this before rendering the deck, and hydration applies the same
+   * payload before mounting any timeline columns.
+   */
+  function applyServerPreferences(token: string, data: ServerUiPreferences | null) {
     _token = token;
+    columns.value = parseServerColumns(data?.['ui:columns']);
+    showTrending.value = true;
+
+    const trending = data?.['ui:show_trending'];
+    if (trending !== null && trending !== undefined) {
+      showTrending.value = trending !== false && trending !== 'false';
+    }
+
+    serverLoaded.value = true;
+  }
+
+  function hydrateFromServer(token: string, data: ServerUiPreferences | null) {
+    preferenceLoadGeneration += 1;
+    applyServerPreferences(token, data);
+  }
+
+  async function loadFromServer(token: string) {
+    const generation = ++preferenceLoadGeneration;
     try {
       const { data } = await getPreferences(token);
-      if (data['ui:columns']) {
-        const parsed = JSON.parse(data['ui:columns']) as ColumnType[];
-        if (Array.isArray(parsed)) {
-          columns.value = parsed;
-        }
-      }
-      if (data['ui:show_trending'] !== null && data['ui:show_trending'] !== undefined) {
-        const v = data['ui:show_trending'];
-        showTrending.value = v !== false && v !== 'false';
-      }
-      serverLoaded.value = true;
+      if (generation !== preferenceLoadGeneration) return;
+      applyServerPreferences(token, data);
     } catch {
-      // Use defaults on failure
+      if (generation !== preferenceLoadGeneration) return;
+      // A successful SSR bootstrap may already hold the correct selection.
+      // Do not erase it if the client's background refresh fails later.
+      const alreadyLoadedForToken = serverLoaded.value && _token === token;
+      if (!alreadyLoadedForToken) {
+        applyServerPreferences(token, null);
+      }
     }
   }
 
   function resetToDefaults() {
+    preferenceLoadGeneration += 1;
     _token = null;
     columns.value = [...DEFAULT_COLUMNS];
     showTrending.value = true;
@@ -251,6 +308,7 @@ export const useUiStore = defineStore('ui', () => {
     addColumn,
     removeColumnAt,
     moveColumn,
+    hydrateFromServer,
     loadFromServer,
     resetToDefaults,
   };

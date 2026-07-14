@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useTimelinesStore } from '@/stores/timelines';
 
+const soundMocks = vi.hoisted(() => ({
+  playNewPostSound: vi.fn(),
+}));
+
+vi.mock('@/utils/newPostSound', () => soundMocks);
+
 // Mock API calls
 vi.mock('@/api/mastodon/timelines', () => ({
   getHomeTimeline: vi.fn(),
@@ -186,6 +192,107 @@ describe('Timelines Store', () => {
 
       expect(store.getTimeline('local').newStatusIds).toContain('live-2');
       expect(store.timelines.has('social')).toBe(false);
+    });
+  });
+
+  describe('new-post sound visibility', () => {
+    async function emitUpdate(
+      store: ReturnType<typeof useTimelinesStore>,
+      stream: string,
+      timelineType: 'home' | 'local' | 'public',
+      statusId: string,
+    ) {
+      const { StreamingClient } = await import('@/api/streaming');
+      const callIndex = vi.mocked(StreamingClient).mock.calls.length;
+      store.connectStream('token', stream, timelineType);
+      const callbacks = vi.mocked(StreamingClient).mock.calls[callIndex]![2] as {
+        onUpdate: (s: unknown) => void;
+      };
+      callbacks.onUpdate({ id: statusId, account: { id: `acct-${statusId}` } });
+    }
+
+    it('stays silent when no view has registered an audible timeline', async () => {
+      const store = useTimelinesStore();
+
+      await emitUpdate(store, 'user', 'home', 'silent-home');
+
+      expect(soundMocks.playNewPostSound).not.toHaveBeenCalled();
+    });
+
+    it('only plays updates whose source is in an audible scope', async () => {
+      const store = useTimelinesStore();
+      store.setAudibleTimelineScope('deck', ['home', 'public']);
+
+      await emitUpdate(store, 'user', 'home', 'visible-home');
+      await emitUpdate(store, 'public:local', 'local', 'hidden-local');
+      await emitUpdate(store, 'public', 'public', 'visible-public');
+
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledTimes(2);
+      expect(soundMocks.playNewPostSound).toHaveBeenNthCalledWith(1, 'visible-home');
+      expect(soundMocks.playNewPostSound).toHaveBeenNthCalledWith(2, 'visible-public');
+    });
+
+    it('treats social as both home and local for live sound', async () => {
+      const store = useTimelinesStore();
+      store.setAudibleTimelineScope('mobile-deck', ['social']);
+
+      await emitUpdate(store, 'user', 'home', 'social-home');
+      await emitUpdate(store, 'public:local', 'local', 'social-local');
+      await emitUpdate(store, 'public', 'public', 'not-social-public');
+
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledTimes(2);
+      expect(soundMocks.playNewPostSound).toHaveBeenNthCalledWith(1, 'social-home');
+      expect(soundMocks.playNewPostSound).toHaveBeenNthCalledWith(2, 'social-local');
+    });
+
+    it('combines owner scopes and clears only the specified owner', async () => {
+      const store = useTimelinesStore();
+      store.setAudibleTimelineScope('deck', ['home']);
+      store.setAudibleTimelineScope('standalone', ['public']);
+
+      store.clearAudibleTimelineScope('deck');
+      await emitUpdate(store, 'user', 'home', 'cleared-home');
+      await emitUpdate(store, 'public', 'public', 'remaining-public');
+
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledOnce();
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledWith('remaining-public');
+    });
+
+    it('keeps a newer instance audible when an older same-view instance cleans up', async () => {
+      const store = useTimelinesStore();
+      const oldDeckInstance = Symbol('deck-home');
+      const newDeckInstance = Symbol('deck-home');
+
+      store.setAudibleTimelineScope(oldDeckInstance, ['local']);
+      store.setAudibleTimelineScope(newDeckInstance, ['public']);
+      store.clearAudibleTimelineScope(oldDeckInstance);
+
+      await emitUpdate(store, 'public:local', 'local', 'old-instance-local');
+      await emitUpdate(store, 'public', 'public', 'new-instance-public');
+
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledOnce();
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledWith('new-instance-public');
+    });
+
+    it('replacing an owner scope with an empty list makes it silent', async () => {
+      const store = useTimelinesStore();
+      store.setAudibleTimelineScope('deck', ['home']);
+      store.setAudibleTimelineScope('deck', []);
+
+      await emitUpdate(store, 'user', 'home', 'empty-scope-home');
+
+      expect(soundMocks.playNewPostSound).not.toHaveBeenCalled();
+    });
+
+    it('does not let a hidden delivery consume sound dedupe before a visible delivery', async () => {
+      const store = useTimelinesStore();
+
+      await emitUpdate(store, 'public:local', 'local', 'shared-status');
+      store.setAudibleTimelineScope('mobile-deck', ['home']);
+      await emitUpdate(store, 'user', 'home', 'shared-status');
+
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledOnce();
+      expect(soundMocks.playNewPostSound).toHaveBeenCalledWith('shared-status');
     });
   });
 });
