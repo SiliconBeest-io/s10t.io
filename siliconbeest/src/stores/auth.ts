@@ -52,6 +52,7 @@ export const useAuthStore = defineStore('auth', () => {
   const loading = ref(false);
   const error = ref<string | null>(null);
   const ready = ref(false);
+  let currentUserRequestGeneration = 0;
 
   const isAuthenticated = computed(() => !!token.value);
   const isAdmin = computed(() => currentUser.value?.role?.name === 'admin');
@@ -61,8 +62,26 @@ export const useAuthStore = defineStore('auth', () => {
       currentUser.value?.role?.name === 'admin',
   );
 
-  function setToken(newToken: string) {
+  function resetPerAccountState(newToken: string | null) {
+    currentUserRequestGeneration += 1;
     token.value = newToken;
+    currentUser.value = null;
+    loading.value = false;
+    error.value = null;
+    useUiStore().resetToDefaults();
+    // Stream clients are keyed by feed name, not by access token. Drop the
+    // previous account's clients before a new account tries to connect using
+    // the same keys, otherwise connectStream would keep the old-token stream.
+    if (typeof window !== 'undefined') {
+      useTimelinesStore().disconnectStream();
+      useNotificationsStore().disconnectStream();
+    }
+  }
+
+  function setToken(newToken: string) {
+    if (token.value !== newToken) {
+      resetPerAccountState(newToken);
+    }
     writeTokenCookie(newToken);
   }
 
@@ -70,14 +89,14 @@ export const useAuthStore = defineStore('auth', () => {
     const storedToken = cookieToken !== undefined ? cookieToken : readTokenCookie();
 
     if (!storedToken) {
-      token.value = null;
-      currentUser.value = null;
+      if (token.value !== null) {
+        resetPerAccountState(null);
+      }
       return null;
     }
 
     if (token.value !== storedToken) {
-      token.value = storedToken;
-      currentUser.value = null;
+      resetPerAccountState(storedToken);
     }
 
     return token.value;
@@ -88,39 +107,61 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearToken() {
-    token.value = null;
-    currentUser.value = null;
+    resetPerAccountState(null);
     clearTokenCookie();
   }
 
-  function connectAuthenticatedStreams() {
-    if (typeof window === 'undefined' || !token.value) return;
+  function connectAuthenticatedNotificationStream(
+    streamToken: string | null = token.value,
+  ) {
+    if (typeof window === 'undefined' || !streamToken) return;
 
-    const timelinesStore = useTimelinesStore();
     const notificationsStore = useNotificationsStore();
-    timelinesStore.connectStream(token.value, 'user', 'home');
-    notificationsStore.connectStream(token.value);
+    notificationsStore.connectStream(streamToken);
   }
 
   async function fetchCurrentUser() {
     syncTokenFromCookie();
-    if (!token.value) return;
+    const requestToken = token.value;
+    if (!requestToken) return;
+    const requestGeneration = ++currentUserRequestGeneration;
     loading.value = true;
     error.value = null;
     try {
-      const { data } = await verifyCredentials(token.value);
+      const { data } = await verifyCredentials(requestToken);
+      if (
+        token.value !== requestToken ||
+        currentUserRequestGeneration !== requestGeneration
+      ) return;
+
       currentUser.value = data;
       // Load server-synced UI preferences
       const uiStore = useUiStore();
-      uiStore.loadFromServer(token.value);
-      connectAuthenticatedStreams();
+      await uiStore.loadFromServer(requestToken);
+      if (
+        token.value !== requestToken ||
+        currentUserRequestGeneration !== requestGeneration
+      ) return;
+      // Timeline views connect their own streams when they are mounted. Keep
+      // only notifications global so an empty desktop deck loads no timeline.
+      connectAuthenticatedNotificationStream(requestToken);
     } catch (e) {
+      if (
+        token.value !== requestToken ||
+        currentUserRequestGeneration !== requestGeneration
+      ) return;
+
       error.value = (e as Error).message;
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         clearToken();
       }
     } finally {
-      loading.value = false;
+      if (
+        token.value === requestToken &&
+        currentUserRequestGeneration === requestGeneration
+      ) {
+        loading.value = false;
+      }
     }
   }
 
@@ -227,12 +268,12 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // Register global 401 handler — auto-logout when session is expired/revoked
-  setOnUnauthorized(() => {
+  setOnUnauthorized((requestToken) => {
+    // A response from the previous account must not log out the account that
+    // has since become active. A missing token preserves legacy callback use.
+    if (requestToken && requestToken !== token.value) return;
+
     clearToken();
-    const timelinesStore = useTimelinesStore();
-    const notificationsStore = useNotificationsStore();
-    timelinesStore.disconnectStream();
-    notificationsStore.disconnectStream();
     // Redirect to login if not already there
     if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
       window.location.href = '/login';
@@ -244,14 +285,6 @@ export const useAuthStore = defineStore('auth', () => {
 
     // Clear local state first so route guards and UI stop treating the user as logged in.
     clearToken();
-
-    const timelinesStore = useTimelinesStore();
-    const notificationsStore = useNotificationsStore();
-    timelinesStore.disconnectStream();
-    notificationsStore.disconnectStream();
-
-    const uiStore = useUiStore();
-    uiStore.resetToDefaults();
 
     if (tokenToRevoke) {
       revokeToken({ token: tokenToRevoke }).catch(() => {

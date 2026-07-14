@@ -8,12 +8,11 @@ beforeEach(() => {
 });
 
 describe('useDeckColumns', () => {
-  it('defaults to home/local/federated from the ui store, in order', () => {
+  it('defaults to no desktop columns while keeping every type configurable', () => {
     const { columns, configRows } = useDeckColumns();
-    expect(columns.value).toEqual(['home', 'local', 'federated']);
-    // Disabled types follow the enabled region
+    expect(columns.value).toEqual([]);
     expect(configRows.value).toEqual([
-      'home', 'local', 'federated', 'social', 'notifications', 'search', 'follow_requests',
+      'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
     ]);
     expect(DECK_COLUMN_TYPES).toEqual([
       'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
@@ -21,6 +20,8 @@ describe('useDeckColumns', () => {
   });
 
   it('toggle adds a column at the end and removes it preserving order', () => {
+    const ui = useUiStore();
+    ui.columns = ['home', 'local', 'federated'];
     const { columns, toggle, isEnabled } = useDeckColumns();
     toggle('notifications');
     expect(columns.value).toEqual(['home', 'local', 'federated', 'notifications']);
@@ -33,12 +34,15 @@ describe('useDeckColumns', () => {
 
   it('toggle persists through the ui store setColumns (server-synced path)', () => {
     const ui = useUiStore();
+    ui.columns = ['home', 'local', 'federated'];
     const { toggle } = useDeckColumns();
     toggle('home');
     expect(ui.columns).toEqual(['local', 'federated']);
   });
 
   it('move shifts a column up/down within bounds', () => {
+    const ui = useUiStore();
+    ui.columns = ['home', 'local', 'federated'];
     const { columns, move } = useDeckColumns();
     move('federated', -1);
     expect(columns.value).toEqual(['home', 'federated', 'local']);
@@ -51,6 +55,8 @@ describe('useDeckColumns', () => {
   });
 
   it('reorder moves rows within the enabled region only', () => {
+    const ui = useUiStore();
+    ui.columns = ['home', 'local', 'federated'];
     const { columns, reorder } = useDeckColumns();
     reorder(0, 2);
     expect(columns.value).toEqual(['local', 'federated', 'home']);

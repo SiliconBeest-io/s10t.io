@@ -1011,7 +1011,7 @@
     "live": "LIVE",
     "streaming": "스트리밍",
     "note": "노트",
-    "columns_empty": "모든 컬럼이 숨겨져 있습니다. 왼쪽 레일에서 타임라인을 다시 켜세요.",
+    "columns_empty": "선택된 컬럼이 없습니다. 왼쪽 위의 컬럼 버튼을 눌러 불러올 컬럼을 선택하세요.",
     "toggle_column": "{name} 컬럼 표시/숨기기",
     "design_aurora": "Aurora UI",
     "design_classic": "클래식 UI",

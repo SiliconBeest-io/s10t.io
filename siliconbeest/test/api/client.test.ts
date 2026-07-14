@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { apiFetch, ApiError, parseLinkHeader, buildQueryString } from '@/api/client';
+import {
+  apiFetch,
+  ApiError,
+  parseLinkHeader,
+  buildQueryString,
+  setOnUnauthorized,
+} from '@/api/client';
 
 // Mock global fetch
 const mockFetch = vi.fn();
@@ -87,6 +93,23 @@ describe('API Client', () => {
       });
 
       await expect(apiFetch('/v1/broken')).rejects.toThrow(ApiError);
+    });
+
+    it('passes the failed request token to the unauthorized handler', async () => {
+      const onUnauthorized = vi.fn();
+      setOnUnauthorized(onUnauthorized);
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        json: () => Promise.resolve({ error: 'Unauthorized' }),
+        headers: new Headers(),
+      });
+
+      await expect(apiFetch('/v1/private', { token: 'expired-token' }))
+        .rejects.toThrow(ApiError);
+
+      expect(onUnauthorized).toHaveBeenCalledWith('expired-token');
     });
 
     it('includes error_description when available', async () => {

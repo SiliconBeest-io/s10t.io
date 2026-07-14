@@ -1011,7 +1011,7 @@
     "live": "LIVE",
     "streaming": "即時",
     "note": "發文",
-    "columns_empty": "所有欄位皆已隱藏。請從左側欄重新開啟時間軸。",
+    "columns_empty": "尚未選擇任何欄位。請使用左上角的「欄位」按鈕選擇要載入的欄位。",
     "toggle_column": "切換 {name} 欄位",
     "design_aurora": "Aurora 介面",
     "design_classic": "經典介面",

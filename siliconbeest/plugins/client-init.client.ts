@@ -13,10 +13,9 @@ export default defineNuxtPlugin((nuxtApp) => {
   const timelines = useTimelinesStore();
   const config = useRuntimeConfig();
 
-  function connectDefaultStreams() {
+  function connectNotificationStream() {
     if (!auth.token) return;
 
-    timelines.connectStream(auth.token, 'user', 'home');
     notifications.connectStream(auth.token);
   }
 
@@ -52,13 +51,13 @@ export default defineNuxtPlugin((nuxtApp) => {
   void Promise.allSettled(backgroundTasks);
 
   nuxtApp.hook('app:mounted', () => {
-    connectDefaultStreams();
+    connectNotificationStream();
 
     watch(
       () => auth.token,
       (token) => {
         if (token) {
-          connectDefaultStreams();
+          connectNotificationStream();
           return;
         }
 

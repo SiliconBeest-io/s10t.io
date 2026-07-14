@@ -14,6 +14,7 @@ import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
 
 export type TimelineType = 'home' | 'social' | 'public' | 'local' | 'tag';
+export type AudibleTimelineScopeOwner = string | symbol;
 
 interface TimelineState {
   statusIds: string[];
@@ -42,8 +43,34 @@ export const useTimelinesStore = defineStore('timelines', () => {
   const streamingClients = ref<Map<string, StreamingClient>>(new Map());
   // Streams the user toggled off (LIVE toggle) — connectStream respects this
   const pausedStreams = ref<Set<string>>(new Set());
+  // Timeline views register which feeds are currently visible. Scopes are
+  // owner-based so overlapping page transitions cannot clear another view's
+  // sound policy. With no registered timelines, live updates stay silent.
+  const audibleTimelineScopes = new Map<AudibleTimelineScopeOwner, Set<TimelineType>>();
   // Cache for newly discovered remote custom emojis
   const emojiCache = ref<Map<string, { shortcode: string; url: string; static_url: string }> | null>(null);
+
+  function setAudibleTimelineScope(
+    owner: AudibleTimelineScopeOwner,
+    types: readonly TimelineType[],
+  ) {
+    audibleTimelineScopes.set(owner, new Set(types));
+  }
+
+  function clearAudibleTimelineScope(owner: AudibleTimelineScopeOwner) {
+    audibleTimelineScopes.delete(owner);
+  }
+
+  function isTimelineAudible(sourceType: TimelineType): boolean {
+    for (const types of audibleTimelineScopes.values()) {
+      if (types.has(sourceType)) return true;
+      // The social feed is a union of the home and local streams.
+      if ((sourceType === 'home' || sourceType === 'local') && types.has('social')) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   function getTimelineKey(type: TimelineType, tag?: string): string {
     return type === 'tag' ? `tag:${tag}` : type;
@@ -260,8 +287,12 @@ export const useTimelinesStore = defineStore('timelines', () => {
         if ((timelineType === 'home' || timelineType === 'local') && timelines.value.has('social')) {
           prependStatus('social', status.id);
         }
-        // Chime once per post, even when several streams deliver it
-        playNewPostSound(status.id);
+        // Check visibility before the sound helper's status-id dedupe. A
+        // hidden stream must not consume the id and silence a subsequent
+        // delivery to a visible timeline.
+        if (isTimelineAudible(timelineType)) {
+          playNewPostSound(status.id);
+        }
       },
       onDelete(statusId: string) {
         removeStatus(statusId);
@@ -322,5 +353,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
     pauseStream,
     unpauseStream,
     resumeStream,
+    setAudibleTimelineScope,
+    clearAudibleTimelineScope,
   };
 });
