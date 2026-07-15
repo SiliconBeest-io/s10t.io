@@ -227,6 +227,31 @@ describe('registration email verification', () => {
 		queueSend.mockRestore();
 	});
 
+	it('rolls back the challenge when the confirmation email cannot be queued', async () => {
+		const registration = await registerUser('verify_queue_failure');
+		const cookie = registrationCookie(registration);
+		const queueSend = vi.spyOn(env.QUEUE_EMAIL, 'send')
+			.mockRejectedValueOnce(new Error('queue unavailable'));
+
+		const failed = await registrationRequest('/continue', cookie);
+		expect(failed.status).toBe(503);
+		expect(await failed.json<{ error: string }>()).toEqual({
+			error: 'Unable to queue confirmation email',
+			error_description: 'Please try again.',
+		});
+		expect(await pendingUser('verify_queue_failure@test.local')).toMatchObject({
+			registration_state: 'awaiting_confirmation',
+			confirmation_token: null,
+			email_verification_code_hash: null,
+			email_verification_expires_at: null,
+		});
+
+		const retried = await registrationRequest('/continue', cookie);
+		expect(retried.status).toBe(200);
+		expect(queueSend).toHaveBeenCalledTimes(2);
+		queueSend.mockRestore();
+	});
+
 	it('rejects an invalid six-digit code without activating the registration', async () => {
 		const registration = await registerUser('verify_invalid');
 		const cookie = registrationCookie(registration);

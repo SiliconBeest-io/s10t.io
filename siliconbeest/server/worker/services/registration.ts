@@ -142,8 +142,22 @@ interface EmailVerificationRecord {
 	registration_state: RegistrationState;
 	confirmation_token: string | null;
 	email_verification_code_hash: string | null;
+	email_verification_sent_at: string | null;
 	email_verification_expires_at: string | null;
 	email_verification_attempts: number;
+}
+
+interface EmailDeliveryLimitRecord {
+	window_started_at: string;
+	send_count: number;
+	last_sent_at: string;
+	updated_at: string;
+}
+
+interface EmailDeliveryClaim {
+	emailHash: string;
+	claimedAt: string;
+	previous: EmailDeliveryLimitRecord | null;
 }
 
 export interface ActivatedRegistration {
@@ -502,7 +516,8 @@ function generateEmailVerificationCode(): string {
 async function getEmailVerificationRecord(userId: string): Promise<EmailVerificationRecord> {
 	const record = await env.DB.prepare(
 		`SELECT id, email, locale, registration_design, registration_state, confirmation_token,
-		        email_verification_code_hash, email_verification_expires_at,
+		        email_verification_code_hash, email_verification_sent_at,
+		        email_verification_expires_at,
 		        email_verification_attempts
 		 FROM users WHERE id = ?1 LIMIT 1`,
 	).bind(userId).first<EmailVerificationRecord>();
@@ -510,9 +525,13 @@ async function getEmailVerificationRecord(userId: string): Promise<EmailVerifica
 	return record;
 }
 
-async function claimEmailVerificationDelivery(email: string, now: Date): Promise<void> {
+async function claimEmailVerificationDelivery(email: string, now: Date): Promise<EmailDeliveryClaim> {
 	const emailHash = await sha256(email.trim().toLowerCase());
 	const nowIso = now.toISOString();
+	const previous = await env.DB.prepare(
+		`SELECT window_started_at, send_count, last_sent_at, updated_at
+		 FROM registration_email_delivery_limits WHERE email_hash = ?1`,
+	).bind(emailHash).first<EmailDeliveryLimitRecord>();
 	const windowCutoff = new Date(
 		now.getTime() - EMAIL_DELIVERY_WINDOW_SECONDS * 1000,
 	).toISOString();
@@ -549,6 +568,29 @@ async function claimEmailVerificationDelivery(email: string, now: Date): Promise
 	if ((result.meta.changes ?? 0) !== 1) {
 		throw new AppError(429, 'Please wait before requesting another confirmation email');
 	}
+	return { emailHash, claimedAt: nowIso, previous };
+}
+
+async function restoreEmailVerificationDeliveryClaim(claim: EmailDeliveryClaim): Promise<void> {
+	if (!claim.previous) {
+		await env.DB.prepare(
+			`DELETE FROM registration_email_delivery_limits
+			 WHERE email_hash = ?1 AND last_sent_at = ?2`,
+		).bind(claim.emailHash, claim.claimedAt).run();
+		return;
+	}
+	await env.DB.prepare(
+		`UPDATE registration_email_delivery_limits
+		 SET window_started_at = ?1, send_count = ?2, last_sent_at = ?3, updated_at = ?4
+		 WHERE email_hash = ?5 AND last_sent_at = ?6`,
+	).bind(
+		claim.previous.window_started_at,
+		claim.previous.send_count,
+		claim.previous.last_sent_at,
+		claim.previous.updated_at,
+		claim.emailHash,
+		claim.claimedAt,
+	).run();
 }
 
 export async function startEmailVerification(userId: string): Promise<RegistrationStatus> {
@@ -565,7 +607,7 @@ export async function startEmailVerification(userId: string): Promise<Registrati
 	const linkToken = generateToken(64);
 	const now = new Date();
 	const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_TTL_SECONDS * 1000).toISOString();
-	await claimEmailVerificationDelivery(record.email, now);
+	const deliveryClaim = await claimEmailVerificationDelivery(record.email, now);
 	const update = await env.DB.prepare(
 		`UPDATE users
 		 SET registration_state = 'email_verification',
@@ -599,9 +641,6 @@ export async function startEmailVerification(userId: string): Promise<Registrati
 	if ((update.meta.changes ?? 0) !== 1) {
 		throw new AppError(409, 'Registration state changed while issuing verification');
 	}
-	if (record.confirmation_token) {
-		await env.CACHE.delete(`email_confirm:${record.confirmation_token}`);
-	}
 	await env.CACHE.put(
 		`email_confirm:${linkToken}`,
 		JSON.stringify({
@@ -613,13 +652,48 @@ export async function startEmailVerification(userId: string): Promise<Registrati
 		}),
 		{ expirationTtl: EMAIL_VERIFICATION_TTL_SECONDS },
 	);
-	await sendConfirmation(
+	const queued = await sendConfirmation(
 		record.email,
 		linkToken,
 		record.locale,
 		code,
 		record.registration_design,
-	).catch(() => false);
+	);
+	if (!queued) {
+		await Promise.all([
+			env.DB.prepare(
+				`UPDATE users
+				 SET registration_state = ?1,
+				     confirmation_token = ?2,
+				     email_verification_code_hash = ?3,
+				     email_verification_sent_at = ?4,
+				     email_verification_expires_at = ?5,
+				     email_verification_attempts = ?6,
+				     updated_at = ?7
+				 WHERE id = ?8
+				   AND registration_state = 'email_verification'
+				   AND confirmation_token = ?9
+				   AND email_verification_code_hash = ?10`,
+			).bind(
+				record.registration_state,
+				record.confirmation_token,
+				record.email_verification_code_hash,
+				record.email_verification_sent_at,
+				record.email_verification_expires_at,
+				record.email_verification_attempts,
+				now.toISOString(),
+				userId,
+				linkToken,
+				codeHash,
+			).run(),
+			env.CACHE.delete(`email_confirm:${linkToken}`),
+			restoreEmailVerificationDeliveryClaim(deliveryClaim),
+		]);
+		throw new AppError(503, 'Unable to queue confirmation email', 'Please try again.');
+	}
+	if (record.confirmation_token) {
+		await env.CACHE.delete(`email_confirm:${record.confirmation_token}`);
+	}
 	return getRegistrationStatus(userId);
 }
 

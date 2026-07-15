@@ -54,7 +54,8 @@ async function sendEmail(
 	try {
 		await env.QUEUE_EMAIL.send({ type: 'send_email', to, subject, html, text });
 		return true;
-	} catch {
+	} catch (error) {
+		console.error('[email] Failed to enqueue message', error);
 		return false;
 	}
 }
