@@ -53,7 +53,7 @@ function seedAnnouncements() {
 }
 
 describe('announcement rendering', () => {
-  it('renders the banner announcement as escaped text', () => {
+  it('renders the banner announcement as plain text', () => {
     seedAnnouncements()
 
     const wrapper = mount(AnnouncementBanner, {
@@ -64,13 +64,15 @@ describe('announcement rendering', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('<img src="x" onerror=')
+    expect(wrapper.text()).toContain('XSS')
+    expect(wrapper.text()).not.toContain('<img')
+    expect(wrapper.text()).not.toContain('<b>')
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.find('b').exists()).toBe(false)
-    expect(wrapper.html()).toContain('&lt;img')
+    expect(wrapper.html()).not.toContain('&lt;img')
   })
 
-  it('renders the announcement center content as escaped text', () => {
+  it('renders the announcement center content as plain text', () => {
     seedAnnouncements()
 
     const wrapper = mount(DeckAnnouncementsView, {
@@ -83,9 +85,11 @@ describe('announcement rendering', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('<img src="x" onerror=')
+    expect(wrapper.text()).toContain('XSS')
+    expect(wrapper.text()).not.toContain('<img')
+    expect(wrapper.text()).not.toContain('<b>')
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.find('b').exists()).toBe(false)
-    expect(wrapper.html()).toContain('&lt;img')
+    expect(wrapper.html()).not.toContain('&lt;img')
   })
 })

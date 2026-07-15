@@ -3,12 +3,14 @@ import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAnnouncementsStore } from '@/stores/announcements'
+import { htmlToPlainText } from '@/utils/html'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const announcements = useAnnouncementsStore()
 
 const current = computed(() => announcements.bannerAnnouncement)
+const currentText = computed(() => htmlToPlainText(current.value?.content ?? ''))
 
 function close() {
   if (current.value) announcements.hideBanner(current.value.id)
@@ -28,7 +30,7 @@ watch(
     <div class="flex h-9 items-center gap-2 px-3 sm:px-4">
       <span aria-hidden="true">📢</span>
       <router-link to="/announcements" class="min-w-0 flex-1 text-sm text-white no-underline">
-        <span class="line-clamp-1 whitespace-pre-wrap">{{ current.content }}</span>
+        <span class="line-clamp-1">{{ currentText }}</span>
       </router-link>
       <router-link v-if="announcements.unreadCount > 1" to="/announcements" class="shrink-0 text-xs font-semibold text-white/80 no-underline">
         +{{ announcements.unreadCount - 1 }}

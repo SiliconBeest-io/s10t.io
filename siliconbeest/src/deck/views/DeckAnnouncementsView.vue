@@ -5,6 +5,7 @@ import DeckPageShell from '../layout/DeckPageShell.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import { useAnnouncementsStore } from '@/stores/announcements'
 import { useAuthStore } from '@/stores/auth'
+import { htmlToPlainText } from '@/utils/html'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -121,7 +122,7 @@ watch(
               {{ t('announcement.mark_read') }}
             </button>
           </div>
-          <div class="dk-text whitespace-pre-wrap px-4 py-4 text-sm leading-relaxed">{{ announcement.content }}</div>
+          <div class="dk-text whitespace-pre-wrap px-4 py-4 text-sm leading-relaxed">{{ htmlToPlainText(announcement.content) }}</div>
         </article>
       </div>
 
