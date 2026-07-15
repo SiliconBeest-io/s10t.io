@@ -10,6 +10,8 @@ const baseProps = {
   favourited: false,
   reblogged: false,
   bookmarked: false,
+  accountCanAct: true,
+  visibility: 'public',
 };
 
 // Button order with menus closed:
@@ -143,5 +145,52 @@ describe('StatusActions', () => {
     for (const span of spans) {
       expect(span.text()).toBe('');
     }
+  });
+
+  it('disables account actions for logged-out viewers and does not emit them', async () => {
+    const wrapper = mountWithPlugins(StatusActions, {
+      props: { ...baseProps, accountCanAct: false, quotePolicyAllows: true },
+    });
+
+    const buttons = wrapper.findAll('button');
+    expect(buttons).toHaveLength(5);
+    expect(buttons[0]!.attributes('disabled')).toBeDefined();
+    expect(buttons[1]!.attributes('disabled')).toBeDefined();
+    expect(buttons[2]!.attributes('disabled')).toBeDefined();
+    expect(buttons[3]!.attributes('disabled')).toBeDefined();
+
+    await buttons[0]!.trigger('click');
+    await buttons[1]!.trigger('click');
+    await buttons[2]!.trigger('click');
+    await buttons[3]!.trigger('click');
+    expect(wrapper.emitted('reply')).toBeFalsy();
+    expect(wrapper.emitted('reblog')).toBeFalsy();
+    expect(wrapper.emitted('favourite')).toBeFalsy();
+    expect(wrapper.emitted('bookmark')).toBeFalsy();
+  });
+
+  it('allows an owner to quote a private status when the API permits it', async () => {
+    const wrapper = mountWithPlugins(StatusActions, {
+      props: {
+        ...baseProps,
+        isOwnStatus: true,
+        visibility: 'private',
+        quotePolicyAllows: true,
+      },
+    });
+
+    await wrapper.findAll('button')[1]!.trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    expect(menuItems[0]!.attributes('disabled')).toBeDefined();
+    expect(menuItems[1]!.attributes('disabled')).toBeUndefined();
+    await menuItems[1]!.trigger('click');
+    expect(wrapper.emitted('quote')![0]).toEqual(['123']);
+  });
+
+  it('fails closed when the API omits the per-viewer quote permission', async () => {
+    const wrapper = mountWithPlugins(StatusActions, { props: baseProps });
+    await wrapper.findAll('button')[1]!.trigger('click');
+    const menuItems = wrapper.findAll('[role="menu"] button');
+    expect(menuItems[1]!.attributes('disabled')).toBeDefined();
   });
 });

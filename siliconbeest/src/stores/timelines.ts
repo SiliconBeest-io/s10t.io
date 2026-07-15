@@ -224,9 +224,33 @@ export const useTimelinesStore = defineStore('timelines', () => {
   }
 
   function removeStatus(statusId: string) {
+    const statusStore = useStatusesStore();
+    const removedIds = new Set([statusId]);
+    for (const [cachedId, cachedStatus] of statusStore.cache) {
+      if (cachedStatus.reblog?.id === statusId) removedIds.add(cachedId);
+    }
+
     for (const timeline of timelines.value.values()) {
-      timeline.statusIds = timeline.statusIds.filter((id) => id !== statusId);
-      timeline.newStatusIds = timeline.newStatusIds.filter((id) => id !== statusId);
+      timeline.statusIds = timeline.statusIds.filter((id) => !removedIds.has(id));
+      timeline.newStatusIds = timeline.newStatusIds.filter((id) => !removedIds.has(id));
+    }
+  }
+
+  function removeAccountStatuses(accountId: string) {
+    const statusStore = useStatusesStore();
+    const removedIds = new Set<string>();
+    for (const [cachedId, cachedStatus] of statusStore.cache) {
+      if (
+        cachedStatus.account.id === accountId
+        || cachedStatus.reblog?.account.id === accountId
+      ) {
+        removedIds.add(cachedId);
+      }
+    }
+
+    for (const timeline of timelines.value.values()) {
+      timeline.statusIds = timeline.statusIds.filter((id) => !removedIds.has(id));
+      timeline.newStatusIds = timeline.newStatusIds.filter((id) => !removedIds.has(id));
     }
   }
 
@@ -347,6 +371,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
     prependStatus,
     showNewStatuses,
     removeStatus,
+    removeAccountStatuses,
     connectStream,
     disconnectStream,
     isStreamPaused,

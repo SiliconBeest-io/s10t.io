@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { serializeAccount } from '../../../utils/mastodonSerializer';
 import type { AccountRow } from '../../../types/db';
 
@@ -10,7 +11,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/endorsements — list endorsed/featured accounts
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const limit = Math.min(parseInt(c.req.query('limit') || '40', 10) || 40, 80);
 

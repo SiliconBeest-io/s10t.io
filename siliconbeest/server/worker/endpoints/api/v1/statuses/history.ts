@@ -2,8 +2,10 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import type { StatusEditRow, MediaAttachmentRow } from '../../../../types/db';
+import { assertStatusViewable } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -36,30 +38,8 @@ interface StatusWithAccountRow {
 
 const app = new Hono<HonoEnv>();
 
-async function canViewStatusHistory(status: StatusWithAccountRow, viewerAccountId: string | null): Promise<boolean> {
-  if (status.visibility === 'direct') {
-    if (!viewerAccountId) return false;
-    if (viewerAccountId === status.account_id) return true;
-    const mention = await env.DB.prepare(
-      'SELECT 1 FROM mentions WHERE status_id = ?1 AND account_id = ?2 LIMIT 1',
-    ).bind(status.id, viewerAccountId).first();
-    return !!mention;
-  }
-
-  if (status.visibility === 'private') {
-    if (!viewerAccountId) return false;
-    if (viewerAccountId === status.account_id) return true;
-    const follow = await env.DB.prepare(
-      'SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2 LIMIT 1',
-    ).bind(viewerAccountId, status.account_id).first();
-    return !!follow;
-  }
-
-  return true;
-}
-
 // GET /api/v1/statuses/:id/history — get edit history
-app.get('/:id/history', authOptional, async (c) => {
+app.get('/:id/history', authOptional, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
   const domain = env.INSTANCE_DOMAIN;
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
@@ -78,9 +58,7 @@ app.get('/:id/history', authOptional, async (c) => {
     .first<StatusWithAccountRow>();
 
   if (!status) throw new AppError(404, 'Record not found');
-  if (!await canViewStatusHistory(status, currentAccountId)) {
-    throw new AppError(404, 'Record not found');
-  }
+  await assertStatusViewable(statusId, currentAccountId);
 
   const acct = status.account_domain
     ? `${status.username}@${status.account_domain}`

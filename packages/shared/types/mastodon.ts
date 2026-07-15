@@ -53,6 +53,7 @@ export type Source = {
   note: string;
   fields: Field[];
   follow_requests_count: number;
+  hide_collections: boolean;
 };
 
 // ============================================================
@@ -86,6 +87,7 @@ export type Account = {
   moved?: Account | null;
   suspended?: boolean;
   limited?: boolean;
+  memorial?: boolean;
   noindex?: boolean;
   role?: AccountRole;
 };

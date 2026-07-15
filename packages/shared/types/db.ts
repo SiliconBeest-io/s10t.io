@@ -26,6 +26,7 @@ export type AccountRow = {
   readonly bot: number;
   readonly discoverable: number | null;
   readonly manually_approves_followers: number;
+  readonly hide_collections?: number;
   readonly statuses_count: number;
   readonly followers_count: number;
   readonly following_count: number;

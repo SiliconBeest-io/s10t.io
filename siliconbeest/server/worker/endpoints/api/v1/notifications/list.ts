@@ -8,6 +8,7 @@ import { serializeAccount, serializeNotification, ensureISO8601 } from '../../..
 import type { AccountRow, NotificationRow } from '../../../../types/db';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import { listNotifications } from '../../../../services/notification';
+import { buildNotificationStatusSqlPredicate } from '../../../../services/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -54,6 +55,11 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
   const statusMap = new Map<string, any>();
   if (uniqueStatusIds.length > 0) {
     const statusPlaceholders = uniqueStatusIds.map(() => '?').join(',');
+    const statusPermission = buildNotificationStatusSqlPredicate(
+      'status',
+      account.id,
+      new Date().toISOString(),
+    );
     const { results: statusRows } = await env.DB.prepare(
       `SELECT s.id, s.uri, s.url, s.content, s.visibility, s.sensitive,
               s.content_warning, s.language, s.created_at, s.in_reply_to_id,
@@ -70,11 +76,13 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
               sa.created_at AS sa_created_at, sa.emoji_tags AS sa_emoji_tags
        FROM statuses s
        JOIN accounts sa ON sa.id = s.account_id
-       WHERE s.id IN (${statusPlaceholders}) AND s.deleted_at IS NULL`,
-    ).bind(...uniqueStatusIds).all();
+       WHERE s.id IN (${statusPlaceholders})
+         AND ${statusPermission.sql}`,
+    ).bind(...uniqueStatusIds, ...statusPermission.bindings).all();
 
     // Get enrichments (media, interactions)
-    const enrichments = await enrichStatuses(domain, uniqueStatusIds, account.id, env.CACHE);
+    const visibleStatusIds = (statusRows ?? []).map((statusRow) => statusRow.id as string);
+    const enrichments = await enrichStatuses(domain, visibleStatusIds, account.id, env.CACHE);
 
     for (const sr of statusRows ?? []) {
       const sId = sr.id as string;
@@ -134,9 +142,13 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
     }
   }
 
+  // Re-check failures (for example a relationship changed after the service
+  // query) must remove the entire status-bearing notification, not just its body.
+  const visibleRows = rows.filter((row) => !row.status_id || statusMap.has(row.status_id));
+
   // Batch-fetch fallback custom emoji URLs for older emoji_reaction rows.
   const emojiShortcodes = new Set<string>();
-  for (const row of rows) {
+  for (const row of visibleRows) {
     const emoji = row.emoji;
     if (row.type === 'emoji_reaction' && emoji?.startsWith(':') && emoji?.endsWith(':')) {
       emojiShortcodes.add(emoji.slice(1, -1));
@@ -155,7 +167,7 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
   }
 
   const reactionEmojiUrlMap = new Map<string, string>();
-  await Promise.all(rows.map(async (row) => {
+  await Promise.all(visibleRows.map(async (row) => {
     const emoji = row.emoji;
     if (row.type !== 'emoji_reaction' || !row.status_id || !emoji?.startsWith(':') || !emoji.endsWith(':')) return;
     const er = await env.DB.prepare(
@@ -168,7 +180,7 @@ app.get('/', authRequired, requireScope('read:notifications'), async (c) => {
     if (er) reactionEmojiUrlMap.set(row.id, formatEmojiUrl(er.image_key, er.domain, env.INSTANCE_DOMAIN));
   }));
 
-  const notifications = rows.map((row) => {
+  const notifications = visibleRows.map((row) => {
     const accountRow: AccountRow = {
       id: row.a_id, username: row.a_username, domain: row.a_domain,
       display_name: row.a_display_name, note: row.a_note, uri: row.a_uri,

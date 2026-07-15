@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { parsePaginationParams, buildLinkHeader } from '../../../../utils/pagination';
 import { serializeAccount, serializeStatus } from '../../../../utils/mastodonSerializer';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
@@ -10,7 +11,7 @@ import type { AccountRow, StatusRow } from '../../../../types/db';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.get('/:listId', authRequired, async (c) => {
+app.get('/:listId', authRequired, requireScope('read:lists'), async (c) => {
   const listId = c.req.param('listId');
   const account = c.get('currentAccount')!;
 

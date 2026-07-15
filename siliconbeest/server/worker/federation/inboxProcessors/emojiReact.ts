@@ -12,6 +12,7 @@ import { generateUlid } from '../../utils/ulid';
 import { broadcastReactionEvent } from '../../services/streaming';
 import { BaseProcessor } from './BaseProcessor';
 import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
+import { canProcessFederatedStatusInteraction } from '../../services/permissions';
 
 /**
  * Extract emoji from an activity.
@@ -28,30 +29,35 @@ function extractEmoji(activity: APActivity & Record<string, unknown>): string | 
 }
 
 class EmojiReactProcessor extends BaseProcessor {
-	async process(activity: APActivity & Record<string, unknown>): Promise<void> {
+	async process(activity: APActivity & Record<string, unknown>): Promise<boolean> {
 		const emoji = extractEmoji(activity);
 		if (!emoji) {
 			console.warn('[emojiReact] No emoji found in activity');
-			return;
+			return false;
 		}
 
 		const statusUri = this.extractObjectUri(activity);
 		if (!statusUri) {
 			console.warn('[emojiReact] activity.object is not a string URI');
-			return;
+			return false;
 		}
 
 		const status = await this.findStatusByUri(statusUri);
 		if (!status) {
 			console.log(`[emojiReact] Status not found: ${statusUri}`);
-			return;
+			return false;
 		}
 
 		const actorAccountId = await this.resolveActor(activity.actor);
 		if (!actorAccountId) {
 			console.error('[emojiReact] Could not resolve remote actor');
-			return;
+			return false;
 		}
+		if (!await canProcessFederatedStatusInteraction(
+			status.id,
+			actorAccountId,
+			this.recipientAccountId || null,
+		)) return false;
 
 		// Store custom emoji if present in the activity's tag array
 		const activityTags = activity.tag as (Record<string, unknown>)[] | undefined;
@@ -101,19 +107,20 @@ class EmojiReactProcessor extends BaseProcessor {
 				.bind(reactionId, actorAccountId, status.id, emoji, customEmojiId, now)
 				.run();
 		} catch {
-			return; // Duplicate reaction
+			return false; // Duplicate reaction
 		}
 
 		await this.notifyIfLocal('emoji_reaction', status.account_id, actorAccountId, status.id);
 
 		// Live-update connected clients viewing this status
 		await broadcastReactionEvent(status.id);
+		return true;
 	}
 }
 
 export async function processEmojiReact(
 	activity: APActivity & Record<string, unknown>,
 	localAccountId: string,
-): Promise<void> {
-	await new EmojiReactProcessor(localAccountId).process(activity);
+): Promise<boolean> {
+	return new EmojiReactProcessor(localAccountId).process(activity);
 }

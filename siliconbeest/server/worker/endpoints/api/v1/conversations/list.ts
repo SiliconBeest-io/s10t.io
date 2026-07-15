@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
 import { serializeAccount, serializeStatus } from '../../../../utils/mastodonSerializer';
 import type { AccountRow, StatusRow } from '../../../../types/db';
@@ -16,7 +17,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/conversations — list DM conversations
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
 

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { serializeAccount } from '../../../utils/mastodonSerializer';
 import type { AccountRow } from '../../../types/db';
 
@@ -11,7 +12,7 @@ const app = new Hono<HonoEnv>();
 
 // GET /api/v1/suggestions — follow suggestions
 // Returns recently active local accounts the user is not already following
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
 
   const limit = Math.min(

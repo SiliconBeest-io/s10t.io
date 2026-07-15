@@ -2,6 +2,12 @@ import { env } from 'cloudflare:workers';
 import { parsePaginationParams, buildPaginationQuery } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 import { AppError } from '../middleware/errorHandler';
+import {
+  buildReblogOriginalSurfaceSqlPredicate,
+  buildStatusRelationshipSqlPredicate,
+  buildStatusVisibilitySqlPredicate,
+} from './permissions';
+import type { StatusPermissionSqlSource } from './permissions';
 
 /**
  * Shared account columns selected alongside statuses in timeline queries.
@@ -40,24 +46,31 @@ export interface TagTimelineOpts extends TimelinePaginationOpts {
 }
 
 // ----------------------------------------------------------------
-// Block/Mute filter helper
+// Relationship/account-state surface filter helper
 // ----------------------------------------------------------------
 
-function addBlockMuteFilters(
+function addStatusSurfaceFilters(
   conditions: string[],
   binds: (string | number)[],
   viewerAccountId: string | undefined,
-  statusAlias = 's',
+  statusSource: StatusPermissionSqlSource = 'status',
 ): void {
-  if (!viewerAccountId) return;
-  conditions.push(
-    `${statusAlias}.account_id NOT IN (SELECT target_account_id FROM blocks WHERE account_id = ?)`,
+  const now = new Date().toISOString();
+  const relationship = buildStatusRelationshipSqlPredicate(
+    statusSource,
+    viewerAccountId ?? null,
+    now,
   );
-  binds.push(viewerAccountId);
-  conditions.push(
-    `${statusAlias}.account_id NOT IN (SELECT target_account_id FROM mutes WHERE account_id = ? AND (expires_at IS NULL OR expires_at > ?))`,
-  );
-  binds.push(viewerAccountId, new Date().toISOString());
+  conditions.push(relationship.sql);
+  binds.push(...relationship.bindings);
+  if (statusSource === 'status') {
+    const reblogOriginal = buildReblogOriginalSurfaceSqlPredicate(
+      viewerAccountId ?? null,
+      now,
+    );
+    conditions.push(reblogOriginal.sql);
+    binds.push(...reblogOriginal.bindings);
+  }
 }
 
 // ----------------------------------------------------------------
@@ -108,7 +121,10 @@ export async function getHomeTimeline(
   }
 
   conditions.push('s.deleted_at IS NULL');
-  addBlockMuteFilters(conditions, binds, accountId);
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -164,7 +180,10 @@ export async function getSocialTimeline(
     conditions.push(whereClause);
     binds.push(...params);
   }
-  addBlockMuteFilters(conditions, binds, accountId);
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -214,7 +233,7 @@ export async function getPublicTimeline(
   if (opts.onlyMedia) {
     conditions.push('EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)');
   }
-  addBlockMuteFilters(conditions, binds, opts.viewerAccountId);
+  addStatusSurfaceFilters(conditions, binds, opts.viewerAccountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -264,7 +283,7 @@ export async function getTagTimeline(
   if (opts.onlyMedia) {
     conditions.push('EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)');
   }
-  addBlockMuteFilters(conditions, binds, opts.viewerAccountId);
+  addStatusSurfaceFilters(conditions, binds, opts.viewerAccountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}
@@ -318,7 +337,10 @@ export async function getListTimeline(
     conditions.push(whereClause);
     binds.push(...params);
   }
-  addBlockMuteFilters(conditions, binds, accountId);
+  const visibility = buildStatusVisibilitySqlPredicate('status', accountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, accountId);
 
   const sql = `
     SELECT s.*, ${ACCOUNT_COLUMNS}

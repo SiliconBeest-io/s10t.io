@@ -1,8 +1,9 @@
 /**
  * Fedify Collection Dispatcher Registration
  *
- * Registers followers, following, outbox, featured, featured-tags, and liked
- * collection dispatchers on the Fedify Federation instance.
+ * Registers followers, following, outbox, featured, and featured-tags
+ * collection dispatchers on the Fedify Federation instance. The unadvertised
+ * liked collection is intentionally not exposed because favourites are private.
  */
 
 import {
@@ -14,13 +15,20 @@ import type { Federation } from '@fedify/fedify';
 import type { FedifyContextData } from '../../fedify';
 import type { AccountRow, StatusRow } from '../../../types/db';
 import { AS_PUBLIC, toTemporalInstant, buildFedifyNote } from './helpers';
-import { setupFollowersDispatcher } from '../../../../../../packages/shared/federation/collection-dispatchers';
+import {
+  authorizeAccountCollectionRequest,
+  setupFollowersDispatcher,
+} from '../../../../../../packages/shared/federation/collection-dispatchers';
+import {
+  canExposeActivityPubPublicStatusRecord,
+  canExposeLocalAccountActivityPubResources,
+  canExposeLocalAccountActivityPubResourcesByUsername,
+} from '../../../services/permissions';
 import { env } from 'cloudflare:workers';
 
 // Page sizes matching existing endpoints
 const FOLLOWING_PAGE_SIZE = 40;
 const OUTBOX_PAGE_SIZE = 20;
-const LIKED_PAGE_SIZE = 20;
 
 /**
  * Register all collection dispatchers on the federation instance.
@@ -33,7 +41,6 @@ export function setupCollectionDispatchers(
   setupOutboxDispatcher(federation);
   setupFeaturedDispatcher(federation);
   setupFeaturedTagsDispatcher(federation);
-  setupLikedDispatcher(federation);
 }
 
 // ============================================================
@@ -62,7 +69,10 @@ function setupFollowingDispatcher(
           .bind(identifier)
           .first<{ id: string; following_count: number }>();
 
-        if (!account) return null;
+        if (
+          !account
+          || !await canExposeLocalAccountActivityPubResources(account.id)
+        ) return null;
 
         const conditions: string[] = ['f.account_id = ?1'];
         const binds: (string | number)[] = [account.id];
@@ -110,11 +120,16 @@ function setupFollowingDispatcher(
         )
         .bind(identifier)
         .first<{ following_count: number }>();
-      return account?.following_count ?? 0;
+      if (
+        !account
+        || !await canExposeLocalAccountActivityPubResourcesByUsername(identifier)
+      ) return 0;
+      return account.following_count;
     })
     .setFirstCursor(async (_ctx, _identifier) => {
       return '';
-    });
+    })
+    .authorize(authorizeAccountCollectionRequest);
 }
 
 // ============================================================
@@ -140,7 +155,10 @@ function setupOutboxDispatcher(
           .bind(identifier)
           .first<AccountRow>();
 
-        if (!account) return null;
+        if (
+          !account
+          || !await canExposeLocalAccountActivityPubResources(account.id)
+        ) return null;
 
         const actorUri = `https://${domain}/users/${identifier}`;
         const followersUri = `${actorUri}/followers`;
@@ -166,7 +184,9 @@ function setupOutboxDispatcher(
         binds.push(OUTBOX_PAGE_SIZE + 1);
 
         const { results } = await db.prepare(sql).bind(...binds).all<StatusRow>();
-        const rows = results ?? [];
+        const rows = (results ?? []).filter((status) =>
+          canExposeActivityPubPublicStatusRecord(status, true)
+        );
         const hasNext = rows.length > OUTBOX_PAGE_SIZE;
         const pageRows = hasNext ? rows.slice(0, OUTBOX_PAGE_SIZE) : rows;
 
@@ -312,7 +332,10 @@ function setupOutboxDispatcher(
         )
         .bind(identifier)
         .first<{ id: string }>();
-      if (!account) return 0;
+      if (
+        !account
+        || !await canExposeLocalAccountActivityPubResources(account.id)
+      ) return 0;
       const row = await db
         .prepare(
           `SELECT COUNT(*) AS cnt FROM statuses
@@ -325,7 +348,10 @@ function setupOutboxDispatcher(
     })
     .setFirstCursor(async (_ctx, _identifier) => {
       return '';
-    });
+    })
+    .authorize((_ctx, identifier) =>
+      canExposeLocalAccountActivityPubResourcesByUsername(identifier)
+    );
 }
 
 // ============================================================
@@ -349,19 +375,25 @@ function setupFeaturedDispatcher(
         .bind(identifier)
         .first<AccountRow>();
 
-      if (!account) return null;
+      if (
+        !account
+        || !await canExposeLocalAccountActivityPubResources(account.id)
+      ) return null;
 
       const { results } = await db
         .prepare(
           `SELECT * FROM statuses
            WHERE account_id = ?1 AND pinned = 1
+             AND visibility IN ('public', 'unlisted')
              AND deleted_at IS NULL AND reblog_of_id IS NULL
            ORDER BY created_at DESC`,
         )
         .bind(account.id)
         .all<StatusRow>();
 
-      const rows = results ?? [];
+      const rows = (results ?? []).filter((status) =>
+        canExposeActivityPubPublicStatusRecord(status, true)
+      );
 
       // Batch-fetch conversation AP URIs
       const convIds = [
@@ -450,6 +482,8 @@ function setupFeaturedDispatcher(
 
       return { items };
     },
+  ).authorize((_ctx, identifier) =>
+    canExposeLocalAccountActivityPubResourcesByUsername(identifier)
   );
 }
 
@@ -473,7 +507,10 @@ function setupFeaturedTagsDispatcher(
         .bind(identifier)
         .first<{ id: string }>();
 
-      if (!account) return null;
+      if (
+        !account
+        || !await canExposeLocalAccountActivityPubResources(account.id)
+      ) return null;
 
       const domain = env.INSTANCE_DOMAIN;
 
@@ -501,86 +538,7 @@ function setupFeaturedTagsDispatcher(
         return { items: [] as Hashtag[] };
       }
     },
+  ).authorize((_ctx, identifier) =>
+    canExposeLocalAccountActivityPubResourcesByUsername(identifier)
   );
-}
-
-// ============================================================
-// LIKED
-// ============================================================
-
-function setupLikedDispatcher(
-  federation: Federation<FedifyContextData>,
-): void {
-  federation
-    .setLikedDispatcher(
-      '/users/{identifier}/liked',
-      async (ctx, identifier, cursor) => {
-        const db = env.DB;
-
-        const account = await db
-          .prepare(
-            `SELECT id FROM accounts
-             WHERE username = ?1 AND domain IS NULL LIMIT 1`,
-          )
-          .bind(identifier)
-          .first<{ id: string }>();
-
-        if (!account) return null;
-
-        const conditions: string[] = ['l.account_id = ?1'];
-        const binds: (string | number)[] = [account.id];
-
-        if (cursor) {
-          conditions.push('l.id < ?2');
-          binds.push(cursor);
-        }
-
-        const sql = `
-          SELECT l.id AS like_id, s.uri
-          FROM favourites l
-          JOIN statuses s ON s.id = l.status_id
-          WHERE ${conditions.join(' AND ')}
-          ORDER BY l.id DESC
-          LIMIT ?${binds.length + 1}
-        `;
-        binds.push(LIKED_PAGE_SIZE + 1);
-
-        const { results } = await db
-          .prepare(sql)
-          .bind(...binds)
-          .all<{ like_id: string; uri: string }>();
-
-        const rows = results ?? [];
-        const hasNext = rows.length > LIKED_PAGE_SIZE;
-        const items = hasNext ? rows.slice(0, LIKED_PAGE_SIZE) : rows;
-
-        const nextCursor = hasNext
-          ? items[items.length - 1].like_id
-          : null;
-
-        return {
-          items: items.map((r) => new URL(r.uri)),
-          nextCursor,
-        };
-      },
-    )
-    .setCounter(async (ctx, identifier) => {
-      const db = env.DB;
-      const account = await db
-        .prepare(
-          `SELECT id FROM accounts
-           WHERE username = ?1 AND domain IS NULL LIMIT 1`,
-        )
-        .bind(identifier)
-        .first<{ id: string }>();
-      if (!account) return 0;
-      const row = await db
-        .prepare('SELECT COUNT(*) AS cnt FROM favourites WHERE account_id = ?1')
-        .bind(account.id)
-        .first<{ cnt: number }>();
-      return row?.cnt ?? 0;
-    })
-    .setFirstCursor(async (_ctx, _identifier) => {
-      return '';
-    });
 }

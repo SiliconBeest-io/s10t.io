@@ -235,6 +235,57 @@ if [[ -z "$CURRENT_REPOSITORY_URL" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
 fi
 CURRENT_REPOSITORY_URL="${CURRENT_REPOSITORY_URL:-https://github.com/SJang1/siliconbeest}"
 
+# --- Fedify Signature Verification Override ---
+# config.env/environment wins. Otherwise preserve the main worker value; the
+# main worker is canonical when the two checked-in configs disagree.
+read_signature_verification_override() {
+  local config_file="$1"
+  if [[ ! -f "$config_file" ]]; then
+    return
+  fi
+
+  sed '/^[[:space:]]*\/\//d' "$config_file" | node -e "
+    try {
+      const d = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+      const value = d.vars?.SKIP_SIGNATURE_VERIFICATION;
+      if (value !== undefined) {
+        console.log(typeof value === 'boolean' ? String(value) : 'INVALID');
+      }
+    } catch (e) {}
+  " 2>/dev/null || true
+}
+
+MAIN_SKIP_SIGNATURE_VERIFICATION=$(
+  read_signature_verification_override "$MAIN_DIR/wrangler.jsonc"
+)
+CONSUMER_SKIP_SIGNATURE_VERIFICATION=$(
+  read_signature_verification_override "$CONSUMER_DIR/wrangler.jsonc"
+)
+
+if [[ "$MAIN_SKIP_SIGNATURE_VERIFICATION" == "INVALID" ]]; then
+  error "Main wrangler SKIP_SIGNATURE_VERIFICATION must be boolean true or false"
+  exit 1
+fi
+if [[ "$CONSUMER_SKIP_SIGNATURE_VERIFICATION" == "INVALID" ]]; then
+  error "Queue consumer wrangler SKIP_SIGNATURE_VERIFICATION must be boolean true or false"
+  exit 1
+fi
+if [[ -n "$MAIN_SKIP_SIGNATURE_VERIFICATION" \
+   && -n "$CONSUMER_SKIP_SIGNATURE_VERIFICATION" \
+   && "$MAIN_SKIP_SIGNATURE_VERIFICATION" != "$CONSUMER_SKIP_SIGNATURE_VERIFICATION" ]]; then
+  warn "Signature verification overrides differ; the main worker value is canonical"
+fi
+
+CURRENT_SKIP_SIGNATURE_VERIFICATION="${SKIP_SIGNATURE_VERIFICATION:-}"
+if [[ -z "$CURRENT_SKIP_SIGNATURE_VERIFICATION" ]]; then
+  CURRENT_SKIP_SIGNATURE_VERIFICATION="${MAIN_SKIP_SIGNATURE_VERIFICATION:-false}"
+fi
+if [[ "$CURRENT_SKIP_SIGNATURE_VERIFICATION" != "true" \
+   && "$CURRENT_SKIP_SIGNATURE_VERIFICATION" != "false" ]]; then
+  error "SKIP_SIGNATURE_VERIFICATION must be boolean true or false"
+  exit 1
+fi
+
 # ============================================================================
 # Summary
 # ============================================================================
@@ -254,6 +305,7 @@ echo "  Domain:         ${CURRENT_DOMAIN}"
 echo "  Title:          ${CURRENT_TITLE}"
 echo "  Repository URL: ${CURRENT_REPOSITORY_URL}"
 echo "  Registration:   ${CURRENT_REG}"
+echo "  Skip signatures: ${CURRENT_SKIP_SIGNATURE_VERIFICATION}"
 echo ""
 
 if ! $APPLY; then
@@ -304,7 +356,7 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 		"INSTANCE_TITLE": "${CURRENT_TITLE}",
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"REGISTRATION_MODE": "${CURRENT_REG}",
-		"SKIP_SIGNATURE_VERIFICATION": true
+		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION}
 	},
 
 	// D1 Database
@@ -404,7 +456,7 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
-		"SKIP_SIGNATURE_VERIFICATION": true
+		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION}
 	},
 
 	// D1 Database (same as main worker)

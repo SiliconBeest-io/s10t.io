@@ -4,6 +4,7 @@ import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { generateUlid } from '../../../../utils/ulid';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import {
 	listCustomEmojis,
 	checkEmojiShortcodeExists,
@@ -18,6 +19,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 /**
  * GET /api/v1/admin/custom_emojis — List all emojis (including hidden).

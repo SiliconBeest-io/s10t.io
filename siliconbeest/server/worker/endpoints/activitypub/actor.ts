@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../types';
 import type { AccountRow } from '../../types/db';
+import { canAccountOriginateFederationActivity } from '../../services/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -43,6 +44,10 @@ app.get('/:username', async (c) => {
       'Content-Type': 'application/activity+json; charset=utf-8',
       'Vary': 'Accept',
     });
+  }
+
+  if (!await canAccountOriginateFederationActivity(account.id)) {
+    return c.json({ error: 'Record not found' }, 404);
   }
 
   // Non-AP requests (browsers) — redirect to the profile page

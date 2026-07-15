@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getStatusActionPermissions } from '@/utils/permissions'
 
 const { t } = useI18n()
 
@@ -12,6 +13,7 @@ const props = defineProps<{
   favourited?: boolean
   reblogged?: boolean
   bookmarked?: boolean
+  accountCanAct?: boolean
   isOwnStatus?: boolean
   accountId?: string
   accountAcct?: string
@@ -23,15 +25,15 @@ const props = defineProps<{
   loadingBookmark?: boolean
 }>()
 
-const canReblog = computed(() => {
-  const v = props.visibility ?? 'public'
-  return v === 'public' || v === 'unlisted'
-})
+const permissions = computed(() => getStatusActionPermissions({
+  accountCanAct: props.accountCanAct === true,
+  isOwnStatus: props.isOwnStatus === true,
+  visibility: props.visibility,
+  quotePolicyAllows: props.quotePolicyAllows,
+}))
 
-const canQuote = computed(() => {
-  const v = props.visibility ?? 'public'
-  return (v === 'public' || v === 'unlisted') && props.quotePolicyAllows !== false
-})
+const canReblog = computed(() => permissions.value.reblog)
+const canQuote = computed(() => permissions.value.quote)
 
 const quoteTooltip = computed(() => {
   if (canQuote.value) return t('status.quote')
@@ -105,39 +107,39 @@ function handleQuoteItem() {
 
 function handleFavouriteItem() {
   showFavMenu.value = false
-  if (!props.loadingFavourite) emit('favourite', props.statusId)
+  if (permissions.value.favourite && !props.loadingFavourite) emit('favourite', props.statusId)
 }
 
 function handleReact() {
   showFavMenu.value = false
-  emit('react', props.statusId, favBtnRef.value ?? undefined)
+  if (permissions.value.react) emit('react', props.statusId, favBtnRef.value ?? undefined)
 }
 
 function handleEdit(id: string) {
   closeMenu()
-  emit('edit', id)
+  if (permissions.value.edit) emit('edit', id)
 }
 
 function handleDelete(id: string) {
   closeMenu()
-  emit('delete', id)
+  if (permissions.value.delete) emit('delete', id)
 }
 
 function handleReport() {
   closeMenu()
-  if (props.accountId && props.accountAcct) {
+  if (permissions.value.report && props.accountId && props.accountAcct) {
     emit('report', { accountId: props.accountId, accountAcct: props.accountAcct, statusId: props.statusId })
   }
 }
 
 function handleBlock() {
   closeMenu()
-  if (props.accountId) emit('block', props.accountId)
+  if (permissions.value.block && props.accountId) emit('block', props.accountId)
 }
 
 function handleMute() {
   closeMenu()
-  if (props.accountId) emit('mute', props.accountId)
+  if (permissions.value.mute && props.accountId) emit('mute', props.accountId)
 }
 
 function onMenuFocusOut(e: FocusEvent) {
@@ -172,7 +174,8 @@ function formatCount(n: number): string {
   <div class="-ml-2 flex items-center justify-between sm:max-w-md" role="group" :aria-label="t('status.actions')">
     <!-- Reply -->
     <button
-      @click="emit('reply', statusId)"
+      @click="permissions.reply && emit('reply', statusId)"
+      :disabled="!permissions.reply"
       class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
       :aria-label="t('status.reply')"
     >
@@ -239,8 +242,11 @@ function formatCount(n: number): string {
       <button
         ref="favBtnRef"
         @click="toggleFavMenu"
+        :disabled="!permissions.favourite && !permissions.react"
         class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-        :class="favourited
+        :class="!permissions.favourite && !permissions.react
+          ? 'cursor-not-allowed text-slate-300 dark:text-slate-600'
+          : favourited
           ? 'text-rose-500 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10'
           : 'text-slate-500 dark:text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400'"
         :aria-label="t('status.favourite')"
@@ -260,7 +266,7 @@ function formatCount(n: number): string {
       >
         <button
           @click="handleFavouriteItem"
-          :disabled="loadingFavourite"
+          :disabled="!permissions.favourite || loadingFavourite"
           class="sb-menu-item py-2.5"
           :class="favourited ? 'text-rose-500 dark:text-rose-400' : ''"
           role="menuitem"
@@ -270,6 +276,7 @@ function formatCount(n: number): string {
         </button>
         <button
           @click="handleReact"
+          :disabled="!permissions.react"
           class="sb-menu-item py-2.5"
           role="menuitem"
         >
@@ -281,10 +288,12 @@ function formatCount(n: number): string {
 
     <!-- Bookmark -->
     <button
-      @click="!loadingBookmark && emit('bookmark', statusId)"
-      :disabled="loadingBookmark"
+      @click="permissions.bookmark && !loadingBookmark && emit('bookmark', statusId)"
+      :disabled="!permissions.bookmark || loadingBookmark"
       class="group flex touch-manipulation items-center gap-1.5 rounded-full p-2 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-      :class="bookmarked
+      :class="!permissions.bookmark
+        ? 'cursor-not-allowed text-slate-300 dark:text-slate-600'
+        : bookmarked
         ? 'text-amber-500 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10'
         : 'text-slate-500 dark:text-slate-400 hover:bg-amber-50 hover:text-amber-500 dark:hover:bg-amber-500/10 dark:hover:text-amber-400'"
       :aria-label="t('status.bookmark')"
@@ -296,7 +305,8 @@ function formatCount(n: number): string {
 
     <!-- Share -->
     <button
-      @click="emit('share', statusId)"
+      @click="permissions.share && emit('share', statusId)"
+      :disabled="!permissions.share"
       class="touch-manipulation rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
       :aria-label="t('status.share')"
     >
@@ -304,7 +314,11 @@ function formatCount(n: number): string {
     </button>
 
     <!-- More menu -->
-    <div class="relative" @focusout="onMenuFocusOut">
+    <div
+      v-if="permissions.edit || permissions.delete || permissions.report || permissions.block || permissions.mute"
+      class="relative"
+      @focusout="onMenuFocusOut"
+    >
       <button
         @click="toggleMenu"
         class="touch-manipulation rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
@@ -319,7 +333,7 @@ function formatCount(n: number): string {
         class="sb-menu absolute bottom-full right-0 z-50 mb-1.5 w-44 animate-fade-in"
       >
         <button
-          v-if="isOwnStatus"
+          v-if="permissions.edit"
           @click="handleEdit(statusId)"
           class="sb-menu-item"
         >
@@ -327,7 +341,7 @@ function formatCount(n: number): string {
           {{ t('status.edit') }}
         </button>
         <button
-          v-if="isOwnStatus"
+          v-if="permissions.delete"
           @click="handleDelete(statusId)"
           class="sb-menu-item text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
         >
@@ -335,7 +349,7 @@ function formatCount(n: number): string {
           {{ t('status.delete_action') }}
         </button>
         <button
-          v-if="!isOwnStatus"
+          v-if="permissions.mute"
           @click="handleMute"
           class="sb-menu-item text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
         >
@@ -343,7 +357,7 @@ function formatCount(n: number): string {
           {{ t('account.mute') }}
         </button>
         <button
-          v-if="!isOwnStatus"
+          v-if="permissions.block"
           @click="handleBlock"
           class="sb-menu-item text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
         >
@@ -351,7 +365,7 @@ function formatCount(n: number): string {
           {{ t('account.block') }}
         </button>
         <button
-          v-if="!isOwnStatus"
+          v-if="permissions.report"
           @click="handleReport"
           class="sb-menu-item text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
         >

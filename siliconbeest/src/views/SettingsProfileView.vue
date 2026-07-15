@@ -18,6 +18,7 @@ const note = ref('')
 const locked = ref(false)
 const bot = ref(false)
 const discoverable = ref(false)
+const hideCollections = ref(false)
 const avatarFile = ref<File | null>(null)
 const headerFile = ref<File | null>(null)
 const avatarPreview = ref('')
@@ -31,6 +32,7 @@ onMounted(() => {
     locked.value = authStore.currentUser.locked
     bot.value = authStore.currentUser.bot
     discoverable.value = authStore.currentUser.discoverable ?? false
+    hideCollections.value = authStore.currentUser.source?.hide_collections ?? false
     avatarPreview.value = authStore.currentUser.avatar
     headerPreview.value = authStore.currentUser.header
     fields.value = (authStore.currentUser.source?.fields ?? authStore.currentUser.fields ?? [])
@@ -75,6 +77,7 @@ async function saveProfile() {
     formData.append('locked', String(locked.value))
     formData.append('bot', String(bot.value))
     formData.append('discoverable', String(discoverable.value))
+    formData.append('hide_collections', String(hideCollections.value))
 
     if (avatarFile.value) {
       formData.append('avatar', avatarFile.value)
@@ -237,6 +240,19 @@ async function saveProfile() {
           <span class="relative inline-flex shrink-0">
             <input
               v-model="discoverable"
+              type="checkbox"
+              class="peer sr-only"
+            />
+            <span class="h-6 w-11 rounded-full bg-slate-300 transition-colors peer-checked:bg-linear-to-r peer-checked:from-brand-600 peer-checked:to-violet-600 peer-focus-visible:ring-2 peer-focus-visible:ring-brand-400 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-white dark:bg-slate-600 dark:peer-focus-visible:ring-offset-surface-dark"></span>
+            <span class="pointer-events-none absolute left-1 top-1 h-4 w-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-5"></span>
+          </span>
+        </label>
+
+        <label class="flex items-center justify-between gap-4 cursor-pointer rounded-xl px-2 py-2.5 transition-colors hover:bg-surface-2 dark:hover:bg-surface-2-dark">
+          <span class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ t('settings.hideCollections') }}</span>
+          <span class="relative inline-flex shrink-0">
+            <input
+              v-model="hideCollections"
               type="checkbox"
               class="peer sr-only"
             />

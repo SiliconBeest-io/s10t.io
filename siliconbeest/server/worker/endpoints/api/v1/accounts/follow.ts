@@ -10,6 +10,7 @@ import { sendToRecipient } from '../../../../federation/helpers/send';
 import { Follow } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { createFollow, getRelationship } from '../../../../services/account';
+import { assertAccountFollowable } from '../../../../services/permissions';
 
 const app = new Hono<HonoEnv>();
 
@@ -19,6 +20,7 @@ app.post('/:id/follow', authRequired, requireScope('write:follows'), async (c) =
   const currentAccountId = currentUser.account_id;
   const domain = env.INSTANCE_DOMAIN;
 
+  await assertAccountFollowable(currentAccountId, targetId);
   const target = await env.DB.prepare('SELECT id, username, domain, uri, inbox_url, shared_inbox_url, locked, manually_approves_followers FROM accounts WHERE id = ?1').bind(targetId).first();
   if (!target) throw new AppError(404, 'Record not found');
 

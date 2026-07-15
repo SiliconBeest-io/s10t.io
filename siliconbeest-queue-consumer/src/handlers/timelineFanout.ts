@@ -9,6 +9,10 @@ import { env } from 'cloudflare:workers';
 import type { TimelineFanoutMessage } from '../shared/types/queue';
 import { measureAsync, PerfTimer } from '../observability/performance';
 import { buildStatusStreamingPayload } from '../../../packages/shared/utils/streamingPayload';
+import {
+  canBroadcastStatusToPublicStreams,
+  canFanOutStatus,
+} from '../../../packages/shared/permissions';
 
 export async function handleTimelineFanout(
   msg: TimelineFanoutMessage,
@@ -17,58 +21,117 @@ export async function handleTimelineFanout(
   const timer = new PerfTimer('timelineFanout.total', { statusId });
   timer.start();
 
-  // Skip DM fanout — DMs should not appear in followers' timelines
   const statusCheck = await measureAsync(
-    'timelineFanout.db.checkVisibility',
-    () => env.DB.prepare('SELECT visibility FROM statuses WHERE id = ? LIMIT 1')
+    'timelineFanout.db.checkPermissions',
+    () => env.DB.prepare(
+      `SELECT s.account_id, s.visibility, s.deleted_at, s.reblog_of_id,
+              s.quote_id, a.suspended_at, a.silenced_at,
+              a.domain AS author_domain
+       FROM statuses s
+       JOIN accounts a ON a.id = s.account_id
+       WHERE s.id = ?
+       LIMIT 1`,
+    )
       .bind(statusId)
-      .first<{ visibility: string }>(),
+      .first<{
+        account_id: string;
+        visibility: string | null;
+        deleted_at: string | null;
+        reblog_of_id: string | null;
+        quote_id: string | null;
+        suspended_at: string | null;
+        silenced_at: string | null;
+        author_domain: string | null;
+      }>(),
     { statusId }
   );
 
-  if (statusCheck?.visibility === 'direct') {
-    console.log(`Skipping timeline fanout for DM status ${statusId}`);
-    timer.stopWithMetadata({ status: 'skipped_dm' });
+  const canFanOut = canFanOutStatus({
+    statusAccountId: statusCheck?.account_id ?? null,
+    messageAccountId: accountId,
+    visibility: statusCheck?.visibility ?? null,
+    statusDeleted: statusCheck ? statusCheck.deleted_at !== null : null,
+    authorSuspended: statusCheck ? statusCheck.suspended_at !== null : null,
+  });
+
+  if (!statusCheck || !canFanOut) {
+    console.warn(
+      `Dropping unauthorized timeline fanout for status ${statusId} and account ${accountId}`,
+    );
+    timer.stopWithMetadata({ status: 'permission_denied' });
     return;
   }
 
-  // Load all local followers of this account
-  // Local accounts have domain IS NULL
+  const canBroadcastPublicly = canBroadcastStatusToPublicStreams({
+    visibility: statusCheck.visibility,
+    statusDeleted: statusCheck.deleted_at !== null,
+    authorSuspended: statusCheck.suspended_at !== null,
+    authorSilenced: statusCheck.silenced_at !== null,
+  });
+  const hasAudienceSensitiveNestedStatus = statusCheck.reblog_of_id !== null
+    || statusCheck.quote_id !== null;
+
+  // Resolve operational local recipients. The UNION includes the author only
+  // when the author also has an active local user.
   const rows = await measureAsync(
     'timelineFanout.db.loadFollowers',
     () => env.DB.prepare(
-      `SELECT f.account_id
-       FROM follows f
-       JOIN accounts a ON a.id = f.account_id
-       WHERE f.target_account_id = ?
-         AND a.domain IS NULL`,
+      `SELECT candidate.account_id
+       FROM (
+         SELECT f.account_id
+         FROM follows f
+         WHERE f.target_account_id = ?1
+         UNION
+         SELECT ?1
+       ) candidate
+       JOIN accounts recipient ON recipient.id = candidate.account_id
+       JOIN users recipient_user ON recipient_user.account_id = recipient.id
+       WHERE recipient.domain IS NULL
+         AND recipient.suspended_at IS NULL
+         AND recipient.memorial = 0
+         AND recipient_user.disabled = 0
+         AND recipient_user.approved = 1`,
     )
       .bind(accountId)
       .all<{ account_id: string }>(),
     { accountId }
   );
 
-  // Build list of local followers + always include the author
   const allFollowerIds = (rows.results ?? []).map((r) => r.account_id);
-  if (!allFollowerIds.includes(accountId)) {
-    allFollowerIds.push(accountId);
-  }
 
-  // Filter out followers who have blocked or muted the author
+  // Filter either block direction and active viewer-to-author mutes. Follow
+  // rows can remain stale after a relationship restriction is created.
   let followerIds = allFollowerIds;
+  const relationshipCheckAt = new Date().toISOString();
   if (allFollowerIds.length > 0) {
-    const now = new Date().toISOString();
     const placeholders = allFollowerIds.map(() => '?').join(',');
     const blockedBy = await env.DB.prepare(
       `SELECT account_id FROM blocks WHERE target_account_id = ? AND account_id IN (${placeholders})`,
     ).bind(accountId, ...allFollowerIds).all<{ account_id: string }>();
     const mutedBy = await env.DB.prepare(
       `SELECT account_id FROM mutes WHERE target_account_id = ? AND account_id IN (${placeholders}) AND (expires_at IS NULL OR expires_at > ?)`,
-    ).bind(accountId, ...allFollowerIds, now).all<{ account_id: string }>();
+    ).bind(accountId, ...allFollowerIds, relationshipCheckAt).all<{ account_id: string }>();
+    const blockedByAuthor = await env.DB.prepare(
+      `SELECT target_account_id AS account_id
+       FROM blocks
+       WHERE account_id = ?
+         AND target_account_id IN (${placeholders})`,
+    ).bind(accountId, ...allFollowerIds).all<{ account_id: string }>();
+    const domainBlockedBy = statusCheck.author_domain === null
+      ? { results: [] as Array<{ account_id: string }> }
+      : await env.DB.prepare(
+        `SELECT account_id
+         FROM user_domain_blocks
+         WHERE lower(domain) = lower(?)
+           AND account_id IN (${placeholders})`,
+      ).bind(statusCheck.author_domain, ...allFollowerIds)
+        .all<{ account_id: string }>();
 
     const excludeSet = new Set([
       ...(blockedBy.results ?? []).map((r) => r.account_id),
       ...(mutedBy.results ?? []).map((r) => r.account_id),
+      ...(blockedByAuthor.results ?? []).map((r) => r.account_id),
+      ...(domainBlockedBy.results ?? []).map((r) => r.account_id),
     ]);
 
     if (excludeSet.size > 0) {
@@ -77,7 +140,7 @@ export async function handleTimelineFanout(
     }
   }
 
-  if (followerIds.length === 0) {
+  if (followerIds.length === 0 && !canBroadcastPublicly) {
     timer.stopWithMetadata({ status: 'no_followers', followerCount: 0 });
     return;
   }
@@ -91,8 +154,55 @@ export async function handleTimelineFanout(
     statements.push(
       env.DB.prepare(
         `INSERT OR IGNORE INTO home_timeline_entries (account_id, status_id, created_at)
-         VALUES (?, ?, datetime('now'))`,
-      ).bind(followerId, statusId),
+         SELECT ?, ?, datetime('now')
+         WHERE EXISTS (
+           SELECT 1
+           FROM accounts recipient
+           JOIN users recipient_user
+             ON recipient_user.account_id = recipient.id
+           WHERE recipient.id = ?
+             AND recipient.domain IS NULL
+             AND recipient.suspended_at IS NULL
+             AND recipient.memorial = 0
+             AND recipient_user.disabled = 0
+             AND recipient_user.approved = 1
+             AND NOT EXISTS (
+               SELECT 1 FROM blocks viewer_block
+               WHERE viewer_block.account_id = recipient.id
+                 AND viewer_block.target_account_id = ?
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM blocks author_block
+               WHERE author_block.account_id = ?
+                 AND author_block.target_account_id = recipient.id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM mutes viewer_mute
+               WHERE viewer_mute.account_id = recipient.id
+                 AND viewer_mute.target_account_id = ?
+                 AND (
+                   viewer_mute.expires_at IS NULL
+                   OR viewer_mute.expires_at > ?
+                 )
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM user_domain_blocks viewer_domain_block
+               WHERE viewer_domain_block.account_id = recipient.id
+                 AND ? IS NOT NULL
+                 AND lower(viewer_domain_block.domain) = lower(?)
+             )
+         )`,
+      ).bind(
+        followerId,
+        statusId,
+        followerId,
+        accountId,
+        accountId,
+        accountId,
+        relationshipCheckAt,
+        statusCheck.author_domain,
+        statusCheck.author_domain,
+      ),
     );
   }
 
@@ -112,30 +222,96 @@ export async function handleTimelineFanout(
     `Fanned out status ${statusId} to ${followerIds.length} local timelines`,
   );
 
-  // Build the streaming payload once — reused for both follower and public streams
-  const statusPayload = await measureAsync(
-    'timelineFanout.buildStreamingPayload',
-    () => buildStatusStreamingPayload(env.DB, statusId, env.INSTANCE_DOMAIN),
-    { statusId }
-  );
-
   // Send streaming events to all local followers
-  if (statusPayload && followerIds.length > 0) {
+  if (followerIds.length > 0) {
     const placeholders = followerIds.map(() => '?').join(',');
     const userRows = await measureAsync(
       'timelineFanout.db.loadUsers',
       () => env.DB.prepare(
-        `SELECT id, account_id FROM users WHERE account_id IN (${placeholders})`,
+        `SELECT recipient_user.id, recipient_user.account_id
+         FROM users recipient_user
+         JOIN accounts recipient ON recipient.id = recipient_user.account_id
+         WHERE recipient_user.account_id IN (${placeholders})
+           AND recipient_user.disabled = 0
+           AND recipient_user.approved = 1
+           AND recipient.domain IS NULL
+           AND recipient.suspended_at IS NULL
+           AND recipient.memorial = 0
+           AND NOT EXISTS (
+             SELECT 1 FROM blocks viewer_block
+             WHERE viewer_block.account_id = recipient_user.account_id
+               AND viewer_block.target_account_id = ?
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM blocks author_block
+             WHERE author_block.account_id = ?
+               AND author_block.target_account_id = recipient_user.account_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM mutes viewer_mute
+             WHERE viewer_mute.account_id = recipient_user.account_id
+               AND viewer_mute.target_account_id = ?
+               AND (
+                 viewer_mute.expires_at IS NULL
+                 OR viewer_mute.expires_at > ?
+               )
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM user_domain_blocks viewer_domain_block
+             WHERE viewer_domain_block.account_id = recipient_user.account_id
+               AND ? IS NOT NULL
+               AND lower(viewer_domain_block.domain) = lower(?)
+           )`,
       )
-        .bind(...followerIds)
+        .bind(
+          ...followerIds,
+          accountId,
+          accountId,
+          accountId,
+          relationshipCheckAt,
+          statusCheck.author_domain,
+          statusCheck.author_domain,
+        )
         .all<{ id: string; account_id: string }>(),
       { followerCount: followerIds.length }
     );
 
     if (userRows.results && userRows.results.length > 0) {
-      // Send streaming event to each user via worker service binding
-      const streamPromises = userRows.results.map((user) =>
-        env.WORKER.fetch(
+      // A user's relationship with a nested reblog/quote author can differ
+      // from their relationship with the wrapper author. Build one payload per
+      // account so nested objects are checked for the actual recipient.
+      const payloadByAccountId = new Map<string, Promise<string | null>>();
+      // Plain statuses have no audience-dependent nested object. The outer
+      // status and each recipient were already rechecked above, so one
+      // authorized serialization can safely serve every recipient without
+      // multiplying D1 reads by the follower count.
+      const sharedPayload = hasAudienceSensitiveNestedStatus
+        ? null
+        : buildStatusStreamingPayload(
+            env.DB,
+            statusId,
+            env.INSTANCE_DOMAIN,
+            {
+              kind: 'account',
+              accountId: userRows.results[0].account_id,
+            },
+          );
+      const streamPromises = userRows.results.map(async (user) => {
+        let payloadPromise = sharedPayload
+          ?? payloadByAccountId.get(user.account_id);
+        if (!payloadPromise) {
+          payloadPromise = buildStatusStreamingPayload(
+            env.DB,
+            statusId,
+            env.INSTANCE_DOMAIN,
+            { kind: 'account', accountId: user.account_id },
+          );
+          payloadByAccountId.set(user.account_id, payloadPromise);
+        }
+        const statusPayload = await payloadPromise;
+        if (!statusPayload) return;
+
+        await env.WORKER.fetch(
           new Request('http://internal/internal/stream-event', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -148,8 +324,8 @@ export async function handleTimelineFanout(
           }),
         ).catch((err) => {
           console.error(`Failed to send stream event to user ${user.id}:`, err);
-        }),
-      );
+        });
+      });
 
       await measureAsync(
         'timelineFanout.streaming.sendEvents',
@@ -168,15 +344,25 @@ export async function handleTimelineFanout(
     followerCount: followerIds.length
   });
 
-  // Broadcast to public/local streams — INDEPENDENT of follower count
-  if (statusPayload && statusCheck?.visibility === 'public') {
-    // Determine if the status is from a local account
-    const authorAccount = await env.DB.prepare(
-      'SELECT domain FROM accounts WHERE id = ? LIMIT 1',
-    ).bind(accountId).first<{ domain: string | null }>();
+  // Public streams receive a separately authorized payload. In particular, a
+  // public wrapper cannot expose an unlisted/private or moderated nested post.
+  const publicStatusPayload = canBroadcastPublicly
+    ? await measureAsync(
+        'timelineFanout.buildPublicStreamingPayload',
+        () => buildStatusStreamingPayload(
+          env.DB,
+          statusId,
+          env.INSTANCE_DOMAIN,
+          { kind: 'public' },
+        ),
+        { statusId },
+      )
+    : null;
 
+  // Broadcast to public/local streams — INDEPENDENT of follower count
+  if (publicStatusPayload) {
     const publicStreams = ['public'];
-    if (!authorAccount?.domain) publicStreams.push('public:local');
+    if (statusCheck.author_domain === null) publicStreams.push('public:local');
 
     console.log(`Broadcasting to public streams: ${publicStreams.join(', ')} for status ${statusId}`);
     await env.WORKER.fetch(
@@ -186,7 +372,7 @@ export async function handleTimelineFanout(
         body: JSON.stringify({
           userId: '__public__',
           event: 'update',
-          payload: statusPayload,
+          payload: publicStatusPayload,
           stream: publicStreams,
         }),
       }),

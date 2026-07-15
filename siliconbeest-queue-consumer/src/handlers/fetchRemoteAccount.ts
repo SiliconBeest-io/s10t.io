@@ -18,6 +18,10 @@ import { pickSignerUsername } from '../../../packages/shared/services/signer';
 import { emojiTagToCustomEmoji } from '../../../packages/shared/utils/customEmoji';
 import { lookupRemoteSoftware } from '../utils/nodeinfo';
 import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
+import {
+  canStoreFetchedRemoteActor,
+  shouldHideRemoteAccountCollections,
+} from '../../../packages/shared/permissions';
 
 /** Cache TTL for remote actor documents (5 minutes). */
 const ACTOR_CACHE_TTL = 300;
@@ -32,15 +36,40 @@ export async function handleFetchRemoteAccount(
 
   let actorDomain: string;
   try {
-    actorDomain = new URL(actorUri).hostname.toLowerCase();
+    const actorUrl = new URL(actorUri);
+    actorDomain = actorUrl.hostname.toLowerCase();
   } catch {
     console.error(`Invalid actor URI: ${actorUri}`);
+    return;
+  }
+
+  if (!canStoreFetchedRemoteActor({
+    requestedActorUri: actorUri,
+    actorUri,
+    localInstanceDomain: env.INSTANCE_DOMAIN,
+    actorSuspended: false,
+  })) {
+    console.warn(`Refusing non-remote actor lookup for ${actorUri}`);
     return;
   }
 
   const suspendedDomains = await getSuspendedDomains(env.DB, [actorDomain]);
   if (suspendedDomains.has(actorDomain)) {
     console.log(`[remote-account] Skipping lookup for suspended domain ${actorDomain}`);
+    return;
+  }
+
+  // A force refresh must not overwrite a locally suspended identity. Read the
+  // account state independently of the freshness/cache shortcuts.
+  const existing = await env.DB.prepare(
+    `SELECT id, fetched_at, suspended_at
+     FROM accounts
+     WHERE uri = ? AND domain IS NOT NULL`,
+  )
+    .bind(actorUri)
+    .first<{ id: string; fetched_at: string | null; suspended_at: string | null }>();
+  if (existing?.suspended_at) {
+    console.log(`[remote-account] Skipping locally suspended actor ${actorUri}`);
     return;
   }
 
@@ -52,15 +81,6 @@ export async function handleFetchRemoteAccount(
       console.log(`Actor ${actorUri} found in cache, skipping fetch`);
       return;
     }
-  }
-
-  // Check if we recently fetched this actor (unless forced)
-  if (!forceRefresh) {
-    const existing = await env.DB.prepare(
-      `SELECT id, fetched_at FROM accounts WHERE uri = ? AND domain IS NOT NULL`,
-    )
-      .bind(actorUri)
-      .first<{ id: string; fetched_at: string | null }>();
 
     if (existing?.fetched_at) {
       const fetchedAt = new Date(existing.fetched_at).getTime();
@@ -81,6 +101,9 @@ export async function handleFetchRemoteAccount(
   // signature keyId (/users/__instance__#main-key), and authorized-fetch
   // verifiers reject the mismatch.
   let actorDoc: Record<string, unknown>;
+  let followersUrl: string | null = null;
+  let followingUrl: string | null = null;
+  let hideCollections = true;
   try {
     const signerUsername = await pickSignerUsername(env.DB, signerAccountId ?? null);
     if (!signerUsername) {
@@ -96,6 +119,37 @@ export async function handleFetchRemoteAccount(
       return;
     }
     actorDoc = (await actorObj.toJsonLd()) as Record<string, unknown>;
+    const fetchedActorUri = typeof actorDoc.id === 'string' ? actorDoc.id : null;
+    if (!canStoreFetchedRemoteActor({
+      requestedActorUri: actorUri,
+      actorUri: fetchedActorUri,
+      localInstanceDomain: env.INSTANCE_DOMAIN,
+      actorSuspended: false,
+    })) {
+      console.warn(`Actor lookup identity mismatch for ${actorUri}, dropping`);
+      return;
+    }
+
+    followersUrl = actorObj.followersId?.href ?? null;
+    followingUrl = actorObj.followingId?.href ?? null;
+    const [followersResult, followingResult] = await Promise.allSettled([
+      actorObj.getFollowers({ documentLoader, suppressError: true }),
+      actorObj.getFollowing({ documentLoader, suppressError: true }),
+    ]);
+    const followersCollection = followersResult.status === 'fulfilled'
+      ? followersResult.value
+      : null;
+    const followingCollection = followingResult.status === 'fulfilled'
+      ? followingResult.value
+      : null;
+    hideCollections = shouldHideRemoteAccountCollections({
+      followersAdvertised: followersUrl !== null,
+      followingAdvertised: followingUrl !== null,
+      followersFirstPageAvailable: followersCollection !== null
+        && followersCollection.firstId !== null,
+      followingFirstPageAvailable: followingCollection !== null
+        && followingCollection.firstId !== null,
+    });
   } catch (err) {
     console.error(`Failed to fetch actor ${actorUri}:`, err);
     throw err; // Retry on transient/auth errors
@@ -112,7 +166,17 @@ export async function handleFetchRemoteAccount(
   }
 
   // Extract fields from the actor document
-  const id = (actorDoc.id as string) || actorUri;
+  const id = typeof actorDoc.id === 'string' ? actorDoc.id : null;
+  if (!id || !canStoreFetchedRemoteActor({
+    requestedActorUri: actorUri,
+    actorUri: id,
+    localInstanceDomain: env.INSTANCE_DOMAIN,
+    actorSuspended: false,
+  })) {
+    console.warn(`Actor lookup identity mismatch for ${actorUri}, dropping`);
+    return;
+  }
+
   const name = (actorDoc.name as string) || preferredUsername || '';
   const username = preferredUsername || '';
   const summary = (actorDoc.summary as string) || '';
@@ -120,8 +184,6 @@ export async function handleFetchRemoteAccount(
   const sharedInbox =
     (actorDoc.endpoints as Record<string, unknown>)?.sharedInbox as string | undefined;
   const outbox = actorDoc.outbox as string | undefined;
-  const followersUrl = actorDoc.followers as string | undefined;
-  const followingUrl = actorDoc.following as string | undefined;
 
   // Extract avatar and header
   const iconObj = actorDoc.icon as Record<string, unknown> | undefined;
@@ -171,17 +233,19 @@ export async function handleFetchRemoteAccount(
     `INSERT INTO accounts (
        id, username, domain, display_name, note, uri, url,
        avatar_url, header_url, inbox_url, outbox_url,
-       shared_inbox_url, followers_url, following_url,
+       shared_inbox_url, followers_url, following_url, hide_collections,
        public_key_pem, public_key_id, actor_type,
        is_bot, is_group, fields, emoji_tags, fetched_at, created_at, updated_at
      ) VALUES (
        ?, ?, ?, ?, ?, ?, ?,
        ?, ?, ?, ?,
-       ?, ?, ?,
+       ?, ?, ?, ?,
        ?, ?, ?,
        ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now')
      )
      ON CONFLICT(uri) DO UPDATE SET
+       username = excluded.username,
+       domain = excluded.domain,
        display_name = excluded.display_name,
        note = excluded.note,
        url = excluded.url,
@@ -192,6 +256,7 @@ export async function handleFetchRemoteAccount(
        shared_inbox_url = excluded.shared_inbox_url,
        followers_url = excluded.followers_url,
        following_url = excluded.following_url,
+       hide_collections = excluded.hide_collections,
        public_key_pem = excluded.public_key_pem,
        public_key_id = excluded.public_key_id,
        actor_type = excluded.actor_type,
@@ -215,8 +280,9 @@ export async function handleFetchRemoteAccount(
       inbox,
       outbox ?? null,
       sharedInbox ?? null,
-      followersUrl ?? null,
-      followingUrl ?? null,
+      followersUrl,
+      followingUrl,
+      hideCollections ? 1 : 0,
       publicKeyPem ?? null,
       publicKeyId ?? null,
       actorType,

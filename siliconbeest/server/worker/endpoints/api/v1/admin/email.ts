@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import { sendCustomEmail } from '../../../../services/email';
 import { getInstanceTitle } from '../../../../services/instance';
 
@@ -10,6 +11,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 /**
  * POST /api/v1/admin/email — send an email to a specific address.

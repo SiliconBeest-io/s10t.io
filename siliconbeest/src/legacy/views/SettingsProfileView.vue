@@ -18,6 +18,7 @@ const note = ref('')
 const locked = ref(false)
 const bot = ref(false)
 const discoverable = ref(false)
+const hideCollections = ref(false)
 const avatarFile = ref<File | null>(null)
 const headerFile = ref<File | null>(null)
 const avatarPreview = ref('')
@@ -31,6 +32,7 @@ onMounted(() => {
     locked.value = authStore.currentUser.locked
     bot.value = authStore.currentUser.bot
     discoverable.value = authStore.currentUser.discoverable ?? false
+    hideCollections.value = authStore.currentUser.source?.hide_collections ?? false
     avatarPreview.value = authStore.currentUser.avatar
     headerPreview.value = authStore.currentUser.header
     fields.value = (authStore.currentUser.source?.fields ?? authStore.currentUser.fields ?? [])
@@ -75,6 +77,7 @@ async function saveProfile() {
     formData.append('locked', String(locked.value))
     formData.append('bot', String(bot.value))
     formData.append('discoverable', String(discoverable.value))
+    formData.append('hide_collections', String(hideCollections.value))
 
     if (avatarFile.value) {
       formData.append('avatar', avatarFile.value)
@@ -222,6 +225,15 @@ async function saveProfile() {
             class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500"
           />
           <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('settings.discoverable') }}</span>
+        </label>
+
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input
+            v-model="hideCollections"
+            type="checkbox"
+            class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500"
+          />
+          <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('settings.hideCollections') }}</span>
         </label>
       </div>
 

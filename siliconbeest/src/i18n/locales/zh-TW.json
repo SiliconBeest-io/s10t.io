@@ -341,6 +341,7 @@
     "lockAccount": "鎖定帳號（手動審核追蹤者）",
     "botAccount": "這是機器人帳號",
     "discoverable": "向他人推薦此帳號",
+    "hideCollections": "隱藏追蹤者與正在追蹤清單",
     "profileFields": "個人檔案資訊欄",
     "addField": "新增欄位",
     "fieldName": "標籤",

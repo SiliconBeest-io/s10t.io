@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import {
 	listEmailDomainBlocks,
 	getEmailDomainBlock,
@@ -14,6 +15,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read:email_domain_blocks', 'admin:write:email_domain_blocks'));
 
 /**
  * GET /api/v1/admin/email_domain_blocks — list email domain blocks.

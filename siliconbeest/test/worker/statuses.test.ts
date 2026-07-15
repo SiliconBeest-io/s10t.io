@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applyMigration, createTestUser, authHeaders } from './helpers';
 
@@ -70,6 +70,28 @@ describe('Statuses API', () => {
       expect(body.visibility).toBe('unlisted');
     });
 
+    it('rejects an invalid visibility before creating a status', async () => {
+      const before = await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM statuses WHERE account_id = ?1',
+      ).bind(user.accountId).first<{ count: number }>();
+
+      const res = await SELF.fetch(`${BASE}/api/v1/statuses`, {
+        method: 'POST',
+        headers: authHeaders(user.token),
+        body: JSON.stringify({
+          status: 'This status must not be stored',
+          visibility: 'followers-or-public',
+        }),
+      });
+
+      expect(res.status).toBe(422);
+
+      const after = await env.DB.prepare(
+        'SELECT COUNT(*) AS count FROM statuses WHERE account_id = ?1',
+      ).bind(user.accountId).first<{ count: number }>();
+      expect(after?.count).toBe(before?.count);
+    });
+
     it('returns 422 for empty status without media', async () => {
       const res = await SELF.fetch(`${BASE}/api/v1/statuses`, {
         method: 'POST',
@@ -110,6 +132,35 @@ describe('Statuses API', () => {
         headers: authHeaders(user.token),
       });
       expect(res.status).toBe(404);
+    });
+
+    it('fails closed for a stored status with an invalid visibility', async () => {
+      const invalidStatusId = 'stored-invalid-visibility';
+      const now = new Date().toISOString();
+      await env.DB.prepare(
+        `INSERT INTO statuses (id, uri, account_id, text, content, visibility, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?6)`,
+      ).bind(
+        invalidStatusId,
+        `${BASE}/users/statususer/statuses/${invalidStatusId}`,
+        user.accountId,
+        'must remain hidden',
+        'followers-or-public',
+        now,
+      ).run();
+
+      const fetchRes = await SELF.fetch(`${BASE}/api/v1/statuses/${invalidStatusId}`, {
+        headers: authHeaders(user.token),
+      });
+      expect(fetchRes.status).toBe(404);
+
+      const accountStatusesRes = await SELF.fetch(
+        `${BASE}/api/v1/accounts/${user.accountId}/statuses`,
+        { headers: authHeaders(user.token) },
+      );
+      expect(accountStatusesRes.status).toBe(200);
+      const accountStatuses = await accountStatusesRes.json<Array<{ id: string }>>();
+      expect(accountStatuses.some((status) => status.id === invalidStatusId)).toBe(false);
     });
   });
 

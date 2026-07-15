@@ -425,10 +425,9 @@ describe('Comprehensive Visibility & Permission Controls', () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.public_1}`, { headers: authHeaders(dave.token) });
       expect(r.status).toBe(200);
     });
-    it('visible to blocked user eve', async () => {
-      // Public posts are still visible even if blocked (Mastodon behavior)
+    it('NOT visible to a user blocked by the author', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.public_1}`, { headers: authHeaders(eve.token) });
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(404);
     });
   });
 
@@ -829,15 +828,16 @@ describe('Comprehensive Visibility & Permission Controls', () => {
   // NEW: Favourite/Reblog/Bookmark on restricted statuses
   // =========================================================================
   describe('Favourite on restricted statuses', () => {
-    it('favourite endpoint does not enforce DM visibility -- succeeds even for non-mentioned user', async () => {
-      // NOTE: The favourite endpoint only checks deleted_at, not visibility.
-      // This means any authenticated user can favourite any non-deleted status.
-      // This documents the current behavior (potential future fix).
+    it('conceals a DM from a non-mentioned user without creating a favourite', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.dm_to_carol}/favourite`, {
         method: 'POST',
         headers: authHeaders(dave.token),
       });
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(404);
+      const favourite = await env.DB.prepare(
+        'SELECT id FROM favourites WHERE account_id = ?1 AND status_id = ?2',
+      ).bind(dave.accountId, IDS.dm_to_carol).first<{ id: string }>();
+      expect(favourite).toBeNull();
     });
 
     it('can favourite a private status if you are a follower', async () => {
@@ -886,14 +886,16 @@ describe('Comprehensive Visibility & Permission Controls', () => {
   });
 
   describe('Bookmark on restricted statuses', () => {
-    it('bookmark endpoint does not enforce DM visibility -- succeeds even for non-mentioned user', async () => {
-      // NOTE: The bookmark endpoint only checks deleted_at, not visibility.
-      // This documents the current behavior (potential future fix).
+    it('conceals a DM from a non-mentioned user without creating a bookmark', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.dm_to_carol}/bookmark`, {
         method: 'POST',
         headers: authHeaders(dave.token),
       });
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(404);
+      const bookmark = await env.DB.prepare(
+        'SELECT id FROM bookmarks WHERE account_id = ?1 AND status_id = ?2',
+      ).bind(dave.accountId, IDS.dm_to_carol).first<{ id: string }>();
+      expect(bookmark).toBeNull();
     });
 
     it('cannot bookmark a deleted status -- 404', async () => {
@@ -974,12 +976,12 @@ describe('Comprehensive Visibility & Permission Controls', () => {
   // NEW: Account statuses edge cases
   // =========================================================================
   describe('Account statuses edge cases', () => {
-    it('blocked user eve: public posts by alice still visible via account statuses', async () => {
+    it('blocked user eve: public posts by alice are omitted from account statuses', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/accounts/${alice.accountId}/statuses`, { headers: authHeaders(eve.token) });
       expect(r.status).toBe(200);
       const data = await r.json() as any[];
       const vis = data.map((s: any) => s.visibility);
-      expect(vis).toContain('public');
+      expect(vis).not.toContain('public');
     });
 
     it('own account statuses: shows ALL visibility levels including direct', async () => {
@@ -1115,13 +1117,9 @@ describe('Comprehensive Visibility & Permission Controls', () => {
   // NEW: Suspended/disabled user statuses
   // =========================================================================
   describe('Statuses by suspended user', () => {
-    it('public status by suspended user is still fetchable (not deleted)', async () => {
-      // The status itself has no deleted_at, the account is just suspended.
-      // In SiliconBeest, the status fetch checks deleted_at on the status, not the account.
-      // So this should still return 200 unless the app filters out suspended user statuses.
+    it('conceals a public status by a suspended user', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.public_by_suspended}`);
-      // Either 200 (status exists, not deleted) or 404 if the app also checks account status
-      expect([200, 404]).toContain(r.status);
+      expect(r.status).toBe(404);
     });
   });
 
@@ -1180,22 +1178,28 @@ describe('Comprehensive Visibility & Permission Controls', () => {
       expect(r.status).toBe(200);
     });
 
-    it('favourite endpoint: stranger can favourite private post (no visibility check)', async () => {
-      // NOTE: favourite endpoint does not enforce visibility, only checks deleted_at.
+    it('stranger cannot favourite a private post', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.private_1}/favourite`, {
         method: 'POST',
         headers: authHeaders(dave.token),
       });
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(404);
+      const favourite = await env.DB.prepare(
+        'SELECT id FROM favourites WHERE account_id = ?1 AND status_id = ?2',
+      ).bind(dave.accountId, IDS.private_1).first<{ id: string }>();
+      expect(favourite).toBeNull();
     });
 
-    it('bookmark endpoint: stranger can bookmark private post (no visibility check)', async () => {
-      // NOTE: bookmark endpoint does not enforce visibility, only checks deleted_at.
+    it('stranger cannot bookmark a private post', async () => {
       const r = await SELF.fetch(`https://t.local/api/v1/statuses/${IDS.private_1}/bookmark`, {
         method: 'POST',
         headers: authHeaders(dave.token),
       });
-      expect(r.status).toBe(200);
+      expect(r.status).toBe(404);
+      const bookmark = await env.DB.prepare(
+        'SELECT id FROM bookmarks WHERE account_id = ?1 AND status_id = ?2',
+      ).bind(dave.accountId, IDS.private_1).first<{ id: string }>();
+      expect(bookmark).toBeNull();
     });
   });
 

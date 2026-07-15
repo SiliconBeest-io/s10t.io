@@ -2,11 +2,17 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authOptional } from '../../../../middleware/auth';
-import { AppError } from '../../../../middleware/errorHandler';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import type { MediaAttachment } from '../../../../types/mastodon';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import {
+  assertAccountViewable,
+  buildReblogOriginalSurfaceSqlPredicate,
+  buildStatusRelationshipSqlPredicate,
+  buildStatusVisibilitySqlPredicate,
+} from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -33,7 +39,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
     reblogged: false,
     muted: false,
     bookmarked: false,
-    pinned: false,
+    pinned: !!row.pinned,
     content: (row.content as string) || '',
     reblog: null,
     quote: null as import('../../../../types/mastodon').Status | null,
@@ -77,13 +83,11 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
 
 const app = new Hono<HonoEnv>();
 
-app.get('/:id/statuses', authOptional, async (c) => {
+app.get('/:id/statuses', authOptional, requireScope('read:statuses'), async (c) => {
   const accountId = c.req.param('id');
   const domain = env.INSTANCE_DOMAIN;
 
-  // Verify account exists
-  const account = await env.DB.prepare('SELECT id FROM accounts WHERE id = ?1').bind(accountId).first();
-  if (!account) throw new AppError(404, 'Record not found');
+  await assertAccountViewable(accountId);
 
   const query = c.req.query();
   const pagination = parsePaginationParams({
@@ -101,29 +105,30 @@ app.get('/:id/statuses', authOptional, async (c) => {
   const pinned = query.pinned === 'true';
 
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
+  const permissionNow = new Date().toISOString();
 
   const conditions: string[] = ['s.account_id = ?', 's.deleted_at IS NULL'];
   const params: unknown[] = [accountId];
-
-  // Visibility filtering:
-  // - Own statuses: show all
-  // - Follower: show public + unlisted + private
-  // - Others: show public + unlisted only
-  if (currentAccountId === accountId) {
-    // Own profile: show everything (including DMs authored by self)
-  } else if (currentAccountId) {
-    // Logged in: check if follower
-    const isFollower = await env.DB.prepare(
-      'SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2 LIMIT 1',
-    ).bind(currentAccountId, accountId).first();
-    if (isFollower) {
-      conditions.push("s.visibility IN ('public', 'unlisted', 'private')");
-    } else {
-      conditions.push("s.visibility IN ('public', 'unlisted')");
-    }
-  } else {
-    // Not logged in: public + unlisted only
-    conditions.push("s.visibility IN ('public', 'unlisted')");
+  const visibilityPredicate = buildStatusVisibilitySqlPredicate('status', currentAccountId);
+  conditions.push(visibilityPredicate.sql);
+  params.push(...visibilityPredicate.bindings);
+  const relationshipPredicate = buildStatusRelationshipSqlPredicate(
+    'status',
+    currentAccountId,
+    permissionNow,
+  );
+  conditions.push(relationshipPredicate.sql);
+  params.push(...relationshipPredicate.bindings);
+  const reblogOriginalPredicate = buildReblogOriginalSurfaceSqlPredicate(
+    currentAccountId,
+    permissionNow,
+  );
+  conditions.push(reblogOriginalPredicate.sql);
+  params.push(...reblogOriginalPredicate.bindings);
+  // Direct messages are conversation resources, not profile entries. Authors
+  // can review their own sent DMs, but recipients must use conversation APIs.
+  if (currentAccountId !== accountId) {
+    conditions.push("s.visibility <> 'direct'");
   }
 
   if (pag.whereClause) {
@@ -135,8 +140,11 @@ app.get('/:id/statuses', authOptional, async (c) => {
   if (excludeReblogs) conditions.push('s.reblog_of_id IS NULL');
   if (onlyMedia) conditions.push("EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)");
   if (pinned) {
-    // Pinned statuses not yet implemented; return empty
-    return c.json([]);
+    conditions.push('s.pinned = 1');
+    // Legacy or manually-corrupted invalid pins must not become profile
+    // entries. Direct messages and boost wrappers are never pinnable.
+    conditions.push('s.reblog_of_id IS NULL');
+    conditions.push("s.visibility <> 'direct'");
   }
 
   const sql = `
@@ -172,6 +180,12 @@ app.get('/:id/statuses', authOptional, async (c) => {
   const reblogMap = new Map<string, Record<string, unknown>>();
   if (reblogOfIds.length > 0) {
     const placeholders = reblogOfIds.map(() => '?').join(',');
+    const reblogVisibilityPredicate = buildStatusVisibilitySqlPredicate('status', currentAccountId);
+    const reblogRelationshipPredicate = buildStatusRelationshipSqlPredicate(
+      'status',
+      currentAccountId,
+      new Date().toISOString(),
+    );
     const { results: reblogResults } = await env.DB.prepare(
       `SELECT s.*,
         a.username AS account_username, a.domain AS account_domain,
@@ -185,8 +199,14 @@ app.get('/:id/statuses', authOptional, async (c) => {
         a.created_at AS account_created_at, a.emoji_tags AS account_emoji_tags
       FROM statuses s
       JOIN accounts a ON a.id = s.account_id
-      WHERE s.id IN (${placeholders}) AND s.deleted_at IS NULL`,
-    ).bind(...reblogOfIds).all();
+      WHERE s.id IN (${placeholders})
+        AND ${reblogVisibilityPredicate.sql}
+        AND ${reblogRelationshipPredicate.sql}`,
+    ).bind(
+      ...reblogOfIds,
+      ...reblogVisibilityPredicate.bindings,
+      ...reblogRelationshipPredicate.bindings,
+    ).all();
     for (const r of (reblogResults ?? []) as Record<string, unknown>[]) {
       reblogMap.set(r.id as string, r);
     }

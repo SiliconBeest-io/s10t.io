@@ -341,6 +341,7 @@
     "lockAccount": "계정 잠금 (팔로워 수동 승인)",
     "botAccount": "봇 계정입니다",
     "discoverable": "다른 사람에게 계정 추천",
+    "hideCollections": "팔로워 및 팔로잉 목록 숨기기",
     "profileFields": "프로필 메타데이터",
     "addField": "필드 추가",
     "fieldName": "라벨",

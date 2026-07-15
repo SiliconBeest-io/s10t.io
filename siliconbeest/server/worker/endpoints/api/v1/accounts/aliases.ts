@@ -15,6 +15,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { getFedifyContext } from '../../../../federation/helpers/send';
 import { getAliases, addAlias, removeAlias } from '../../../../services/account';
 
@@ -22,7 +23,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 // ── GET /aliases ──
 
-app.get('/aliases', authRequired, async (c) => {
+app.get('/aliases', authRequired, requireScope('read:accounts'), async (c) => {
 	const accountId = c.get('currentUser')!.account_id;
 	const aliases = await getAliases(accountId);
 	return c.json({ aliases });
@@ -30,7 +31,7 @@ app.get('/aliases', authRequired, async (c) => {
 
 // ── POST /aliases ──
 
-app.post('/aliases', authRequired, async (c) => {
+app.post('/aliases', authRequired, requireScope('write:accounts'), async (c) => {
 	const accountId = c.get('currentUser')!.account_id;
 	const body = await c.req.json<{ alias: string }>().catch(() => null);
 
@@ -76,7 +77,7 @@ app.post('/aliases', authRequired, async (c) => {
 
 // ── DELETE /aliases ──
 
-app.delete('/aliases', authRequired, async (c) => {
+app.delete('/aliases', authRequired, requireScope('write:accounts'), async (c) => {
 	const accountId = c.get('currentUser')!.account_id;
 	const body = await c.req.json<{ alias: string }>().catch(() => null);
 

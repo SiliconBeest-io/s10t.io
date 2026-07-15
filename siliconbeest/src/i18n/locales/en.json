@@ -341,6 +341,7 @@
     "lockAccount": "Lock account (manually approve followers)",
     "botAccount": "This is a bot account",
     "discoverable": "Suggest account to others",
+    "hideCollections": "Hide your followers and following lists",
     "profileFields": "Profile metadata",
     "addField": "Add field",
     "fieldName": "Label",

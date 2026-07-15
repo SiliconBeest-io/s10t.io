@@ -12,6 +12,11 @@ import { env } from 'cloudflare:workers';
 import type { ImportItemMessage } from '../shared/types/queue';
 import { generateUlid } from '../../../packages/shared/utils/ulid';
 import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
+import {
+  canActAsAccount,
+  canCreateBlockOrMuteAccountRelationship,
+  canFollowAccount,
+} from '../../../packages/shared/permissions';
 
 const AP_CONTEXT = 'https://www.w3.org/ns/activitystreams';
 
@@ -70,23 +75,35 @@ export async function handleImportItem(
     shared_inbox_url: string | null;
     locked: number;
     manually_approves_followers: number;
+    suspended_at: string | null;
+    memorial: number;
+    moved_to_account_id: string | null;
+    user_approved: number | null;
   } | null = null;
 
   if (domain) {
     targetAccount = await env.DB.prepare(
-      `SELECT id, username, domain, uri, inbox_url, shared_inbox_url, locked,
-              COALESCE(manually_approves_followers, 0) AS manually_approves_followers
-       FROM accounts
-       WHERE username = ? AND domain = ?`,
+      `SELECT target.id, target.username, target.domain, target.uri,
+              target.inbox_url, target.shared_inbox_url, target.locked,
+              COALESCE(target.manually_approves_followers, 0) AS manually_approves_followers,
+              target.suspended_at, target.memorial, target.moved_to_account_id,
+              target_user.approved AS user_approved
+       FROM accounts target
+       LEFT JOIN users target_user ON target_user.account_id = target.id
+       WHERE target.username = ? AND target.domain = ?`,
     )
       .bind(username, domain)
       .first();
   } else {
     targetAccount = await env.DB.prepare(
-      `SELECT id, username, domain, uri, inbox_url, shared_inbox_url, locked,
-              COALESCE(manually_approves_followers, 0) AS manually_approves_followers
-       FROM accounts
-       WHERE username = ? AND domain IS NULL`,
+      `SELECT target.id, target.username, target.domain, target.uri,
+              target.inbox_url, target.shared_inbox_url, target.locked,
+              COALESCE(target.manually_approves_followers, 0) AS manually_approves_followers,
+              target.suspended_at, target.memorial, target.moved_to_account_id,
+              target_user.approved AS user_approved
+       FROM accounts target
+       LEFT JOIN users target_user ON target_user.account_id = target.id
+       WHERE target.username = ? AND target.domain IS NULL`,
     )
       .bind(username)
       .first();
@@ -94,6 +111,44 @@ export async function handleImportItem(
 
   // If not found and it's a remote account, try WebFinger and enqueue fetch
   if (!targetAccount && domain) {
+    const importingActor = await env.DB.prepare(
+      `SELECT importing_actor.suspended_at, importing_actor.memorial,
+              importing_user.disabled AS user_disabled,
+              importing_user.approved AS user_approved
+       FROM accounts importing_actor
+       LEFT JOIN users importing_user
+         ON importing_user.account_id = importing_actor.id
+       WHERE importing_actor.id = ?1 AND importing_actor.domain IS NULL
+       LIMIT 1`,
+    )
+      .bind(accountId)
+      .first<{
+        suspended_at: string | null;
+        memorial: number | null;
+        user_disabled: number | null;
+        user_approved: number | null;
+      }>();
+    if (!canActAsAccount({
+      accountSuspended: importingActor
+        ? importingActor.suspended_at !== null
+        : null,
+      userDisabled: importingActor?.user_disabled === null
+        || importingActor?.user_disabled === undefined
+        ? null
+        : importingActor.user_disabled !== 0,
+      userApproved: importingActor?.user_approved === null
+        || importingActor?.user_approved === undefined
+        ? null
+        : importingActor.user_approved !== 0,
+      memorial: importingActor?.memorial === null
+        || importingActor?.memorial === undefined
+        ? null
+        : importingActor.memorial !== 0,
+    })) {
+      console.log(`[import] Skipping remote lookup for inactive account ${accountId}`);
+      return;
+    }
+
     const suspendedDomains = await getSuspendedDomains(env.DB, [domain]);
     if (suspendedDomains.has(domain)) {
       console.log(`[import] Skipping remote lookup for suspended domain ${domain}`);
@@ -132,18 +187,91 @@ export async function handleImportItem(
     return;
   }
 
+  if (action === 'following' && targetAccount.domain) {
+    const targetDomain = targetAccount.domain.toLowerCase();
+    const suspendedDomains = await getSuspendedDomains(env.DB, [targetDomain]);
+    if (suspendedDomains.has(targetDomain)) {
+      console.log(`[import] Skipping follow import for suspended domain ${targetDomain}`);
+      return;
+    }
+  }
+
+  const actorPermission = await env.DB.prepare(
+    `SELECT actor.suspended_at, actor.memorial,
+            actor_user.disabled AS user_disabled,
+            actor_user.approved AS user_approved,
+            EXISTS (
+              SELECT 1 FROM blocks actor_block
+              WHERE actor_block.account_id = actor.id
+                AND actor_block.target_account_id = ?2
+            ) AS actor_blocks_target,
+            EXISTS (
+              SELECT 1 FROM blocks target_block
+              WHERE target_block.account_id = ?2
+                AND target_block.target_account_id = actor.id
+            ) AS target_blocks_actor,
+            EXISTS (
+              SELECT 1 FROM user_domain_blocks actor_domain_block
+              WHERE actor_domain_block.account_id = actor.id
+                AND ?3 IS NOT NULL
+                AND lower(?3) = lower(actor_domain_block.domain)
+            ) AS actor_blocks_target_domain
+     FROM accounts actor
+     LEFT JOIN users actor_user ON actor_user.account_id = actor.id
+     WHERE actor.id = ?1
+     LIMIT 1`,
+  ).bind(accountId, targetAccount.id, targetAccount.domain).first<{
+    suspended_at: string | null;
+    memorial: number | null;
+    user_disabled: number | null;
+    user_approved: number | null;
+    actor_blocks_target: number;
+    target_blocks_actor: number;
+    actor_blocks_target_domain: number;
+  }>();
+  const actorOperational = canActAsAccount({
+    accountSuspended: actorPermission
+      ? actorPermission.suspended_at !== null
+      : null,
+    userDisabled: actorPermission?.user_disabled === null
+      || actorPermission?.user_disabled === undefined
+      ? null
+      : actorPermission.user_disabled !== 0,
+    userApproved: actorPermission?.user_approved === null
+      || actorPermission?.user_approved === undefined
+      ? null
+      : actorPermission.user_approved !== 0,
+    memorial: actorPermission?.memorial === null
+      || actorPermission?.memorial === undefined
+      ? null
+      : actorPermission.memorial !== 0,
+  });
+  const targetViewable = targetAccount.suspended_at === null
+    && (targetAccount.domain !== null || targetAccount.user_approved === 1);
+
   const now = new Date().toISOString();
   const id = generateUlid();
 
   switch (action) {
     case 'following': {
-      if (targetAccount.domain) {
-        const targetDomain = targetAccount.domain.toLowerCase();
-        const suspendedDomains = await getSuspendedDomains(env.DB, [targetDomain]);
-        if (suspendedDomains.has(targetDomain)) {
-          console.log(`[import] Skipping follow import for suspended domain ${targetDomain}`);
-          return;
-        }
+      if (!actorOperational || !canFollowAccount({
+        actorAccountId: accountId,
+        targetAccountId: targetAccount.id,
+        targetViewable,
+        targetMemorial: targetAccount.memorial !== 0,
+        targetMoved: targetAccount.moved_to_account_id !== null,
+        actorBlocksTarget: actorPermission
+          ? actorPermission.actor_blocks_target !== 0
+          : null,
+        actorBlocksTargetDomain: actorPermission
+          ? actorPermission.actor_blocks_target_domain !== 0
+          : null,
+        targetBlocksActor: actorPermission
+          ? actorPermission.target_blocks_actor !== 0
+          : null,
+      })) {
+        console.log(`[import] Skipping unauthorized follow import for ${normalizedAcct}`);
+        return;
       }
 
       // Check if already following or requested
@@ -185,12 +313,13 @@ export async function handleImportItem(
 
       if (isRemote || needsApproval) {
         // Create follow request
-        await env.DB.prepare(
-          `INSERT INTO follow_requests (id, account_id, target_account_id, uri, created_at, updated_at)
+        const insertResult = await env.DB.prepare(
+          `INSERT OR IGNORE INTO follow_requests (id, account_id, target_account_id, uri, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
         )
           .bind(id, accountId, targetAccount.id, followActivity.id, now, now)
           .run();
+        if (insertResult.meta.changes !== 1) return;
 
         // Send Follow activity to remote
         if (isRemote) {
@@ -208,51 +337,115 @@ export async function handleImportItem(
         }
       } else {
         // Local non-locked: auto-accept
-        const batch = [
-          env.DB.prepare(
-            `INSERT INTO follows (id, account_id, target_account_id, uri, show_reblogs, notify, created_at, updated_at)
-             VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
-          ).bind(id, accountId, targetAccount.id, followActivity.id, now, now),
+        const insertResult = await env.DB.prepare(
+          `INSERT OR IGNORE INTO follows (
+             id, account_id, target_account_id, uri,
+             show_reblogs, notify, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 1, 0, ?, ?)`,
+        ).bind(id, accountId, targetAccount.id, followActivity.id, now, now).run();
+        if (insertResult.meta.changes !== 1) return;
+
+        await env.DB.batch([
           env.DB.prepare(
             'UPDATE accounts SET following_count = following_count + 1 WHERE id = ?',
           ).bind(accountId),
           env.DB.prepare(
             'UPDATE accounts SET followers_count = followers_count + 1 WHERE id = ?',
           ).bind(targetAccount.id),
-        ];
-        await env.DB.batch(batch);
+        ]);
       }
       break;
     }
 
     case 'blocks': {
-      const existing = await env.DB.prepare(
-        `SELECT id FROM blocks WHERE account_id = ? AND target_account_id = ?`,
-      )
-        .bind(accountId, targetAccount.id)
-        .first();
-      if (existing) return;
+      if (!canCreateBlockOrMuteAccountRelationship({
+        actorAccountId: accountId,
+        targetAccountId: targetAccount.id,
+        actorOperational,
+        targetExists: true,
+      })) {
+        console.log(`[import] Skipping unauthorized block import for ${normalizedAcct}`);
+        return;
+      }
 
-      await env.DB.prepare(
-        `INSERT INTO blocks (id, account_id, target_account_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-        .bind(id, accountId, targetAccount.id, now, now)
-        .run();
-
-      // Also remove any existing follow relationships in both directions
+      // Blocking tears down both relationship directions. Count updates are
+      // conditional on the rows that still exist, so retries cannot drift.
       await env.DB.batch([
         env.DB.prepare(
-          'DELETE FROM follows WHERE account_id = ? AND target_account_id = ?',
+          `INSERT OR IGNORE INTO blocks (
+             id, account_id, target_account_id, created_at
+           ) VALUES (?, ?, ?, ?)`,
+        ).bind(id, accountId, targetAccount.id, now),
+        env.DB.prepare(
+          `UPDATE accounts SET following_count = MAX(0, following_count - 1)
+           WHERE id = ?1 AND EXISTS (
+             SELECT 1 FROM follows
+             WHERE account_id = ?1 AND target_account_id = ?2
+           )`,
         ).bind(accountId, targetAccount.id),
         env.DB.prepare(
-          'DELETE FROM follows WHERE account_id = ? AND target_account_id = ?',
+          `UPDATE accounts SET followers_count = MAX(0, followers_count - 1)
+           WHERE id = ?2 AND EXISTS (
+             SELECT 1 FROM follows
+             WHERE account_id = ?1 AND target_account_id = ?2
+           )`,
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          `UPDATE accounts SET following_count = MAX(0, following_count - 1)
+           WHERE id = ?2 AND EXISTS (
+             SELECT 1 FROM follows
+             WHERE account_id = ?2 AND target_account_id = ?1
+           )`,
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          `UPDATE accounts SET followers_count = MAX(0, followers_count - 1)
+           WHERE id = ?1 AND EXISTS (
+             SELECT 1 FROM follows
+             WHERE account_id = ?2 AND target_account_id = ?1
+           )`,
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          'DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2',
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          'DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2',
         ).bind(targetAccount.id, accountId),
+        env.DB.prepare(
+          'DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2',
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          'DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2',
+        ).bind(targetAccount.id, accountId),
+        env.DB.prepare(
+          `DELETE FROM list_accounts
+           WHERE account_id = ?1
+             AND list_id IN (SELECT id FROM lists WHERE account_id = ?2)`,
+        ).bind(targetAccount.id, accountId),
+        env.DB.prepare(
+          `DELETE FROM list_accounts
+           WHERE account_id = ?1
+             AND list_id IN (SELECT id FROM lists WHERE account_id = ?2)`,
+        ).bind(accountId, targetAccount.id),
+        env.DB.prepare(
+          `DELETE FROM account_pins
+           WHERE (account_id = ?1 AND target_account_id = ?2)
+              OR (account_id = ?2 AND target_account_id = ?1)`,
+        ).bind(accountId, targetAccount.id),
       ]);
       break;
     }
 
     case 'mutes': {
+      if (!canCreateBlockOrMuteAccountRelationship({
+        actorAccountId: accountId,
+        targetAccountId: targetAccount.id,
+        actorOperational,
+        targetExists: true,
+      })) {
+        console.log(`[import] Skipping unauthorized mute import for ${normalizedAcct}`);
+        return;
+      }
+
       const existing = await env.DB.prepare(
         `SELECT id FROM mutes WHERE account_id = ? AND target_account_id = ?`,
       )
@@ -260,12 +453,16 @@ export async function handleImportItem(
         .first();
       if (existing) return;
 
-      await env.DB.prepare(
-        `INSERT INTO mutes (id, account_id, target_account_id, hide_notifications, created_at, updated_at)
+      const insertResult = await env.DB.prepare(
+        `INSERT OR IGNORE INTO mutes (
+           id, account_id, target_account_id, hide_notifications,
+           created_at, updated_at
+         )
          VALUES (?, ?, ?, 1, ?, ?)`,
       )
         .bind(id, accountId, targetAccount.id, now, now)
         .run();
+      if (insertResult.meta.changes !== 1) return;
       break;
     }
   }

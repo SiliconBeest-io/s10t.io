@@ -2,10 +2,16 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import type { MediaAttachment } from '../../../../types/mastodon';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import {
+  assertStatusViewable,
+  canSurfaceStatusToViewer,
+  getSurfaceableReblogOriginalId,
+} from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -53,7 +59,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
     reblogged: false,
     muted: false,
     bookmarked: false,
-    pinned: false,
+    pinned: !!row.pinned,
     content: (row.content as string) || '',
     filtered: [] as Record<string, unknown>[],
     reblog: null,
@@ -144,7 +150,7 @@ const STATUS_JOIN_SQL = `
 
 const app = new Hono<HonoEnv>();
 
-app.get('/:id', authOptional, async (c) => {
+app.get('/:id', authOptional, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
   const domain = env.INSTANCE_DOMAIN;
@@ -154,33 +160,42 @@ app.get('/:id', authOptional, async (c) => {
   ).bind(statusId).first();
 
   if (!row) throw new AppError(404, 'Record not found');
+  await assertStatusViewable(statusId, currentAccountId);
 
-  // Visibility access control
-  const visibility = (row as Record<string, unknown>).visibility as string;
-  const statusAccountId = (row as Record<string, unknown>).account_id as string;
-
-  if (visibility === 'direct') {
-    // DM: only visible to the author and mentioned users
-    if (!currentAccountId) throw new AppError(404, 'Record not found');
-    if (currentAccountId !== statusAccountId) {
-      const mention = await env.DB.prepare(
-        'SELECT 1 FROM mentions WHERE status_id = ?1 AND account_id = ?2 LIMIT 1',
-      ).bind(statusId, currentAccountId).first();
-      if (!mention) throw new AppError(404, 'Record not found');
-    }
-  } else if (visibility === 'private') {
-    // Followers-only: only visible to the author and their followers
-    if (!currentAccountId) throw new AppError(404, 'Record not found');
-    if (currentAccountId !== statusAccountId) {
-      const follow = await env.DB.prepare(
-        'SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2 LIMIT 1',
-      ).bind(currentAccountId, statusAccountId).first();
-      if (!follow) throw new AppError(404, 'Record not found');
-    }
+  const status = await serializeStatusEnriched(
+    row,
+    domain,
+    currentAccountId,
+    env.CACHE,
+  );
+  if (row.reblog_of_id === null) return c.json(status);
+  if (typeof row.reblog_of_id !== 'string' || row.reblog_of_id.length === 0) {
+    throw new AppError(404, 'Record not found');
   }
-  // 'public' and 'unlisted' are visible to everyone
 
-  return c.json(await serializeStatusEnriched(row as Record<string, unknown>, domain, currentAccountId, env.CACHE));
+  const originalId = await getSurfaceableReblogOriginalId(
+    statusId,
+    currentAccountId,
+  );
+  if (!originalId) throw new AppError(404, 'Record not found');
+
+  const originalRow = await env.DB.prepare(
+    `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
+  ).bind(originalId).first();
+  if (
+    !originalRow
+    || originalRow.reblog_of_id !== null
+    || !await canSurfaceStatusToViewer(originalId, currentAccountId)
+  ) {
+    throw new AppError(404, 'Record not found');
+  }
+  const original = await serializeStatusEnriched(
+    originalRow,
+    domain,
+    currentAccountId,
+    env.CACHE,
+  );
+  return c.json({ ...status, reblog: original });
 });
 
 export { STATUS_JOIN_SQL, serializeStatus, serializeStatusEnriched };

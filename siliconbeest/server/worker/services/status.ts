@@ -2,9 +2,33 @@ import { env } from 'cloudflare:workers';
 import { generateUlid } from '../utils/ulid';
 import { parseContent, type ParsedContent } from '../utils/contentParser';
 import { AppError } from '../middleware/errorHandler';
-import type { StatusRow, PollRow, AccountRow, CustomEmojiRow } from '../types/db';
+import type {
+  StatusRow,
+  PollRow,
+  AccountRow,
+  CustomEmojiRow,
+  MediaAttachmentRow,
+} from '../types/db';
 import { serializePoll } from '../utils/mastodonSerializer';
 import { normalizeQuotePolicy, type QuotePolicy } from '../../../../packages/shared/utils/quotePolicy';
+import {
+  constrainQuoteVisibility,
+  type StatusVisibility,
+} from '../../../../packages/shared/permissions';
+import {
+  assertMediaAttachmentsAttachable,
+  assertPollVoteAllowedForRecord,
+  assertStatusMutationAllowedForRecord,
+  assertStatusRebloggable,
+  canQuoteStatusRecord,
+  canSurfaceStatusToViewer,
+  canViewStatusRecord,
+  resolveLocalStatusCreationVisibility,
+  type PollVotePermissionRecord,
+  type StatusMutationPermissionRecord,
+  type StatusPermissionRecord,
+  type StatusQuotePermissionRecord,
+} from './permissions';
 
 // ----------------------------------------------------------------
 // getStatusById
@@ -30,17 +54,34 @@ export async function deleteStatus(
   accountId: string,
 ): Promise<DeleteStatusResult> {
   const status = await getStatusById(statusId);
-  if (!status) throw new AppError(404, 'Record not found');
-  if (status.account_id !== accountId) throw new AppError(403, 'This action is not allowed');
+  assertStatusMutationAllowedForRecord(status, accountId, 'delete');
 
   const now = new Date().toISOString();
-  const stmts = [
-    env.DB.prepare('UPDATE statuses SET deleted_at = ?1 WHERE id = ?2').bind(now, statusId),
+  const deleted = await env.DB.prepare(
+    `UPDATE statuses
+     SET deleted_at = ?1
+     WHERE id = ?2
+       AND account_id = ?3
+       AND deleted_at IS NULL
+       AND local = 1`,
+  ).bind(now, statusId, accountId).run();
+  if ((deleted.meta?.changes ?? 0) !== 1) {
+    throw new AppError(404, 'Record not found');
+  }
+
+  const stmts: D1PreparedStatement[] = [
     env.DB.prepare('UPDATE accounts SET statuses_count = MAX(0, statuses_count - 1) WHERE id = ?1').bind(accountId),
   ];
   if (status.in_reply_to_id) {
     stmts.push(
       env.DB.prepare('UPDATE statuses SET replies_count = MAX(0, replies_count - 1) WHERE id = ?1').bind(status.in_reply_to_id),
+    );
+  }
+  if (status.reblog_of_id) {
+    stmts.push(
+      env.DB.prepare(
+        'UPDATE statuses SET reblogs_count = MAX(0, reblogs_count - 1) WHERE id = ?1',
+      ).bind(status.reblog_of_id),
     );
   }
   await env.DB.batch(stmts);
@@ -72,67 +113,43 @@ export interface ContextResult {
   descendants: Record<string, unknown>[];
 }
 
-async function canViewContextStatus(
-  status: Record<string, unknown>,
-  viewerAccountId: string | null,
-): Promise<boolean> {
-  const visibility = status.visibility as string | null;
-  const statusAccountId = status.account_id as string | null;
-  const statusId = status.id as string;
-
-  if (visibility === 'direct') {
-    if (!viewerAccountId) return false;
-    if (viewerAccountId === statusAccountId) return true;
-    const mention = await env.DB
-      .prepare('SELECT 1 FROM mentions WHERE status_id = ?1 AND account_id = ?2 LIMIT 1')
-      .bind(statusId, viewerAccountId)
-      .first();
-    return !!mention;
-  }
-
-  if (visibility === 'private') {
-    if (!viewerAccountId) return false;
-    if (viewerAccountId === statusAccountId) return true;
-    const follow = await env.DB
-      .prepare('SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2 LIMIT 1')
-      .bind(viewerAccountId, statusAccountId)
-      .first();
-    return !!follow;
-  }
-
-  return true;
-}
-
 export async function getContext(
   statusId: string,
   viewerAccountId: string | null = null,
 ): Promise<ContextResult> {
   // Verify status exists
   const status = await env.DB
-    .prepare('SELECT id, in_reply_to_id FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
+    .prepare('SELECT id, account_id, visibility, deleted_at, in_reply_to_id FROM statuses WHERE id = ?1')
     .bind(statusId)
-    .first();
-  if (!status) throw new AppError(404, 'Record not found');
+    .first<StatusPermissionRecord & { in_reply_to_id: string | null }>();
+  if (!status || !await canViewStatusRecord(status, viewerAccountId)) {
+    throw new AppError(404, 'Record not found');
+  }
 
   // Ancestors: walk up the in_reply_to chain
   const ancestors: Record<string, unknown>[] = [];
-  let currentId = status.in_reply_to_id as string | null;
-  const visited = new Set<string>();
+  let currentId = status.in_reply_to_id;
+  const visitedAncestorIds = new Set<string>();
 
-  while (currentId && !visited.has(currentId) && ancestors.length < 40) {
-    visited.add(currentId);
+  while (
+    currentId
+    && !visitedAncestorIds.has(currentId)
+    && visitedAncestorIds.size < 40
+  ) {
+    visitedAncestorIds.add(currentId);
     const ancestor = await env.DB
       .prepare(`${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`)
       .bind(currentId)
       .first();
     if (!ancestor) break;
-    if (!await canViewContextStatus(ancestor as Record<string, unknown>, viewerAccountId)) break;
-    ancestors.unshift(ancestor as Record<string, unknown>);
     currentId = (ancestor.in_reply_to_id as string) || null;
+    if (await canSurfaceStatusToViewer(ancestor.id as string, viewerAccountId)) {
+      ancestors.unshift(ancestor);
+    }
   }
 
   // Build set of ancestor IDs + current status to exclude from descendants
-  const excludeIds = new Set<string>([statusId, ...ancestors.map((a) => a.id as string)]);
+  const excludeIds = new Set<string>([statusId, ...visitedAncestorIds]);
 
   // Descendants: BFS through replies
   const descendantRows: Record<string, unknown>[] = [];
@@ -153,13 +170,14 @@ export async function getContext(
       )
       .bind(...batch)
       .all();
-    for (const r of (replyRows ?? []) as Record<string, unknown>[]) {
+    for (const r of replyRows ?? []) {
       const rid = r.id as string;
       if (!seenDescendantIds.has(rid) && !excludeIds.has(rid)) {
         seenDescendantIds.add(rid);
-        if (!await canViewContextStatus(r, viewerAccountId)) continue;
-        descendantRows.push(r);
         queue.push(rid);
+        if (await canSurfaceStatusToViewer(rid, viewerAccountId)) {
+          descendantRows.push(r);
+        }
       }
     }
     depth++;
@@ -239,6 +257,8 @@ export async function reblogStatus(
   username: string,
   statusId: string,
 ): Promise<ReblogResult> {
+  await assertStatusRebloggable(statusId, accountId);
+
   // Check if already reblogged
   const existing = await env.DB
     .prepare('SELECT id FROM statuses WHERE reblog_of_id = ?1 AND account_id = ?2 AND deleted_at IS NULL')
@@ -257,18 +277,40 @@ export async function reblogStatus(
   const reblogId = generateUlid();
   const reblogUri = `https://${domain}/users/${username}/statuses/${reblogId}/activity`;
 
-  // Fetch original status visibility for the reblog row
-  const originalStatus = await env.DB
-    .prepare('SELECT visibility FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
-    .bind(statusId)
-    .first();
-  const visibility = originalStatus ? (originalStatus.visibility as string) : 'public';
+  const inserted = await env.DB.prepare(
+    `INSERT INTO statuses
+       (id, uri, url, account_id, reblog_of_id, visibility, local, created_at, updated_at)
+     SELECT ?1, ?2, NULL, ?3, s.id, s.visibility, 1, ?4, ?4
+     FROM statuses s
+     JOIN accounts original_author ON original_author.id = s.account_id
+     WHERE s.id = ?5
+       AND s.deleted_at IS NULL
+       AND s.visibility IN ('public', 'unlisted')
+       AND original_author.suspended_at IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM statuses existing_reblog
+         WHERE existing_reblog.reblog_of_id = s.id
+           AND existing_reblog.account_id = ?3
+           AND existing_reblog.deleted_at IS NULL
+       )`,
+  ).bind(reblogId, reblogUri, accountId, now, statusId).run();
+  if ((inserted.meta?.changes ?? 0) !== 1) {
+    const concurrent = await env.DB.prepare(
+      `SELECT id FROM statuses
+       WHERE reblog_of_id = ?1 AND account_id = ?2 AND deleted_at IS NULL
+       LIMIT 1`,
+    ).bind(statusId, accountId).first<{ id: string }>();
+    if (concurrent) {
+      return {
+        reblogId: concurrent.id,
+        reblogUri: `https://${domain}/users/${username}/statuses/${concurrent.id}/activity`,
+        created: false,
+      };
+    }
+    throw new AppError(404, 'Record not found');
+  }
 
   await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO statuses (id, uri, url, account_id, reblog_of_id, visibility, local, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)`,
-    ).bind(reblogId, reblogUri, null, accountId, statusId, visibility, now),
     env.DB.prepare('UPDATE statuses SET reblogs_count = reblogs_count + 1 WHERE id = ?1').bind(statusId),
     env.DB.prepare('UPDATE accounts SET statuses_count = statuses_count + 1 WHERE id = ?1').bind(accountId),
   ]);
@@ -295,18 +337,37 @@ export async function unreblogStatus(
   statusId: string,
 ): Promise<UnreblogResult> {
   const reblog = await env.DB
-    .prepare('SELECT id FROM statuses WHERE reblog_of_id = ?1 AND account_id = ?2 AND deleted_at IS NULL')
+    .prepare(
+      `SELECT id FROM statuses
+       WHERE reblog_of_id = ?1
+         AND account_id = ?2
+         AND deleted_at IS NULL
+         AND local = 1
+       LIMIT 1`,
+    )
     .bind(statusId, accountId)
-    .first();
+    .first<{ id: string }>();
 
   if (reblog) {
     const now = new Date().toISOString();
+    const deleted = await env.DB.prepare(
+      `UPDATE statuses
+       SET deleted_at = ?1
+       WHERE id = ?2
+         AND account_id = ?3
+         AND reblog_of_id = ?4
+         AND deleted_at IS NULL
+         AND local = 1`,
+    ).bind(now, reblog.id, accountId, statusId).run();
+    if ((deleted.meta?.changes ?? 0) !== 1) {
+      return { reblogId: null };
+    }
+
     await env.DB.batch([
-      env.DB.prepare('UPDATE statuses SET deleted_at = ?1 WHERE id = ?2').bind(now, reblog.id as string),
       env.DB.prepare('UPDATE statuses SET reblogs_count = MAX(0, reblogs_count - 1) WHERE id = ?1').bind(statusId),
       env.DB.prepare('UPDATE accounts SET statuses_count = MAX(0, statuses_count - 1) WHERE id = ?1').bind(accountId),
     ]);
-    return { reblogId: reblog.id as string };
+    return { reblogId: reblog.id };
   }
 
   return { reblogId: null };
@@ -398,7 +459,7 @@ export interface CreateStatusResult {
   quoteApprovalStatus: string;
   quoteRequestUri: string | null;
   quotePolicy: QuotePolicy;
-  visibility: string;
+  visibility: StatusVisibility;
   sensitive: number;
   spoilerText: string;
   language: string;
@@ -412,7 +473,10 @@ export async function createStatus(
 ): Promise<CreateStatusResult> {
   const now = new Date().toISOString();
   const statusId = generateUlid();
-  const visibility = data.visibility || 'public';
+  let visibility = await resolveLocalStatusCreationVisibility(
+    accountId,
+    data.visibility ?? 'public',
+  );
   const sensitive = data.sensitive ? 1 : 0;
   const spoilerText = data.spoilerText || '';
   const language = data.language || 'en';
@@ -439,15 +503,16 @@ export async function createStatus(
 
   if (data.inReplyToId) {
     const parent = await env.DB
-      .prepare('SELECT id, account_id, conversation_id FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
+      .prepare('SELECT id, account_id, visibility, deleted_at, conversation_id FROM statuses WHERE id = ?1')
       .bind(data.inReplyToId)
-      .first();
-    if (parent) {
-      inReplyToId = parent.id as string;
-      inReplyToAccountId = parent.account_id as string;
-      conversationId = (parent.conversation_id as string) || null;
-      isReply = 1;
+      .first<StatusPermissionRecord & { conversation_id: string | null }>();
+    if (!parent || !await canViewStatusRecord(parent, accountId)) {
+      throw new AppError(404, 'Record not found');
     }
+    inReplyToId = parent.id;
+    inReplyToAccountId = parent.account_id;
+    conversationId = parent.conversation_id;
+    isReply = 1;
   }
 
   // -- FEP-e232: Resolve quote post --
@@ -458,17 +523,28 @@ export async function createStatus(
   let quoteRequestUri: string | null = null;
   if (data.quoteId) {
     const quoted = await env.DB
-      .prepare('SELECT id, uri, url FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
+      .prepare(`SELECT id, account_id, visibility, deleted_at, quote_policy,
+                       quote_policy_automatic_approvals, quote_policy_manual_approvals,
+                       uri, url
+                FROM statuses WHERE id = ?1`)
       .bind(data.quoteId)
-      .first();
-    if (quoted) {
-      quoteId = quoted.id as string;
-      quoteUri = quoted.uri as string;
-      quoteUrl = (quoted.url as string | null) || quoteUri;
-      quoteApprovalStatus = 'pending';
-      quoteRequestUri = `${statusUri}/quote`;
+      .first<StatusQuotePermissionRecord & { uri: string; url: string | null }>();
+    if (!quoted || !await canViewStatusRecord(quoted, accountId)) {
+      throw new AppError(404, 'Record not found');
     }
+    const quoteVisibility = constrainQuoteVisibility(visibility, quoted.visibility);
+    if (!quoteVisibility || !await canQuoteStatusRecord(quoted, accountId)) {
+      throw new AppError(422, 'Validation failed', 'Cannot quote this status');
+    }
+    visibility = quoteVisibility;
+    quoteId = quoted.id;
+    quoteUri = quoted.uri;
+    quoteUrl = quoted.url || quoteUri;
+    quoteApprovalStatus = 'pending';
+    quoteRequestUri = `${statusUri}/quote`;
   }
+
+  await assertMediaAttachmentsAttachable(mediaIds, accountId, statusId);
 
   // -- Conversation creation/lookup --
   let conversationApUri: string | null = null;
@@ -518,7 +594,32 @@ export async function createStatus(
     }
   }
 
-  // -- Main batch: status INSERT + account count + reply count + media linking + home_timeline --
+  const claimedMediaIds: string[] = [];
+  for (const mediaId of mediaIds) {
+    const claimed = await env.DB.prepare(
+      `UPDATE media_attachments
+       SET status_id = ?1
+       WHERE id = ?2
+         AND account_id = ?3
+         AND status_id IS NULL`,
+    ).bind(statusId, mediaId, accountId).run();
+    if ((claimed.meta?.changes ?? 0) !== 1) {
+      if (claimedMediaIds.length > 0) {
+        const placeholders = claimedMediaIds.map(() => '?').join(', ');
+        await env.DB.prepare(
+          `UPDATE media_attachments
+           SET status_id = NULL
+           WHERE status_id = ?
+             AND account_id = ?
+             AND id IN (${placeholders})`,
+        ).bind(statusId, accountId, ...claimedMediaIds).run();
+      }
+      throw new AppError(422, 'Validation failed', 'Invalid media attachment');
+    }
+    claimedMediaIds.push(mediaId);
+  }
+
+  // -- Main batch: status INSERT + account count + reply count + home_timeline --
   const stmts: D1PreparedStatement[] = [
     env.DB.prepare(
       `INSERT INTO statuses (id, uri, url, account_id, in_reply_to_id, in_reply_to_account_id, text, content, content_warning, visibility, sensitive, language, conversation_id, reply, quote_id, quote_approval_status, quote_request_uri, quote_policy, local, emoji_tags, created_at, updated_at)
@@ -555,16 +656,6 @@ export async function createStatus(
     stmts.push(env.DB.prepare('UPDATE statuses SET replies_count = replies_count + 1 WHERE id = ?1').bind(inReplyToId));
   }
 
-  for (const mediaId of mediaIds) {
-    stmts.push(
-      env.DB.prepare('UPDATE media_attachments SET status_id = ?1 WHERE id = ?2 AND account_id = ?3').bind(
-        statusId,
-        mediaId,
-        accountId,
-      ),
-    );
-  }
-
   stmts.push(
     env.DB.prepare('INSERT OR IGNORE INTO home_timeline_entries (id, account_id, status_id, created_at) VALUES (?1, ?2, ?3, ?4)').bind(
       generateUlid(),
@@ -574,7 +665,21 @@ export async function createStatus(
     ),
   );
 
-  await env.DB.batch(stmts);
+  try {
+    await env.DB.batch(stmts);
+  } catch (error) {
+    if (claimedMediaIds.length > 0) {
+      const placeholders = claimedMediaIds.map(() => '?').join(', ');
+      await env.DB.prepare(
+        `UPDATE media_attachments
+         SET status_id = NULL
+         WHERE status_id = ?
+           AND account_id = ?
+           AND id IN (${placeholders})`,
+      ).bind(statusId, accountId, ...claimedMediaIds).run();
+    }
+    throw error;
+  }
 
   // -- Poll creation --
   let pollData: ReturnType<typeof serializePoll> | null = null;
@@ -781,17 +886,16 @@ export async function editStatus(
   const row = await env.DB
     .prepare('SELECT * FROM statuses WHERE id = ?1 AND deleted_at IS NULL')
     .bind(statusId)
-    .first();
-
-  if (!row) throw new AppError(404, 'Record not found');
-  if (row.account_id !== accountId) throw new AppError(403, 'This action is not allowed');
+    .first<StatusRow>();
+  assertStatusMutationAllowedForRecord(row, accountId, 'edit');
 
   const now = new Date().toISOString();
-  const statusText = data.text !== undefined ? data.text.trim() : (row.text as string);
-  const sensitive = data.sensitive !== undefined ? (data.sensitive ? 1 : 0) : (row.sensitive as number);
-  const spoilerText = data.spoilerText !== undefined ? data.spoilerText : (row.content_warning as string) || '';
-  const language = data.language !== undefined ? data.language : (row.language as string) || 'en';
+  const statusText = data.text !== undefined ? data.text.trim() : row.text;
+  const sensitive = data.sensitive !== undefined ? (data.sensitive ? 1 : 0) : row.sensitive;
+  const spoilerText = data.spoilerText !== undefined ? data.spoilerText : row.content_warning || '';
+  const language = data.language !== undefined ? data.language : row.language || 'en';
   const mediaIds = data.mediaIds || [];
+  await assertMediaAttachmentsAttachable(mediaIds, accountId, statusId);
 
   const parsed = parseContent(statusText, domain);
   const content = parsed.html;
@@ -800,8 +904,8 @@ export async function editStatus(
   const { results: currentMedia } = await env.DB
     .prepare('SELECT * FROM media_attachments WHERE status_id = ?1')
     .bind(statusId)
-    .all();
-  const mediaSnapshot = (currentMedia ?? []).map((m: any) => ({
+    .all<MediaAttachmentRow>();
+  const mediaSnapshot = (currentMedia ?? []).map((m) => ({
     id: m.id,
     type: m.type || 'image',
     url: `https://${domain}/media/${m.file_key}`,
@@ -811,22 +915,6 @@ export async function editStatus(
     description: m.description || null,
     blurhash: m.blurhash || null,
   }));
-
-  await env.DB
-    .prepare(
-      `INSERT INTO status_edits (id, status_id, content, spoiler_text, sensitive, media_attachments_json, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-    )
-    .bind(
-      generateUlid(),
-      statusId,
-      (row.content as string) || '',
-      (row.content_warning as string) || '',
-      row.sensitive as number,
-      JSON.stringify(mediaSnapshot),
-      (row.edited_at as string) || (row.created_at as string),
-    )
-    .run();
 
   // -- Custom emoji detection --
   let emojiTagsJson: string | null = null;
@@ -856,24 +944,56 @@ export async function editStatus(
     }
   }
 
-  // Main update batch: status fields + media attachments
-  const stmts: D1PreparedStatement[] = [
-    env.DB
-      .prepare(
-        `UPDATE statuses SET text = ?1, content = ?2, content_warning = ?3, sensitive = ?4, language = ?5, emoji_tags = ?6, edited_at = ?7, updated_at = ?7 WHERE id = ?8`,
-      )
-      .bind(statusText, content, spoilerText, sensitive, language, emojiTagsJson, now, statusId),
-  ];
-
-  for (const mediaId of mediaIds) {
-    stmts.push(
-      env.DB
-        .prepare('UPDATE media_attachments SET status_id = ?1 WHERE id = ?2 AND account_id = ?3')
-        .bind(statusId, mediaId, accountId),
-    );
+  const updated = await env.DB.prepare(
+    `UPDATE statuses
+     SET text = ?1, content = ?2, content_warning = ?3, sensitive = ?4,
+         language = ?5, emoji_tags = ?6, edited_at = ?7, updated_at = ?7
+     WHERE id = ?8
+       AND account_id = ?9
+       AND deleted_at IS NULL
+       AND local = 1
+       AND reblog_of_id IS NULL`,
+  ).bind(
+    statusText,
+    content,
+    spoilerText,
+    sensitive,
+    language,
+    emojiTagsJson,
+    now,
+    statusId,
+    accountId,
+  ).run();
+  if ((updated.meta?.changes ?? 0) !== 1) {
+    throw new AppError(404, 'Record not found');
   }
 
-  await env.DB.batch(stmts);
+  await env.DB.prepare(
+    `INSERT INTO status_edits
+       (id, status_id, content, spoiler_text, sensitive, media_attachments_json, created_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+  ).bind(
+    generateUlid(),
+    statusId,
+    row.content || '',
+    row.content_warning || '',
+    row.sensitive,
+    JSON.stringify(mediaSnapshot),
+    row.edited_at || row.created_at,
+  ).run();
+
+  for (const mediaId of mediaIds) {
+    const attached = await env.DB.prepare(
+      `UPDATE media_attachments
+       SET status_id = ?1
+       WHERE id = ?2
+         AND account_id = ?3
+         AND (status_id IS NULL OR status_id = ?1)`,
+    ).bind(statusId, mediaId, accountId).run();
+    if ((attached.meta?.changes ?? 0) !== 1) {
+      throw new AppError(422, 'Validation failed', 'Invalid media attachment');
+    }
+  }
 
   // -- Hashtag batch upsert (same pattern as createStatus) --
   const hashtags = parsed.tags;
@@ -1036,10 +1156,24 @@ export async function pinStatus(
   accountId: string,
   statusId: string,
 ): Promise<void> {
-  await env.DB
-    .prepare('UPDATE statuses SET pinned = 1 WHERE id = ?1 AND account_id = ?2')
-    .bind(statusId, accountId)
-    .run();
+  const status = await env.DB.prepare(
+    `SELECT id, account_id, visibility, deleted_at, local, reblog_of_id
+     FROM statuses WHERE id = ?1 LIMIT 1`,
+  ).bind(statusId).first<StatusMutationPermissionRecord>();
+  assertStatusMutationAllowedForRecord(status, accountId, 'pin');
+
+  const pinned = await env.DB.prepare(
+    `UPDATE statuses SET pinned = 1
+     WHERE id = ?1
+       AND account_id = ?2
+       AND deleted_at IS NULL
+       AND local = 1
+       AND reblog_of_id IS NULL
+       AND visibility IN ('public', 'unlisted', 'private')`,
+  ).bind(statusId, accountId).run();
+  if ((pinned.meta?.changes ?? 0) !== 1) {
+    throw new AppError(404, 'Record not found');
+  }
 }
 
 // ----------------------------------------------------------------
@@ -1050,10 +1184,22 @@ export async function unpinStatus(
   accountId: string,
   statusId: string,
 ): Promise<void> {
-  await env.DB
-    .prepare('UPDATE statuses SET pinned = 0 WHERE id = ?1 AND account_id = ?2')
-    .bind(statusId, accountId)
-    .run();
+  const status = await env.DB.prepare(
+    `SELECT id, account_id, visibility, deleted_at, local, reblog_of_id
+     FROM statuses WHERE id = ?1 LIMIT 1`,
+  ).bind(statusId).first<StatusMutationPermissionRecord>();
+  assertStatusMutationAllowedForRecord(status, accountId, 'unpin');
+
+  const unpinned = await env.DB.prepare(
+    `UPDATE statuses SET pinned = 0
+     WHERE id = ?1
+       AND account_id = ?2
+       AND deleted_at IS NULL
+       AND local = 1`,
+  ).bind(statusId, accountId).run();
+  if ((unpinned.meta?.changes ?? 0) !== 1) {
+    throw new AppError(404, 'Record not found');
+  }
 }
 
 // ----------------------------------------------------------------
@@ -1186,10 +1332,15 @@ export async function votePoll(
     throw new AppError(404, 'Record not found');
   }
 
-  // Check if expired
-  if (row.expires_at && new Date(row.expires_at) <= new Date()) {
-    throw new AppError(422, 'Validation failed', 'Poll has ended');
-  }
+  const parent = await env.DB.prepare(
+    `SELECT id, account_id, visibility, deleted_at
+     FROM statuses WHERE id = ?1 LIMIT 1`,
+  ).bind(row.status_id).first<StatusPermissionRecord>();
+  if (!parent) throw new AppError(404, 'Record not found');
+  await assertPollVoteAllowedForRecord({
+    ...parent,
+    expires_at: row.expires_at,
+  } satisfies PollVotePermissionRecord, accountId);
 
   // Parse options to validate choice indices
   let options: Array<string | { title: string; votes_count?: number }>;
@@ -1200,9 +1351,12 @@ export async function votePoll(
   }
 
   for (const choice of choices) {
-    if (choice < 0 || choice >= options.length) {
+    if (!Number.isInteger(choice) || choice < 0 || choice >= options.length) {
       throw new AppError(422, 'Validation failed', 'Invalid choice index');
     }
+  }
+  if (new Set(choices).size !== choices.length) {
+    throw new AppError(422, 'Validation failed', 'Duplicate choice index');
   }
 
   // Check not multiple if poll doesn't allow it
@@ -1255,6 +1409,7 @@ export async function votePoll(
     .prepare('SELECT * FROM polls WHERE id = ?1')
     .bind(pollId)
     .first<PollRow>();
+  if (!updated) throw new AppError(404, 'Record not found');
 
-  return { poll: serializePoll(updated!, { voted: true, ownVotes: choices }) };
+  return { poll: serializePoll(updated, { voted: true, ownVotes: choices }) };
 }

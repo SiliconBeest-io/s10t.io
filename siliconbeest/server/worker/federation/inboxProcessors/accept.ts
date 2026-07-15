@@ -10,6 +10,11 @@ import type { APActivity, APObject } from '../../types/activitypub';
 import { generateUlid } from '../../utils/ulid';
 import { BaseProcessor } from './BaseProcessor';
 import { AS_PUBLIC, FEP044F_QUOTE_REQUEST, addQuoteProperties, getId, quoteContext } from '../helpers/quote';
+import {
+	canApplyFederatedResponse,
+	canApplyQuoteResponse,
+} from '../../../../../packages/shared/permissions';
+import { canAccountOriginateFederationActivity } from '../../services/permissions';
 
 class AcceptProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -51,43 +56,74 @@ class AcceptProcessor extends BaseProcessor {
 			console.warn(`[accept] Remote actor not found: ${activity.actor}`);
 			return;
 		}
+		if (!await canAccountOriginateFederationActivity(remoteAccount.id)) return;
 
 		// Try to find the pending follow_request
-		let followRequest: { id: string; account_id: string; target_account_id: string; uri: string | null } | null = null;
+		type FollowRequestResponseTarget = {
+			id: string;
+			account_id: string;
+			target_account_id: string;
+			uri: string | null;
+			local_initiator_uri: string;
+			response_owner_uri: string;
+		};
+		let followRequest: FollowRequestResponseTarget | null = null;
+		const followObject = typeof object === 'object' ? object as APObject : null;
+		const objectId = typeof object === 'string' ? object : followObject?.id ?? null;
 
-		if (typeof object === 'string') {
+		if (objectId) {
 			followRequest = await env.DB.prepare(
-				`SELECT id, account_id, target_account_id, uri FROM follow_requests
-				 WHERE uri = ?1 LIMIT 1`,
+				`SELECT fr.id, fr.account_id, fr.target_account_id, fr.uri,
+				        local_initiator.uri AS local_initiator_uri,
+				        response_owner.uri AS response_owner_uri
+				 FROM follow_requests fr
+				 JOIN accounts local_initiator ON local_initiator.id = fr.account_id
+				 JOIN accounts response_owner ON response_owner.id = fr.target_account_id
+				 WHERE fr.uri = ?1
+				   AND fr.target_account_id = ?2
+				   AND local_initiator.domain IS NULL
+				 LIMIT 1`,
 			)
-				.bind(object)
-				.first();
-		} else {
-			const obj = object as APObject;
-			if (obj.id) {
-				followRequest = await env.DB.prepare(
-					`SELECT id, account_id, target_account_id, uri FROM follow_requests
-					 WHERE uri = ?1 LIMIT 1`,
-				)
-					.bind(obj.id)
-					.first();
-			}
+				.bind(objectId, remoteAccount.id)
+				.first<FollowRequestResponseTarget>();
 		}
 
-		// Fallback: find by account pair
-		if (!followRequest) {
+		// Some servers embed an id-less Follow. In that case only, correlate by
+		// both embedded actors; a mismatched or unknown object id never falls back.
+		if (!followRequest && followObject && !followObject.id) {
 			followRequest = await env.DB.prepare(
-				`SELECT id, account_id, target_account_id, uri FROM follow_requests
-				 WHERE target_account_id = ?1
-				 AND account_id IN (SELECT id FROM accounts WHERE domain IS NULL)
+				`SELECT fr.id, fr.account_id, fr.target_account_id, fr.uri,
+				        local_initiator.uri AS local_initiator_uri,
+				        response_owner.uri AS response_owner_uri
+				 FROM follow_requests fr
+				 JOIN accounts local_initiator ON local_initiator.id = fr.account_id
+				 JOIN accounts response_owner ON response_owner.id = fr.target_account_id
+				 WHERE fr.target_account_id = ?1
+				   AND local_initiator.domain IS NULL
 				 LIMIT 1`,
 			)
 				.bind(remoteAccount.id)
-				.first();
+				.first<FollowRequestResponseTarget>();
 		}
 
 		if (!followRequest) {
 			console.warn('[accept] No matching follow_request found');
+			return;
+		}
+		const embeddedInitiatorUri = followObject ? getId(followObject.actor) : null;
+		const embeddedOwnerUri = followObject ? getId(followObject.object) : null;
+		if (!canApplyFederatedResponse({
+			actorAccountId: remoteAccount.id,
+			ownerAccountId: followRequest.target_account_id,
+			localInitiatorAccountId: followRequest.account_id,
+			recipientAccountId: this.recipientAccountId || null,
+			localInitiatorIsLocal: true,
+			requestPending: true,
+			embeddedInitiatorMatches: !embeddedInitiatorUri
+				|| embeddedInitiatorUri === followRequest.local_initiator_uri,
+			embeddedOwnerMatches: !embeddedOwnerUri
+				|| embeddedOwnerUri === followRequest.response_owner_uri,
+		}) || !await canAccountOriginateFederationActivity(followRequest.account_id)) {
 			return;
 		}
 
@@ -96,15 +132,34 @@ class AcceptProcessor extends BaseProcessor {
 
 		// Move from follow_requests to follows
 		try {
-			await env.DB.batch([
+			const [inserted, deleted] = await env.DB.batch([
 				env.DB.prepare(
-					`INSERT INTO follows (id, account_id, target_account_id, uri, created_at, updated_at)
-					 VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
-				).bind(newFollowId, followRequest.account_id, followRequest.target_account_id, followRequest.uri, now, now),
+					`INSERT INTO follows
+					   (id, account_id, target_account_id, uri, created_at, updated_at)
+					 SELECT ?1, fr.account_id, fr.target_account_id, fr.uri, ?2, ?2
+					 FROM follow_requests fr
+					 WHERE fr.id = ?3
+					   AND fr.account_id = ?4
+					   AND fr.target_account_id = ?5`,
+				).bind(
+					newFollowId,
+					now,
+					followRequest.id,
+					followRequest.account_id,
+					followRequest.target_account_id,
+				),
 				env.DB.prepare(
-					`DELETE FROM follow_requests WHERE id = ?1`,
-				).bind(followRequest.id),
+					`DELETE FROM follow_requests
+					 WHERE id = ?1 AND account_id = ?2 AND target_account_id = ?3`,
+				).bind(
+					followRequest.id,
+					followRequest.account_id,
+					followRequest.target_account_id,
+				),
 			]);
+			if ((inserted.meta?.changes ?? 0) !== 1 || (deleted.meta?.changes ?? 0) !== 1) {
+				return;
+			}
 
 			await this.accountRepo.incrementCount(followRequest.account_id, 'following_count');
 			await this.accountRepo.incrementCount(followRequest.target_account_id, 'followers_count');
@@ -122,21 +177,47 @@ class AcceptProcessor extends BaseProcessor {
 			return;
 		}
 
+		const responseActorAccountId = await this.resolveActor(activity.actor);
+		if (!responseActorAccountId
+			|| !await canAccountOriginateFederationActivity(responseActorAccountId)) {
+			return;
+		}
+
 		const status = await env.DB.prepare(
-			`SELECT s.id, s.quote_id, qs.uri AS quoted_uri
+			`SELECT s.id, s.account_id AS local_quote_author_account_id,
+			        s.quote_id, s.quote_approval_status, qs.uri AS quoted_uri,
+			        qs.account_id AS quote_target_author_account_id
 			 FROM statuses s
 			 LEFT JOIN statuses qs ON qs.id = s.quote_id
 			 WHERE s.uri = ?1 AND s.local = 1 AND s.deleted_at IS NULL
 			 LIMIT 1`,
-		).bind(instrumentUri).first<{ id: string; quote_id: string | null; quoted_uri: string | null }>();
+		).bind(instrumentUri).first<{
+			id: string;
+			local_quote_author_account_id: string;
+			quote_id: string | null;
+			quote_approval_status: string | null;
+			quoted_uri: string | null;
+			quote_target_author_account_id: string | null;
+		}>();
 
-		if (!status || status.quoted_uri !== quotedUri) return;
+		if (!status
+			|| status.quoted_uri !== quotedUri
+			|| !canApplyQuoteResponse({
+				actorAccountId: responseActorAccountId,
+				ownerAccountId: status.quote_target_author_account_id,
+				localQuoteAuthorAccountId: status.local_quote_author_account_id,
+				recipientAccountId: this.recipientAccountId || null,
+				quoteApprovalStatus: status.quote_approval_status,
+			})) {
+			return;
+		}
 
-		await env.DB.prepare(
+		const updated = await env.DB.prepare(
 			`UPDATE statuses
 			 SET quote_authorization_uri = ?1, quote_approval_status = 'accepted', updated_at = ?2
-			 WHERE id = ?3`,
+			 WHERE id = ?3 AND quote_approval_status = 'pending'`,
 		).bind(authorizationUri, new Date().toISOString(), status.id).run();
+		if ((updated.meta?.changes ?? 0) === 0) return;
 
 		await this.enqueueQuoteUpdate(status.id, authorizationUri);
 	}

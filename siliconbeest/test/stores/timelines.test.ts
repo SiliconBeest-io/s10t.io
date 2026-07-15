@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { setActivePinia, createPinia } from 'pinia';
 import { useTimelinesStore } from '@/stores/timelines';
+import { useStatusesStore } from '@/stores/statuses';
+import type { Status } from '@/types/mastodon';
 
 const soundMocks = vi.hoisted(() => ({
   playNewPostSound: vi.fn(),
@@ -117,6 +119,38 @@ describe('Timelines Store', () => {
       store.removeStatus('5');
       const timeline = store.getTimeline('home');
       expect(timeline.newStatusIds).toEqual(['6']);
+    });
+
+    it('also removes a rendered reblog wrapper when its original is deleted', () => {
+      const store = useTimelinesStore();
+      const statuses = useStatusesStore();
+      statuses.cacheStatus({
+        id: 'wrapper',
+        account: { id: 'booster' },
+        reblog: { id: 'original', account: { id: 'author' } },
+      } as Status);
+      store.getTimeline('home').statusIds = ['wrapper', 'original', 'other'];
+
+      store.removeStatus('original');
+
+      expect(store.getTimeline('home').statusIds).toEqual(['other']);
+    });
+
+    it('removes direct and reblogged statuses after blocking or muting an account', () => {
+      const store = useTimelinesStore();
+      const statuses = useStatusesStore();
+      statuses.cacheStatus({ id: 'direct', account: { id: 'hidden' }, reblog: null } as Status);
+      statuses.cacheStatus({
+        id: 'wrapper',
+        account: { id: 'booster' },
+        reblog: { id: 'original', account: { id: 'hidden' } },
+      } as Status);
+      statuses.cacheStatus({ id: 'kept', account: { id: 'visible' }, reblog: null } as Status);
+      store.getTimeline('home').statusIds = ['direct', 'wrapper', 'kept'];
+
+      store.removeAccountStatuses('hidden');
+
+      expect(store.getTimeline('home').statusIds).toEqual(['kept']);
     });
   });
 

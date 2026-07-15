@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import { getAllSettings, setSettings } from '../../../../services/instance';
 
 type HonoEnv = { Variables: AppVariables };
@@ -9,6 +10,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 /**
  * GET /api/v1/admin/settings — get all instance settings.

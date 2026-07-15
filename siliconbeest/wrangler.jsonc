@@ -35,7 +35,7 @@
 		"INSTANCE_TITLE": "My SiliconBeest Instance",
 		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
 		"REGISTRATION_MODE": "open",
-		"SKIP_SIGNATURE_VERIFICATION": true
+		"SKIP_SIGNATURE_VERIFICATION": false
 	},
 
 	// D1 Database

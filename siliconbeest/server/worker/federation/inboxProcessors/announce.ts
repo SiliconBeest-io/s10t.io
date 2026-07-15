@@ -9,6 +9,16 @@ import { env } from 'cloudflare:workers';
 import type { APActivity } from '../../types/activitypub';
 import { BaseProcessor } from './BaseProcessor';
 import { sanitizeHtml } from '../../utils/sanitize';
+import {
+	canAccountInteractWithStatus,
+	canQuoteStatusById,
+} from '../../services/permissions';
+import {
+	canReblogStatus,
+	constrainQuoteVisibility,
+	parseStatusVisibility,
+	type StatusVisibility,
+} from '../../../../../packages/shared/permissions';
 
 function idsFrom(value: unknown): string | undefined {
 	if (typeof value === 'string') return value;
@@ -32,13 +42,20 @@ function hasQuoteCommentary(activity: APActivity): boolean {
 		|| activity.inReplyTo !== undefined;
 }
 
-function resolveVisibility(activity: APActivity): string {
-	const to = Array.isArray(activity.to) ? activity.to : activity.to ? [activity.to] : [];
-	const cc = Array.isArray(activity.cc) ? activity.cc : activity.cc ? [activity.cc] : [];
+function getAddressTargets(value: string | string[] | undefined): string[] {
+	if (typeof value === 'string') return [value];
+	if (!Array.isArray(value)) return [];
+	return value.filter((target): target is string => typeof target === 'string');
+}
+
+function resolveVisibility(activity: APActivity): string | null {
+	const to = getAddressTargets(activity.to);
+	const cc = getAddressTargets(activity.cc);
 	if (to.some(isPublicCollection)) return 'public';
-	if (cc.some(isPublicCollection)) return 'unlisted';
+	if (to.length > 0 && cc.some(isPublicCollection)) return 'unlisted';
 	if (to.some((target) => target.endsWith('/followers'))) return 'private';
-	return 'direct';
+	if (to.length > 0) return 'direct';
+	return null;
 }
 
 function isPublicCollection(value: string): boolean {
@@ -48,7 +65,7 @@ function isPublicCollection(value: string): boolean {
 }
 
 class AnnounceProcessor extends BaseProcessor {
-	async process(activity: APActivity): Promise<void> {
+	async process(activity: APActivity): Promise<boolean> {
 		// Relay Announce handling
 		const relay = await env.DB.prepare(
 			"SELECT id FROM relays WHERE actor_uri = ?1 AND state = 'accepted'",
@@ -65,31 +82,47 @@ class AnnounceProcessor extends BaseProcessor {
 					...(this.recipientAccountId ? { signerAccountId: this.recipientAccountId } : {}),
 				});
 			}
-			return;
+			return false;
 		}
 
 		const statusUri = idsFrom(activity.object);
 		if (!statusUri) {
 			console.warn('[announce] activity.object has no resolvable URI');
-			return;
+			return false;
 		}
 
 		const originalStatus = await this.findStatusByUri(statusUri);
 		if (!originalStatus) {
 			console.log(`[announce] Original status not found: ${statusUri}`);
-			return;
+			return false;
 		}
 
 		const boosterAccountId = await this.resolveActor(activity.actor);
 		if (!boosterAccountId) {
 			console.error('[announce] Could not resolve remote actor');
-			return;
+			return false;
 		}
+		if (!await canAccountInteractWithStatus(originalStatus.id, boosterAccountId)) return false;
+
+		const wrapperVisibility = parseStatusVisibility(resolveVisibility(activity));
+		if (!wrapperVisibility) return false;
 
 		if (hasQuoteCommentary(activity)) {
-			await this.processQuoteAnnounce(activity, originalStatus.id, originalStatus.account_id, boosterAccountId);
-			return;
+			if (!await canQuoteStatusById(originalStatus.id, boosterAccountId)) return false;
+			const constrainedVisibility = constrainQuoteVisibility(
+				wrapperVisibility,
+				originalStatus.visibility,
+			);
+			if (!constrainedVisibility) return false;
+			return this.processQuoteAnnounce(
+				activity,
+				originalStatus.id,
+				originalStatus.account_id,
+				boosterAccountId,
+				constrainedVisibility,
+			);
 		}
+		if (!canReblogStatus(originalStatus.visibility)) return false;
 
 		// Check for duplicate reblog
 		const existingReblog = await env.DB.prepare(
@@ -100,7 +133,7 @@ class AnnounceProcessor extends BaseProcessor {
 			.bind(originalStatus.id, boosterAccountId)
 			.first();
 
-		if (existingReblog) return;
+		if (existingReblog) return false;
 
 		const reblogUri = activity.id ?? `${activity.actor}/statuses/${originalStatus.id}`;
 
@@ -108,7 +141,7 @@ class AnnounceProcessor extends BaseProcessor {
 			uri: reblogUri,
 			account_id: boosterAccountId,
 			reblog_of_id: originalStatus.id,
-			visibility: 'public',
+			visibility: wrapperVisibility,
 			local: 0,
 		});
 
@@ -120,6 +153,7 @@ class AnnounceProcessor extends BaseProcessor {
 			statusId: reblog.id,
 			accountId: boosterAccountId,
 		});
+		return true;
 	}
 
 	private async processQuoteAnnounce(
@@ -127,13 +161,14 @@ class AnnounceProcessor extends BaseProcessor {
 		originalStatusId: string,
 		originalAccountId: string,
 		boosterAccountId: string,
-	): Promise<void> {
+		visibility: StatusVisibility,
+	): Promise<boolean> {
 		const existingQuote = await env.DB.prepare(
 			`SELECT id FROM statuses
 			 WHERE uri = ?1 AND account_id = ?2 AND deleted_at IS NULL
 			 LIMIT 1`,
 		).bind(activity.id ?? '', boosterAccountId).first();
-		if (existingQuote) return;
+		if (existingQuote) return false;
 
 		const quoteUri = activity.id ?? `${activity.actor}/quotes/${originalStatusId}`;
 		const content = sanitizeHtml(activity.content ?? '');
@@ -144,10 +179,10 @@ class AnnounceProcessor extends BaseProcessor {
 			account_id: boosterAccountId,
 			text: content.replace(/<[^>]+>/g, ''),
 			content,
-			visibility: resolveVisibility(activity),
+			visibility,
 			local: 0,
 			quote_id: originalStatusId,
-			quote_approval_status: 'none',
+			quote_approval_status: 'accepted',
 		});
 
 		await this.statusRepo.incrementCount(originalStatusId, 'reblogs_count');
@@ -157,12 +192,13 @@ class AnnounceProcessor extends BaseProcessor {
 			statusId: quote.id,
 			accountId: boosterAccountId,
 		});
+		return true;
 	}
 }
 
 export async function processAnnounce(
 	activity: APActivity,
 	localAccountId: string,
-): Promise<void> {
-	await new AnnounceProcessor(localAccountId).process(activity);
+): Promise<boolean> {
+	return new AnnounceProcessor(localAccountId).process(activity);
 }

@@ -189,17 +189,25 @@ export async function setAccountRole(
 		.run();
 }
 
-/**
- * Get active access tokens for a user (for cache invalidation).
- */
-export async function getActiveTokensForUser(
+export interface ActiveTokenCacheIdentity {
+	tokenHash: string | null;
+	legacyToken: string | null;
+}
+
+/** Get cache identities for all active access tokens owned by a user. */
+export async function getActiveTokenCacheIdentitiesForUser(
 	userId: string,
-): Promise<string[]> {
+): Promise<ActiveTokenCacheIdentity[]> {
 	const { results } = await env.DB.prepare(
-		'SELECT token FROM oauth_access_tokens WHERE user_id = ?1 AND revoked_at IS NULL',
+		`SELECT token_hash, token
+		 FROM oauth_access_tokens
+		 WHERE user_id = ?1 AND revoked_at IS NULL`,
 	).bind(userId).all();
 
-	return (results || []).map((t) => t.token as string);
+	return (results || []).map((token) => ({
+		tokenHash: token.token_hash as string | null,
+		legacyToken: token.token as string | null,
+	}));
 }
 
 // ----------------------------------------------------------------

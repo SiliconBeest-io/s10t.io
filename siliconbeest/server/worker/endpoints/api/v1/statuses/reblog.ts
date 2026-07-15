@@ -13,6 +13,7 @@ import { getStatusFederationAudience } from '../../../../federation/helpers/stat
 import { Announce } from '@fedify/fedify/vocab';
 import { reblogStatus } from '../../../../services/status';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { assertStatusRebloggable } from '../../../../services/permissions';
 
 const app = new Hono<HonoEnv>();
 
@@ -30,12 +31,9 @@ app.post('/:id/reblog', authRequired, requireScope('write:statuses'), async (c) 
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
   ).bind(statusId).first();
   if (!row) throw new AppError(404, 'Record not found');
+  await assertStatusRebloggable(statusId, currentUser.account_id);
 
-  // Check visibility allows reblog
   const visibility = row.visibility as string;
-  if (visibility === 'private' || visibility === 'direct') {
-    throw new AppError(422, 'Validation failed', 'Cannot reblog this status');
-  }
 
   const { reblogId, reblogUri, created } = await reblogStatus(
     domain,

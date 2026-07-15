@@ -151,6 +151,10 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
     updates.push(`discoverable = ?${paramIdx++}`);
     params.push(body.discoverable ? 1 : 0);
   }
+  if (body.hide_collections !== undefined) {
+    updates.push(`hide_collections = ?${paramIdx++}`);
+    params.push(body.hide_collections ? 1 : 0);
+  }
 
   // Handle profile fields/metadata
   // Mastodon sends fields_attributes[0][name], fields_attributes[0][value] in FormData
@@ -283,6 +287,7 @@ app.patch('/update_credentials', authRequired, requireScope('write:accounts'), a
       note: (row.note as string) || '',
       fields: parseFields(row.fields as string | null),
       follow_requests_count: 0,
+      hide_collections: !!(row.hide_collections),
       quote_policy: normalizeQuotePolicy(row.default_quote_policy),
     },
   });

@@ -4,6 +4,7 @@ import { AppError } from '../../../../../middleware/errorHandler';
 import { sendRejection } from '../../../../../services/email';
 import { sanitizeLocale } from '../../../../../utils/locales';
 import { getAccountWithUser, rejectAccount } from '../../../../../services/admin';
+import { assertAccountModeratable } from '../../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -16,6 +17,8 @@ app.post('/:id/reject', async (c) => {
 	const id = c.req.param('id');
 
 	const { account, user } = await getAccountWithUser(id);
+	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	if (user.approved) throw new AppError(403, 'This account is not pending approval');
 

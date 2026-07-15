@@ -15,6 +15,12 @@ import {
   getId,
   quoteContext,
 } from '../helpers/quote';
+import {
+  canAccountOriginateFederationActivity,
+  canProcessFederatedStatusInteraction,
+  canQuoteStatusRecord,
+  type StatusQuotePermissionRecord,
+} from '../../services/permissions';
 
 function activityObjectId(value: unknown): string | null {
   return getId(value);
@@ -24,20 +30,6 @@ function getInstrumentUri(instrument: APQuoteRequest['instrument']): string | nu
   if (typeof instrument === 'string') return instrument;
   if (instrument && typeof instrument === 'object') return getId(instrument);
   return null;
-}
-
-function shouldRejectForVisibility(
-  quotedVisibility: string,
-  instrument: APQuoteRequest['instrument'],
-): boolean {
-  if (quotedVisibility === 'direct') return true;
-  if (quotedVisibility === 'public' || typeof instrument === 'string') return false;
-
-  const publicNs = 'https://www.w3.org/ns/activitystreams#Public';
-  const obj = instrument as Record<string, unknown>;
-  const to = Array.isArray(obj.to) ? obj.to : obj.to ? [obj.to] : [];
-  const cc = Array.isArray(obj.cc) ? obj.cc : obj.cc ? [obj.cc] : [];
-  return quotedVisibility !== 'public' && (to.includes(publicNs) || cc.includes(publicNs));
 }
 
 class QuoteRequestProcessor extends BaseProcessor {
@@ -58,16 +50,16 @@ class QuoteRequestProcessor extends BaseProcessor {
     }
 
     const quoted = await env.DB.prepare(
-      `SELECT s.id, s.uri, s.account_id, s.visibility, a.username, a.uri AS account_uri
+      `SELECT s.id, s.uri, s.account_id, s.visibility, s.deleted_at, s.quote_policy,
+              s.quote_policy_automatic_approvals, s.quote_policy_manual_approvals,
+              a.username, a.uri AS account_uri
        FROM statuses s
        JOIN accounts a ON a.id = s.account_id
        WHERE s.uri = ?1 AND s.deleted_at IS NULL AND a.domain IS NULL
        LIMIT 1`,
-    ).bind(quotedObjectUri).first<{
-      id: string;
+    ).bind(quotedObjectUri).first<StatusQuotePermissionRecord & {
       uri: string;
       account_id: string;
-      visibility: string;
       username: string;
       account_uri: string;
     }>();
@@ -75,18 +67,25 @@ class QuoteRequestProcessor extends BaseProcessor {
     if (!quoted) return;
 
     const remoteActorAccountId = await this.resolveActor(request.actor);
-    const remoteActor = remoteActorAccountId
-      ? await env.DB.prepare(
-        'SELECT inbox_url, shared_inbox_url FROM accounts WHERE id = ?1 LIMIT 1',
-      ).bind(remoteActorAccountId).first<{ inbox_url: string | null; shared_inbox_url: string | null }>()
-      : null;
+    if (!remoteActorAccountId
+      || !await canAccountOriginateFederationActivity(remoteActorAccountId)
+      || !await canProcessFederatedStatusInteraction(
+        quoted.id,
+        remoteActorAccountId,
+        this.recipientAccountId || null,
+      )) {
+      return;
+    }
+    const remoteActor = await env.DB.prepare(
+      'SELECT inbox_url, shared_inbox_url FROM accounts WHERE id = ?1 LIMIT 1',
+    ).bind(remoteActorAccountId).first<{ inbox_url: string | null; shared_inbox_url: string | null }>();
 
     if (!remoteActor?.inbox_url) {
       console.warn(`[quoteRequest] Could not resolve inbox for ${request.actor}`);
       return;
     }
 
-    const reject = shouldRejectForVisibility(quoted.visibility, request.instrument);
+    const reject = !await canQuoteStatusRecord(quoted, remoteActorAccountId);
     if (reject) {
       await this.deliverResponse({
         type: 'Reject',
@@ -118,9 +117,7 @@ class QuoteRequestProcessor extends BaseProcessor {
       result: stampUri,
     });
 
-    if (remoteActorAccountId) {
-      await this.notify('mention', quoted.account_id, remoteActorAccountId, quoted.id);
-    }
+    await this.notify('mention', quoted.account_id, remoteActorAccountId, quoted.id);
   }
 
   private async deliverResponse(input: {

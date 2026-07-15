@@ -79,6 +79,7 @@ export interface AccountSource {
   note: string;
   fields: AccountField[];
   follow_requests_count: number;
+  hide_collections: boolean;
   quote_policy?: QuotePolicy;
 }
 

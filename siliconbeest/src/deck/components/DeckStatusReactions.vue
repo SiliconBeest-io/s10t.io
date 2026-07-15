@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useStatusesStore } from '@/stores/statuses'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const { t } = useI18n()
 
@@ -25,6 +26,12 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: authStore.isAuthenticated,
+  accountLoaded: authStore.currentUser !== null,
+  accountSuspended: authStore.currentUser?.suspended,
+  accountMemorial: authStore.currentUser?.memorial,
+}))
 const statusesStore = useStatusesStore()
 const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
@@ -62,7 +69,7 @@ watch(
 )
 
 async function toggleReaction(reaction: EmojiReaction) {
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   try {
@@ -83,7 +90,7 @@ async function toggleReaction(reaction: EmojiReaction) {
 
 async function handleEmojiSelect(emoji: string) {
   showPicker.value = false
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   // Custom emojis arrive as :shortcode:, unicode emojis as-is — pass through
@@ -141,6 +148,7 @@ function computePickerPosition() {
 
 /** Opened from the star chooser in DeckStatusActions. */
 async function openPicker(anchor?: HTMLElement) {
+  if (!accountCanAct.value || loading.value) return
   anchorEl = anchor ?? containerRef.value
   showPicker.value = true
   await nextTick()
@@ -215,9 +223,9 @@ function getShortcode(name: string): string {
           background: reaction.me ? 'color-mix(in oklab, var(--dk-acc) 24%, transparent)' : 'var(--dk-surface2)',
           color: reaction.me ? 'var(--dk-text)' : 'var(--dk-dim)',
           opacity: isRemoteCustomEmoji(reaction) ? 0.7 : 1,
-          cursor: isRemoteCustomEmoji(reaction) || !authStore.isAuthenticated ? 'default' : loading ? 'wait' : 'pointer',
+          cursor: isRemoteCustomEmoji(reaction) || !accountCanAct ? 'default' : loading ? 'wait' : 'pointer',
         }"
-        :disabled="loading || !authStore.isAuthenticated || isRemoteCustomEmoji(reaction)"
+        :disabled="loading || !accountCanAct || isRemoteCustomEmoji(reaction)"
         :aria-pressed="!!reaction.me"
         :title="isRemoteCustomEmoji(reaction) ? `${reaction.name} (${t('deck.remote_reaction_hint')})` : reaction.name"
         @click="!isRemoteCustomEmoji(reaction) && toggleReaction(reaction)"

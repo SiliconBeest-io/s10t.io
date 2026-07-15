@@ -3,6 +3,10 @@ import { generateUlid } from '../utils/ulid';
 import { serializeList, serializeAccount } from '../utils/mastodonSerializer';
 import { AppError } from '../middleware/errorHandler';
 import type { ListRow, AccountRow } from '../types/db';
+import {
+  assertListMemberAddable,
+  listPermittedListMemberIds,
+} from './permissions';
 
 // ----------------------------------------------------------------
 // listLists
@@ -128,26 +132,18 @@ export async function deleteList(listId: string, accountId: string): Promise<voi
 // ----------------------------------------------------------------
 
 export async function getListMembers(listId: string, accountId: string, instanceDomain: string) {
-  const list = await env.DB
-    .prepare('SELECT id FROM lists WHERE id = ?1 AND account_id = ?2')
-    .bind(listId, accountId)
-    .first();
-
-  if (!list) {
-    throw new AppError(404, 'Record not found');
-  }
+  const memberIds = await listPermittedListMemberIds(listId, accountId);
+  if (memberIds.length === 0) return [];
+  const placeholders = memberIds.map(() => '?').join(', ');
 
   const { results } = await env.DB
     .prepare(
-      `SELECT a.*
-       FROM list_accounts la
-       JOIN accounts a ON a.id = la.account_id
-       WHERE la.list_id = ?1`,
+      `SELECT a.* FROM accounts a WHERE a.id IN (${placeholders})`,
     )
-    .bind(listId)
-    .all();
+    .bind(...memberIds)
+    .all<AccountRow>();
 
-  return (results ?? []).map((row: any) => serializeAccount(row as AccountRow, { instanceDomain }));
+  return (results ?? []).map((row) => serializeAccount(row, { instanceDomain }));
 }
 
 // ----------------------------------------------------------------
@@ -159,21 +155,18 @@ export async function addListMembers(
   accountId: string,
   memberAccountIds: string[],
 ): Promise<void> {
-  const list = await env.DB
-    .prepare('SELECT id FROM lists WHERE id = ?1 AND account_id = ?2')
-    .bind(listId, accountId)
-    .first();
-
-  if (!list) {
-    throw new AppError(404, 'Record not found');
-  }
+  const uniqueMemberIds = [...new Set(memberAccountIds)];
+  const permittedMembers = await Promise.all(uniqueMemberIds.map(async (memberId) => ({
+    memberId,
+    followId: await assertListMemberAddable(listId, accountId, memberId),
+  })));
 
   const stmts: D1PreparedStatement[] = [];
-  for (const memberId of memberAccountIds) {
+  for (const member of permittedMembers) {
     stmts.push(
       env.DB.prepare(
-        'INSERT OR IGNORE INTO list_accounts (list_id, account_id, follow_id) VALUES (?1, ?2, NULL)',
-      ).bind(listId, memberId),
+        'INSERT OR IGNORE INTO list_accounts (list_id, account_id, follow_id) VALUES (?1, ?2, ?3)',
+      ).bind(listId, member.memberId, member.followId),
     );
   }
 

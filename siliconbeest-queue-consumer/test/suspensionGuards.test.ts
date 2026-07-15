@@ -71,7 +71,69 @@ describe('queue suspension guards', () => {
     expect(mocks.env.QUEUE_FEDERATION.send).not.toHaveBeenCalled();
   });
 
-  it('does not store a status attributed to an actor on a suspended domain', async () => {
+  it.each([
+    ['a user-blocked target domain', {}, { actor_blocks_target_domain: 1 }],
+    ['a disabled importing account', {}, { user_disabled: 1 }],
+    ['a memorial target', { memorial: 1 }, {}],
+    ['a migrated-away target', { moved_to_account_id: 'new-account' }, {}],
+    ['a suspended target', { suspended_at: '2026-07-15T00:00:00.000Z' }, {}],
+    ['a target that blocks the importer', {}, { target_blocks_actor: 1 }],
+  ])('does not import a follow across %s', async (
+    _label,
+    targetOverrides,
+    actorOverrides,
+  ) => {
+    mocks.env.DB.prepare.mockImplementation((sql: string) => ({
+      bind: () => ({
+        first: async () => {
+          if (sql.includes('FROM accounts target')) {
+            return {
+              id: 'remote-account',
+              username: 'alice',
+              domain: 'remote.example',
+              uri: 'https://remote.example/users/alice',
+              inbox_url: 'https://remote.example/inbox',
+              shared_inbox_url: null,
+              locked: 0,
+              manually_approves_followers: 0,
+              suspended_at: null,
+              memorial: 0,
+              moved_to_account_id: null,
+              user_approved: null,
+              ...targetOverrides,
+            };
+          }
+          if (sql.includes('FROM accounts actor')) {
+            return {
+              suspended_at: null,
+              memorial: 0,
+              user_disabled: 0,
+              user_approved: 1,
+              actor_blocks_target: 0,
+              target_blocks_actor: 0,
+              actor_blocks_target_domain: 0,
+              ...actorOverrides,
+            };
+          }
+          throw new Error(`Unexpected D1 query: ${sql}`);
+        },
+      }),
+    }));
+    mocks.getSuspendedDomains.mockResolvedValue(new Set());
+
+    await handleImportItem({
+      type: 'import_item',
+      acct: 'alice@remote.example',
+      action: 'following',
+      accountId: 'local-account',
+    });
+
+    expect(mocks.env.QUEUE_FEDERATION.send).not.toHaveBeenCalled();
+    expect(mocks.env.QUEUE_INTERNAL.send).not.toHaveBeenCalled();
+    expect(mocks.env.DB.prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not store a cross-host status attribution', async () => {
     mocks.env.DB.prepare.mockImplementation((sql: string) => ({
       bind: () => ({
         first: async () => {
@@ -114,11 +176,7 @@ describe('queue suspension guards', () => {
       mocks.env.DB,
       ['status-host.example'],
     );
-    expect(mocks.getSuspendedDomains).toHaveBeenNthCalledWith(
-      2,
-      mocks.env.DB,
-      ['blocked.example'],
-    );
+    expect(mocks.getSuspendedDomains).toHaveBeenCalledTimes(1);
     expect(mocks.env.DB.prepare).toHaveBeenCalledTimes(1);
     expect(mocks.env.QUEUE_INTERNAL.send).not.toHaveBeenCalled();
   });

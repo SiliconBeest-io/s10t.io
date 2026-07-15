@@ -21,6 +21,7 @@ import {
 import { Temporal } from '@js-temporal/polyfill';
 import type { AccountRow, StatusRow, PollRow } from '../../../types/db';
 import { normalizeQuotePolicy, quotePolicyAutomaticApprovals } from '../../../../../../packages/shared/utils/quotePolicy';
+import { canEmbedQuote } from '../../../../../../packages/shared/permissions';
 
 export const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
 
@@ -198,8 +199,12 @@ export function buildFedifyNote(
     });
   }
 
-  if (status.quote_id) {
-    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+  const quoteStatusId = status.quote_id;
+  if (quoteStatusId && canEmbedQuote({
+    quoteStatusId,
+    quoteApprovalStatus: status.quote_approval_status ?? null,
+  })) {
+    const quoteUri = helpers.quoteUriMap.get(quoteStatusId);
     if (quoteUri) {
       noteValues.quote = new URL(quoteUri);
       noteValues.quoteUrl = new URL(quoteUri);
@@ -308,8 +313,12 @@ export function buildFedifyQuestion(
     });
   }
 
-  if (status.quote_id) {
-    const quoteUri = helpers.quoteUriMap.get(status.quote_id);
+  const quoteStatusId = status.quote_id;
+  if (quoteStatusId && canEmbedQuote({
+    quoteStatusId,
+    quoteApprovalStatus: status.quote_approval_status ?? null,
+  })) {
+    const quoteUri = helpers.quoteUriMap.get(quoteStatusId);
     if (quoteUri) {
       questionValues.quote = new URL(quoteUri);
       questionValues.quoteUrl = new URL(quoteUri);

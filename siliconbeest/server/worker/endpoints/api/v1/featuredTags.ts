@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 import { generateUlid } from '../../../utils/ulid';
 
@@ -37,7 +38,7 @@ function serialize(row: FeaturedTagWithNameRow, domain: string) {
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/featured_tags — list own featured tags
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
 
@@ -55,7 +56,7 @@ app.get('/', authRequired, async (c) => {
 });
 
 // POST /api/v1/featured_tags — feature a tag
-app.post('/', authRequired, async (c) => {
+app.post('/', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
   const body = await c.req.json<{ name?: string }>();
@@ -127,7 +128,7 @@ app.post('/', authRequired, async (c) => {
 });
 
 // DELETE /api/v1/featured_tags/:id — unfeature a tag
-app.delete('/:id', authRequired, async (c) => {
+app.delete('/:id', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const ftId = c.req.param('id');
 
@@ -147,7 +148,7 @@ app.delete('/:id', authRequired, async (c) => {
 });
 
 // GET /api/v1/featured_tags/suggestions — suggest tags to feature
-app.get('/suggestions', authRequired, async (c) => {
+app.get('/suggestions', authRequired, requireScope('read:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
 

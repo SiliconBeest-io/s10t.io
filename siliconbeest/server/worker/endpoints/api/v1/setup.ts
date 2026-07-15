@@ -7,6 +7,7 @@ import { registerUser, getOrCreateInternalApp, createAccessToken, updateSignInTr
 import { createDefaultImages } from '../../../utils/defaultImages';
 import { sanitizeLocale } from '../../../utils/locales';
 import { setAuthTokenCookie } from '../../../utils/authCookie';
+import { getInternalSessionOAuthScopes } from '../../../../../../packages/shared/permissions';
 
 const SETUP_LOCK_KEY = 'setup_admin_seeded';
 
@@ -143,11 +144,13 @@ app.post('/', async (c) => {
     const appRecord = await getOrCreateInternalApp();
     const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
     const userAgent = c.req.header('User-Agent') || '';
+    const scopes = getInternalSessionOAuthScopes('admin');
     const { tokenValue, createdAt } = await createAccessToken(appRecord.id, user.id, {
       ip,
       userAgent,
       email,
       locale,
+      scopes,
     });
     await updateSignInTracking(user.id, ip);
 
@@ -156,7 +159,7 @@ app.post('/', async (c) => {
     return c.json({
       access_token: tokenValue,
       token_type: 'Bearer',
-      scope: 'read write follow push',
+      scope: scopes,
       created_at: Math.floor(new Date(createdAt).getTime() / 1000),
     });
   } catch (error) {

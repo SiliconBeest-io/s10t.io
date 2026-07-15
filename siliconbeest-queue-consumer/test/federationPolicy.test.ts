@@ -194,7 +194,7 @@ describe('legacy delivery identity mapping', () => {
                 { inbox_url: sharedInbox, kind: 'domain', value: 'blocked.example' },
               ],
             }
-          : { results: [{ domain: 'blocked.example' }] },
+          : { results: [{ domain: 'blocked.example', severity: 'suspend' }] },
       }),
     });
     const db = { prepare } as unknown as D1Database;

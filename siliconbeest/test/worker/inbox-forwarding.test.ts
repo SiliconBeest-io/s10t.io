@@ -31,7 +31,7 @@ async function insertLocalStatus(id: string, accountId: string, uri: string, vis
 	).bind(id, uri, accountId, visibility, createdAt).run();
 }
 
-function buildListeners(processCreate = vi.fn(async () => {})) {
+function buildListeners(processCreate = vi.fn(async () => true)) {
 	const handlers = new Map<unknown, (ctx: any, activity: any) => Promise<void>>();
 	const builder = {
 		on: vi.fn((type: unknown, handler: (ctx: any, activity: any) => Promise<void>) => {
@@ -59,6 +59,7 @@ function buildListeners(processCreate = vi.fn(async () => {})) {
 		Accept: Symbol('Accept'),
 		Reject: Symbol('Reject'),
 		EmojiReact: Symbol('EmojiReact'),
+		QuoteRequest: Symbol('QuoteRequest'),
 	};
 	const noop = vi.fn(async () => {});
 
@@ -79,6 +80,7 @@ function buildListeners(processCreate = vi.fn(async () => {})) {
 			processMove: noop,
 			processFlag: noop,
 			processEmojiReact: noop,
+			processQuoteRequest: noop,
 		},
 	);
 
@@ -158,6 +160,40 @@ describe('inbox activity forwarding', () => {
 
 		await handlers.get(vocab.Create)!({ recipient: null, data: {}, forwardActivity }, create);
 
+		expect(forwardActivity).not.toHaveBeenCalled();
+	});
+
+	it('does not forward an interaction rejected by its processor', async () => {
+		const suffix = crypto.randomUUID();
+		const authorId = `forward_denied_author_${suffix}`;
+		const username = `forward_denied_author_${suffix}`;
+		const parentUri = `https://test.siliconbeest.local/users/${username}/statuses/private`;
+		await insertLocalAccount(authorId, username);
+		await insertLocalStatus(`forward_denied_status_${suffix}`, authorId, parentUri, 'private');
+
+		const processCreate = vi.fn(async () => false);
+		const { handlers, vocab } = buildListeners(processCreate);
+		const forwardActivity = vi.fn(async () => {});
+		const create = {
+			actorId: new URL('https://remote.example/users/unauthorized'),
+			toJsonLd: async () => ({
+				id: `https://remote.example/activities/${suffix}`,
+				type: 'Create',
+				actor: 'https://remote.example/users/unauthorized',
+				to: [PUBLIC],
+				object: {
+					id: `https://remote.example/statuses/${suffix}`,
+					type: 'Note',
+					inReplyTo: parentUri,
+					to: [PUBLIC],
+					content: 'unauthorized reply',
+				},
+			}),
+		};
+
+		await handlers.get(vocab.Create)!({ recipient: null, data: {}, forwardActivity }, create);
+
+		expect(processCreate).toHaveBeenCalledOnce();
 		expect(forwardActivity).not.toHaveBeenCalled();
 	});
 });

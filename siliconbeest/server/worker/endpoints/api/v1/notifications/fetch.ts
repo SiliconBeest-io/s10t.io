@@ -8,6 +8,7 @@ import type { AccountRow, NotificationRow } from '../../../../types/db';
 import type { Status } from '../../../../types/mastodon';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import { getNotification } from '../../../../services/notification';
+import { buildNotificationStatusSqlPredicate } from '../../../../services/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -90,6 +91,11 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
   // Fetch status if notification has one
   let statusObj: Status | null = null;
   if (row.status_id) {
+    const statusPermission = buildNotificationStatusSqlPredicate(
+      'status',
+      account.id,
+      new Date().toISOString(),
+    );
     const sr = await env.DB.prepare(
       `SELECT s.id, s.uri, s.url, s.content, s.visibility, s.sensitive,
               s.content_warning, s.language, s.created_at, s.in_reply_to_id,
@@ -106,8 +112,9 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
               sa.created_at AS sa_created_at, sa.emoji_tags AS sa_emoji_tags
        FROM statuses s
        JOIN accounts sa ON sa.id = s.account_id
-       WHERE s.id = ?1 AND s.deleted_at IS NULL`,
-    ).bind(row.status_id).first<StatusWithAccountRow>();
+       WHERE s.id = ?
+         AND ${statusPermission.sql}`,
+    ).bind(row.status_id, ...statusPermission.bindings).first<StatusWithAccountRow>();
 
     if (sr) {
       const enrichments = await enrichStatuses(domain, [sr.id], account.id, env.CACHE);
@@ -164,6 +171,10 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
         emojis: e?.emojis ?? [],
         account: serializeAccount(statusAccountRow, { instanceDomain: env.INSTANCE_DOMAIN }),
       } as Status;
+    }
+
+    if (!statusObj) {
+      return c.json({ error: 'Record not found' }, 404);
     }
   }
 

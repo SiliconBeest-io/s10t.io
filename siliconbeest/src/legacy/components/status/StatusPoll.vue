@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Poll } from '@/types/mastodon'
 import { apiFetch } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -24,6 +25,12 @@ const hasVoted = computed(() => props.poll.voted ?? false)
 const isExpired = computed(() => props.poll.expired)
 const showResults = computed(() => hasVoted.value || isExpired.value)
 const totalVotes = computed(() => props.poll.votes_count || 0)
+const accountCanVote = computed(() => canUseAuthenticatedActions({
+  authenticated: auth.isAuthenticated,
+  accountLoaded: auth.currentUser !== null,
+  accountSuspended: auth.currentUser?.suspended,
+  accountMemorial: auth.currentUser?.memorial,
+}))
 
 const timeRemaining = computed(() => {
   if (!props.poll.expires_at) return null
@@ -40,7 +47,7 @@ const timeRemaining = computed(() => {
 })
 
 function toggleChoice(idx: number) {
-  if (showResults.value) return
+  if (showResults.value || !accountCanVote.value) return
   if (props.poll.multiple) {
     const i = selectedChoices.value.indexOf(idx)
     if (i >= 0) selectedChoices.value.splice(i, 1)
@@ -51,7 +58,7 @@ function toggleChoice(idx: number) {
 }
 
 async function vote() {
-  if (!auth.token || selectedChoices.value.length === 0 || voting.value) return
+  if (!accountCanVote.value || !auth.token || selectedChoices.value.length === 0 || voting.value) return
   voting.value = true
   error.value = null
   try {
@@ -97,6 +104,7 @@ function percentage(count: number | null): number {
       <button
         v-else
         type="button"
+        :disabled="!accountCanVote"
         @click="toggleChoice(idx)"
         class="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md border transition-colors"
         :class="selectedChoices.includes(idx)
@@ -115,7 +123,7 @@ function percentage(count: number | null): number {
 
     <!-- Vote button -->
     <button
-      v-if="!showResults && auth.isAuthenticated"
+      v-if="!showResults && accountCanVote"
       :disabled="selectedChoices.length === 0 || voting"
       @click="vote"
       class="px-4 py-1.5 text-sm font-medium rounded-md border border-indigo-500 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

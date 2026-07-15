@@ -8,6 +8,7 @@ import Avatar from '../common/Avatar.vue'
 import FollowButton from './FollowButton.vue'
 import ReportDialog from '../common/ReportDialog.vue'
 import { emojifyHtml, emojifyPlainText } from '@/utils/customEmoji'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const { t } = useI18n()
 
@@ -39,6 +40,12 @@ const emojifiedFields = computed(() => (props.account.fields ?? []).map((field) 
 })))
 
 const auth = useAuthStore()
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: auth.isAuthenticated,
+  accountLoaded: auth.currentUser !== null,
+  accountSuspended: auth.currentUser?.suspended,
+  accountMemorial: auth.currentUser?.memorial,
+}))
 
 const emit = defineEmits<{
   'toggle-follow': []
@@ -50,6 +57,7 @@ const showReportDialog = ref(false)
 const actionLoading = ref(false)
 
 function openReport() {
+  if (!accountCanAct.value || props.isOwn) return
   showMoreMenu.value = false
   showReportDialog.value = true
 }
@@ -62,7 +70,7 @@ function onMenuFocusOut(e: FocusEvent) {
 }
 
 async function toggleBlock() {
-  if (!auth.token || actionLoading.value) return
+  if (!accountCanAct.value || props.isOwn || !auth.token || actionLoading.value) return
   showMoreMenu.value = false
   actionLoading.value = true
   try {
@@ -77,7 +85,7 @@ async function toggleBlock() {
 }
 
 async function toggleMute() {
-  if (!auth.token || actionLoading.value) return
+  if (!accountCanAct.value || props.isOwn || !auth.token || actionLoading.value) return
   showMoreMenu.value = false
   actionLoading.value = true
   try {
@@ -140,7 +148,7 @@ function handleToggle() {
             class="text-xs px-2 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
           >{{ t('profile.follows_you') }}</span>
           <FollowButton
-            v-if="!isOwn"
+            v-if="accountCanAct && !isOwn"
             :account-id="account.id"
             :following="relationship?.following"
             :requested="relationship?.requested"
@@ -148,7 +156,7 @@ function handleToggle() {
             @toggle="handleToggle"
           />
           <!-- More menu for non-own accounts -->
-          <div v-if="!isOwn" class="relative" @focusout="onMenuFocusOut">
+          <div v-if="accountCanAct && !isOwn" class="relative" @focusout="onMenuFocusOut">
             <button
               type="button"
               @click="showMoreMenu = !showMoreMenu"
@@ -187,7 +195,7 @@ function handleToggle() {
             </div>
           </div>
           <router-link
-            v-if="isOwn"
+            v-if="accountCanAct && isOwn"
             to="/settings/profile"
             class="px-4 py-1.5 rounded-full border border-gray-300 dark:border-gray-600 text-sm font-bold hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
           >

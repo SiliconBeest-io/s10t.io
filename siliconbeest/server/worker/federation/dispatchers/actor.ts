@@ -32,6 +32,7 @@ import {
 } from '../../../../../packages/shared/crypto/keys';
 import { generateEd25519KeyPair } from '../../utils/crypto';
 import { getInstanceTitle } from '../../services/instance';
+import { canAccountOriginateFederationActivity } from '../../services/permissions';
 import { env } from 'cloudflare:workers';
 
 /** Profile metadata field as stored in accounts.fields JSON column. */
@@ -78,9 +79,10 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
 
       if (!account) return null;
 
-      // Suspended actors: return null so the request falls through to
-      // the Hono Tombstone fallback route at /users/:username.
+      // Suspended actors fall through to the Tombstone route. Other inactive
+      // local users (disabled, unapproved, memorial) are not discoverable.
       if (account.suspended_at) return null;
+      if (!await canAccountOriginateFederationActivity(account.id)) return null;
 
       // Fedify-managed key pairs (RSA first, then Ed25519; lazily generated
       // by the key-pairs dispatcher below).  Serving fedify's own
@@ -230,6 +232,7 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
           console.warn(`[keyPairsDispatcher] No local account for identifier='${identifier}' — returning empty keyPairs (Fedify will fall back to unauthenticated loader)`);
           return [];
         }
+        if (!await canAccountOriginateFederationActivity(account.id)) return [];
         accountId = account.id;
       }
 
@@ -289,6 +292,13 @@ export function setupActorDispatcher(fed: Federation<FedifyContextData>): void {
 
     // Instance actor case
     if (!username || username.toLowerCase() === domain.toLowerCase()) return [];
+
+    const account = await env.DB.prepare(
+      `SELECT id FROM accounts
+       WHERE username = ?1 AND domain IS NULL
+       LIMIT 1`,
+    ).bind(username).first<{ id: string }>();
+    if (!account || !await canAccountOriginateFederationActivity(account.id)) return [];
 
     const profileUrl = `https://${domain}/@${username}`;
 

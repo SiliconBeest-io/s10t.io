@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { getInternalSessionOAuthScopes } from '../../../packages/shared/permissions';
 
 // ---------------------------------------------------------------------------
 // Test RSA key pair (generated once at module level, cached for reuse)
@@ -78,20 +79,16 @@ import m0034 from '../../migrations/0034_quote_policy_approvals.sql?raw';
 import m0035 from '../../migrations/0035_federation_dlq_parked.sql?raw';
 import m0036 from '../../migrations/0036_federation_suspensions.sql?raw';
 import m0037 from '../../migrations/0037_accounts_inbox_indexes.sql?raw';
+import m0038 from '../../migrations/0038_account_collection_privacy.sql?raw';
 
 const MIGRATIONS: string[] = [
   m0001, m0002, m0003, m0004, m0005, m0006, m0007, m0008,
   m0009a, m0009b, m0010, m0011, m0012, m0013, m0014, m0015,
-  m0016, m0017, m0018, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037,
+  m0016, m0017, m0018, m0020, m0021, m0022, m0023, m0024, m0025, m0026, m0027, m0028, m0029, m0030, m0031, m0032, m0033, m0034, m0035, m0036, m0037, m0038,
 ];
 
-/**
- * Apply all D1 migrations in order.
- * SQL files are imported at build time via Vite ?raw imports,
- * so this works in the Cloudflare Workers test runtime.
- */
-export async function applyMigration() {
-  for (const sql of MIGRATIONS) {
+async function applyMigrationSql(migrations: readonly string[]) {
+  for (const sql of migrations) {
     // Split SQL into individual statements and execute one by one.
     // D1 exec() in the test runtime can be finicky with multi-statement SQL.
     const statements = sql
@@ -102,15 +99,33 @@ export async function applyMigration() {
     for (const stmt of statements) {
       try {
         await env.DB.prepare(stmt).run();
-      } catch (e: any) {
-        const msg = e?.message || '';
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : '';
         if (msg.includes('already exists') || msg.includes('duplicate column')) {
           continue;
         }
-        throw e;
+        throw error;
       }
     }
   }
+}
+
+/**
+ * Apply all D1 migrations in order.
+ * SQL files are imported at build time via Vite ?raw imports,
+ * so this works in the Cloudflare Workers test runtime.
+ */
+export async function applyMigration() {
+  await applyMigrationSql(MIGRATIONS);
+}
+
+/** Test-only helpers for asserting the 0038 data migration boundary. */
+export async function applyMigrationsBeforeAccountCollectionPrivacy() {
+  await applyMigrationSql(MIGRATIONS.slice(0, -1));
+}
+
+export async function applyAccountCollectionPrivacyMigration() {
+  await applyMigrationSql([m0038]);
 }
 
 async function sha256Hex(input: string): Promise<string> {
@@ -121,10 +136,14 @@ async function sha256Hex(input: string): Promise<string> {
     .join('');
 }
 
-export async function createTestUser(username: string, opts?: { email?: string; role?: string }) {
+export async function createTestUser(
+  username: string,
+  opts?: { email?: string; role?: string; scopes?: string },
+) {
   const id = crypto.randomUUID();
   const email = opts?.email || username + '@test.local';
   const role = opts?.role || 'user';
+  const scopes = opts?.scopes ?? getInternalSessionOAuthScopes(role);
   const now = new Date().toISOString();
   const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
   const tokenHash = await sha256Hex(token);
@@ -140,8 +159,8 @@ export async function createTestUser(username: string, opts?: { email?: string; 
     env.DB.prepare("INSERT INTO accounts (id, username, domain, display_name, note, uri, url, created_at, updated_at) VALUES (?, ?, NULL, ?, '', ?, ?, ?, ?)").bind(id, username, username, uri, 'https://test.siliconbeest.local/@' + username, now, now),
     env.DB.prepare("INSERT INTO users (id, account_id, email, encrypted_password, role, approved, confirmed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)").bind(id, id, email, 'dummy_hash', role, now, now, now),
     env.DB.prepare("INSERT INTO actor_keys (id, account_id, public_key, private_key, key_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), id, keys.publicPem, keys.privatePem, uri + '#main-key', now),
-    env.DB.prepare("INSERT INTO oauth_applications (id, name, website, redirect_uri, client_id, client_secret, scopes, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)").bind(appId, 'Test App', 'urn:ietf:wg:oauth:2.0:oob', clientId, clientSecret, 'read write follow push', now, now),
-    env.DB.prepare("INSERT INTO oauth_access_tokens (id, token, token_hash, application_id, user_id, scopes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), token, tokenHash, appId, id, 'read write follow push', now),
+    env.DB.prepare("INSERT INTO oauth_applications (id, name, website, redirect_uri, client_id, client_secret, scopes, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)").bind(appId, 'Test App', 'urn:ietf:wg:oauth:2.0:oob', clientId, clientSecret, scopes, now, now),
+    env.DB.prepare("INSERT INTO oauth_access_tokens (id, token, token_hash, application_id, user_id, scopes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind(crypto.randomUUID(), token, tokenHash, appId, id, scopes, now),
   ]);
 
   return { accountId: id, userId: id, token };

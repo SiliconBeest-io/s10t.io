@@ -3,6 +3,7 @@ import type { AppVariables } from '../types';
 import { resolveToken, type ResolvedToken } from '../services/auth';
 import { sha256 } from '../utils/crypto';
 import { getAuthTokenFromCookie } from '../utils/authCookie';
+import { hasStaffCapability } from '../../../../packages/shared/permissions';
 
 type MiddlewareEnv = { Variables: AppVariables };
 
@@ -93,7 +94,7 @@ export const authRequired = createMiddleware<MiddlewareEnv>(async (c, next) => {
  */
 export const adminRequired = createMiddleware<MiddlewareEnv>(async (c, next) => {
   const user = c.get('currentUser');
-  if (!user || (user.role !== 'admin' && user.role !== 'moderator')) {
+  if (!user || !hasStaffCapability(user.role, 'accounts:moderate')) {
     return c.json(
       { error: 'This action is not allowed' },
       403,
@@ -109,7 +110,7 @@ export const adminRequired = createMiddleware<MiddlewareEnv>(async (c, next) => 
  */
 export const adminOnlyRequired = createMiddleware<MiddlewareEnv>(async (c, next) => {
   const user = c.get('currentUser');
-  if (!user || user.role !== 'admin') {
+  if (!user || !hasStaffCapability(user.role, 'roles:manage')) {
     return c.json(
       { error: 'This action is not allowed' },
       403,

@@ -17,6 +17,11 @@ import type { AppVariables } from '../../../types';
 import { resolveToken } from '../../../services/auth';
 import { sha256 } from '../../../utils/crypto';
 import { getAuthTokenFromCookie } from '../../../utils/authCookie';
+import {
+  canAccessStreamingChannel,
+  parseStreamingChannel,
+  permittedStreamingChannels,
+} from '../../../../../../packages/shared/permissions';
 
 // ---------------------------------------------------------------------------
 // Route
@@ -46,12 +51,12 @@ async function resolveFirstValidToken(tokens: Array<string | null | undefined>) 
 }
 
 app.get('/', async (c) => {
-  const stream = c.req.query('stream') || 'user';
+  const requestedStream = c.req.query('stream') || 'user';
 
   // 1. Require WebSocket upgrade
   const upgradeHeader = c.req.header('Upgrade');
   debugStreaming('request', {
-    stream,
+    stream: requestedStream,
     upgrade: upgradeHeader ?? null,
     hasBearer: !!extractBearerToken(c.req.header('Authorization')),
     hasCookie: !!getAuthTokenFromCookie(c.req.header('Cookie')),
@@ -59,7 +64,7 @@ app.get('/', async (c) => {
   });
 
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-    debugStreaming('rejected: missing websocket upgrade', { stream });
+    debugStreaming('rejected: missing websocket upgrade', { stream: requestedStream });
     return c.json({ error: 'Expected WebSocket upgrade' }, 426);
   }
 
@@ -71,8 +76,28 @@ app.get('/', async (c) => {
     c.req.query('access_token'),
   ]);
   if (!payload) {
-    debugStreaming('rejected: invalid token', { stream });
+    debugStreaming('rejected: invalid token', { stream: requestedStream });
     return c.json({ error: 'The access token is invalid' }, 401);
+  }
+
+  const stream = parseStreamingChannel(requestedStream);
+  if (!stream) {
+    return c.json({ error: 'Unknown channel requested' }, 400);
+  }
+  if (!canAccessStreamingChannel(payload.scopes, stream)) {
+    return c.json({ error: 'This action is outside the authorized scopes' }, 403);
+  }
+
+  if (stream === 'list') {
+    const listId = c.req.query('list');
+    if (!listId) return c.json({ error: 'list is required' }, 422);
+    const ownedList = await env.DB.prepare(
+      'SELECT id FROM lists WHERE id = ?1 AND account_id = ?2 LIMIT 1',
+    ).bind(listId, payload.account.id).first<{ id: string }>();
+    if (!ownedList) return c.json({ error: 'Record not found' }, 404);
+  }
+  if ((stream === 'hashtag' || stream === 'hashtag:local') && !c.req.query('tag')) {
+    return c.json({ error: 'tag is required' }, 422);
   }
 
   const userId = payload.user.id;
@@ -103,9 +128,13 @@ app.get('/', async (c) => {
 
   let response: Response;
   try {
+    const forwardHeaders = new Headers(c.req.raw.headers);
+    const allowedStreams = permittedStreamingChannels(payload.scopes)
+      .filter((channel) => channel !== 'list' || stream === 'list');
+    forwardHeaders.set('X-Siliconbeest-Allowed-Streams', JSON.stringify(allowedStreams));
     response = await doStub.fetch(doUrl.toString(), {
       method: c.req.method,
-      headers: c.req.raw.headers,
+      headers: forwardHeaders,
     });
     debugStreaming('durable object response', {
       stream,

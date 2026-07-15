@@ -11,6 +11,7 @@ import { getStatusFederationAudience } from '../../../../federation/helpers/stat
 import { Announce, Undo } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { unreblogStatus } from '../../../../services/status';
+import { canViewStatusById } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -22,14 +23,14 @@ app.post('/:id/unreblog', authRequired, requireScope('write:statuses'), async (c
   const domain = env.INSTANCE_DOMAIN;
 
   const row = await env.DB.prepare(
-    `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
+    `${STATUS_JOIN_SQL} WHERE s.id = ?1`,
   ).bind(statusId).first();
-  if (!row) throw new AppError(404, 'Record not found');
 
+  const canView = await canViewStatusById(statusId, currentAccountId);
   const { reblogId } = await unreblogStatus(currentAccountId, statusId);
 
   // Federation: deliver Undo(Announce) to followers
-  if (reblogId) {
+  if (reblogId && row) {
     try {
       const currentAccount = await env.DB.prepare(
         'SELECT uri, username FROM accounts WHERE id = ?1',
@@ -76,6 +77,7 @@ app.post('/:id/unreblog', authRequired, requireScope('write:statuses'), async (c
     }
   }
 
+  if (!row || !canView) throw new AppError(404, 'Record not found');
   const status = await serializeStatusEnriched(row as Record<string, unknown>, domain, currentAccountId, env.CACHE);
   status.reblogged = false;
   if (reblogId) {

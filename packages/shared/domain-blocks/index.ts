@@ -15,6 +15,19 @@ export interface DomainBlockResult {
 const CACHE_TTL = 300; // 5 minutes
 const CACHE_PREFIX = 'domblk:';
 
+function normalizeDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/\.+$/, '');
+}
+
+/** Most-specific to least-specific DNS label suffixes. */
+function getDomainVariants(domain: string): string[] {
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return [];
+  const labels = normalized.split('.');
+  if (labels.some((label) => label.length === 0)) return [normalized];
+  return labels.map((_, index) => labels.slice(index).join('.'));
+}
+
 export async function isDomainBlocked(
   db: D1Database,
   cache: KVNamespace | null,
@@ -22,7 +35,8 @@ export async function isDomainBlocked(
 ): Promise<DomainBlockResult> {
   if (!domain) return { blocked: false, severity: null };
 
-  const lowerDomain = domain.toLowerCase();
+  const lowerDomain = normalizeDomain(domain);
+  if (!lowerDomain) return { blocked: false, severity: null };
 
   // 1. Check KV cache
   if (cache) {
@@ -31,11 +45,17 @@ export async function isDomainBlocked(
   }
 
   // 2. D1 lookup
+  const variants = getDomainVariants(lowerDomain);
+  const placeholders = variants.map((_, index) => `?${index + 1}`).join(', ');
   const row = await db
     .prepare(
-      'SELECT severity, reject_media, reject_reports FROM domain_blocks WHERE domain = ?1 LIMIT 1',
+      `SELECT severity, reject_media, reject_reports
+       FROM domain_blocks
+       WHERE domain IN (${placeholders})
+       ORDER BY length(domain) DESC
+       LIMIT 1`,
     )
-    .bind(lowerDomain)
+    .bind(...variants)
     .first<{ severity: string; reject_media: number; reject_reports: number }>();
 
   const result: DomainBlockResult = row
@@ -68,21 +88,43 @@ export async function getSuspendedDomains(
   domains: Iterable<string>,
 ): Promise<Set<string>> {
   const normalized = [...new Set(
-    [...domains].map((domain) => domain.trim().toLowerCase()).filter(Boolean),
+    [...domains].map(normalizeDomain).filter(Boolean),
   )];
   const suspended = new Set<string>();
   const batchSize = 100;
 
-  for (let offset = 0; offset < normalized.length; offset += batchSize) {
-    const batch = normalized.slice(offset, offset + batchSize);
+  const variantsByDomain = new Map<string, string[]>();
+  const allVariants = new Set<string>();
+  for (const domain of normalized) {
+    const variants = getDomainVariants(domain);
+    variantsByDomain.set(domain, variants);
+    for (const variant of variants) allVariants.add(variant);
+  }
+
+  const rules = new Map<string, string>();
+  const variants = [...allVariants];
+
+  for (let offset = 0; offset < variants.length; offset += batchSize) {
+    const batch = variants.slice(offset, offset + batchSize);
     const placeholders = batch.map((_, index) => `?${index + 1}`).join(', ');
     const { results } = await db.prepare(
-      `SELECT domain FROM domain_blocks
-       WHERE severity = 'suspend' AND domain IN (${placeholders})`,
+      `SELECT domain, severity FROM domain_blocks
+       WHERE domain IN (${placeholders})`,
     )
       .bind(...batch)
-      .all<{ domain: string }>();
-    for (const row of results ?? []) suspended.add(row.domain.toLowerCase());
+      .all<{ domain: string; severity: string }>();
+    for (const row of results ?? []) {
+      rules.set(normalizeDomain(row.domain), row.severity);
+    }
+  }
+
+  for (const domain of normalized) {
+    for (const variant of variantsByDomain.get(domain) ?? []) {
+      const severity = rules.get(variant);
+      if (severity === undefined) continue;
+      if (severity === 'suspend') suspended.add(domain);
+      break;
+    }
   }
 
   return suspended;

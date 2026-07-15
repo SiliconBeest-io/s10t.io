@@ -155,12 +155,20 @@ export const useStatusesStore = defineStore('statuses', () => {
     }
   }
 
-  async function deleteStatus(id: string) {
+  async function deleteStatus(id: string): Promise<string[]> {
     const auth = useAuthStore();
-    if (!auth.token) return;
+    if (!auth.token) return [];
+
+    const removedIds = [id];
+    for (const [cachedId, cachedStatus] of cache.value) {
+      if (cachedId !== id && cachedStatus.reblog?.id === id) {
+        removedIds.push(cachedId);
+      }
+    }
 
     await apiDeleteStatus(id, auth.token);
-    cache.value.delete(id);
+    for (const removedId of removedIds) cache.value.delete(removedId);
+    return removedIds;
   }
 
   async function editStatus(id: string, params: CreateStatusParams) {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired, adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import {
 	listAnnouncements,
 	getAnnouncement,
@@ -15,6 +16,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 /**
  * GET /api/v1/admin/announcements — list all announcements.

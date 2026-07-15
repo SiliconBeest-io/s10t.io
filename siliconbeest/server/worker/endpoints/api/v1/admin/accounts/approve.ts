@@ -5,6 +5,7 @@ import { AppError } from '../../../../../middleware/errorHandler';
 import { sendWelcome } from '../../../../../services/email';
 import { sanitizeLocale } from '../../../../../utils/locales';
 import { getAccountWithUser, approveAccount } from '../../../../../services/admin';
+import { assertAccountModeratable } from '../../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -18,6 +19,8 @@ app.post('/:id/approve', async (c) => {
 	const domain = env.INSTANCE_DOMAIN;
 
 	const { account, user } = await getAccountWithUser(id);
+	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	if (user.approved) throw new AppError(403, 'This account is not pending approval');
 	if (!user.confirmed_at) throw new AppError(422, 'User has not confirmed their email address');

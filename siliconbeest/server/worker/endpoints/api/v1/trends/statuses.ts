@@ -5,6 +5,7 @@ import { authOptional } from '../../../../middleware/auth';
 import { serializeAccount, serializeStatus } from '../../../../utils/mastodonSerializer';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import type { AccountRow, StatusRow } from '../../../../types/db';
+import { buildStatusRelationshipSqlPredicate } from '../../../../services/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -17,6 +18,12 @@ app.get('/', authOptional, async (c) => {
   const limit = Math.min(Math.max(limitRaw, 1), 40);
   const offsetRaw = parseInt(c.req.query('offset') ?? '0', 10);
   const offset = Math.max(offsetRaw, 0);
+  const currentAccount = c.get('currentAccount');
+  const relationship = buildStatusRelationshipSqlPredicate(
+    'status',
+    currentAccount?.id ?? null,
+    new Date().toISOString(),
+  );
 
   const { results } = await env.DB.prepare(`
     SELECT s.*, a.id AS a_id, a.username AS a_username, a.domain AS a_domain,
@@ -35,12 +42,12 @@ app.get('/', authOptional, async (c) => {
       AND s.deleted_at IS NULL
       AND s.visibility = 'public'
       AND s.reblog_of_id IS NULL
+      AND ${relationship.sql}
     ORDER BY (s.favourites_count + s.reblogs_count) DESC
-    LIMIT ?1 OFFSET ?2
-  `).bind(limit, offset).all();
+    LIMIT ? OFFSET ?
+  `).bind(...relationship.bindings, limit, offset).all();
 
   const statusIds = (results ?? []).map((r: any) => r.id as string);
-  const currentAccount = c.get('currentAccount');
   const enrichments = await enrichStatuses(
     env.INSTANCE_DOMAIN,
     statusIds,

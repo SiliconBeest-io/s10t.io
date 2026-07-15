@@ -2,10 +2,8 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
-import { getFedifyContext } from '../../../../federation/helpers/send';
-import { isActor } from '@fedify/fedify/vocab';
 import { getAccountByUsername } from '../../../../services/account';
-import { pickSignerUsername } from '../../../../../../../packages/shared/services/signer';
+import { assertAccountViewable } from '../../../../services/permissions';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 import { sanitizeHtml } from '../../../../utils/sanitize';
 
@@ -28,99 +26,26 @@ app.get('/lookup', async (c) => {
 
   // Parse acct: "user" (local) or "user@domain" (remote)
   const cleaned = acct.replace(/^@/, '');
-  const parts = cleaned.split('@');
-  const username = parts[0]!;
+  const atPosition = cleaned.lastIndexOf('@');
+  const username = atPosition === -1 ? cleaned : cleaned.slice(0, atPosition);
   // Domains are DNS names (case-insensitive): normalize to lowercase so the
-  // instance-domain check, WebFinger resource, INSERT, and re-SELECT all use
-  // the canonical form (remote rows store URL.host, which is lowercase).
+  // instance-domain check and cached-account lookup use the canonical form.
   // The username intentionally keeps its exact case (AP identity).
-  const acctDomain = parts[1]?.toLowerCase() || null;
+  const acctDomain = atPosition === -1
+    ? null
+    : cleaned.slice(atPosition + 1).toLowerCase() || null;
+  if (!username) throw new AppError(400, 'Validation failed', 'acct is invalid');
 
-  let row;
-  if (!acctDomain || acctDomain === instanceDomain.toLowerCase()) {
-    // Local account
-    row = await getAccountByUsername(username);
-  } else {
-    // Remote account — check if we have it cached
-    row = await getAccountByUsername(username, acctDomain);
-  }
+  const row = !acctDomain || acctDomain === instanceDomain.toLowerCase()
+    ? await getAccountByUsername(username)
+    : await getAccountByUsername(username, acctDomain);
 
-  // If remote account not in DB, try WebFinger + Fedify lookupObject
-  if (!row && acctDomain && acctDomain !== instanceDomain.toLowerCase()) {
-    console.log(`[lookup] Remote account not in DB, resolving ${username}@${acctDomain}`);
-    try {
-      const fed = c.get('federation');
-      if (!fed) {
-        console.error('[lookup] Federation not available on context');
-        throw new Error('Federation not available');
-      }
-      const ctx = getFedifyContext(fed);
-      console.log(`[lookup] Looking up WebFinger for acct:${username}@${acctDomain}`);
-      const wfResult = await ctx.lookupWebFinger(`acct:${username}@${acctDomain}`);
-      console.log(`[lookup] WebFinger result:`, wfResult ? 'found' : 'null');
-      const selfLink = wfResult?.links?.find(
-        (link) =>
-          link.rel === 'self' &&
-          (link.type === 'application/activity+json' ||
-            link.type === 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"') &&
-          link.href,
-      );
-      console.log(`[lookup] selfLink:`, selfLink?.href || 'not found');
-      if (selfLink?.href) {
-        console.log(`[lookup] Looking up actor object: ${selfLink.href}`);
-        // /api/v1/accounts/lookup is an unauthenticated public endpoint;
-        // sign with the oldest local account (no per-request user available).
-        const signerUsername = await pickSignerUsername(env.DB, null);
-        if (!signerUsername) {
-          console.warn('[lookup] No local signer available, skipping remote fetch');
-          return c.json({ error: 'No local signer available' }, 503);
-        }
-        const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
-        const actorObject = await ctx.lookupObject(selfLink.href, { documentLoader: docLoader });
-        console.log(`[lookup] lookupObject result:`, actorObject ? `${actorObject.constructor.name} id=${actorObject.id}` : 'null');
-        if (actorObject && isActor(actorObject) && actorObject.id) {
-          // Upsert into accounts
-          const id = crypto.randomUUID();
-          const now = new Date().toISOString();
-          const preferredUsername = actorObject.preferredUsername || username;
-          const iconObj = await actorObject.getIcon({ documentLoader: docLoader });
-          const imageObj = await actorObject.getImage({ documentLoader: docLoader });
-          const iconUrl = iconObj?.url instanceof URL ? iconObj.url.href : '';
-          const imageUrl = imageObj?.url instanceof URL ? imageObj.url.href : '';
-          const actorUrl = actorObject.url instanceof URL ? actorObject.url.href : `https://${acctDomain}/@${preferredUsername}`;
-          const inboxUrl = actorObject.inboxId?.href || '';
-          const endpointsObj = actorObject.endpoints;
-          const sharedInboxUrl = endpointsObj?.sharedInbox?.href || '';
-          await env.DB.prepare(
-            `INSERT OR IGNORE INTO accounts (id, username, domain, display_name, note, uri, url,
-             avatar_url, header_url, locked, bot, discoverable, inbox_url, shared_inbox_url,
-             followers_count, following_count, statuses_count, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?18)`,
-          ).bind(
-            id, preferredUsername, acctDomain,
-            sanitizeHtml(actorObject.name?.toString() || ''),
-            sanitizeHtml(actorObject.summary?.toString() || ''),
-            actorObject.id.href,
-            actorUrl,
-            iconUrl, imageUrl,
-            actorObject.manuallyApprovesFollowers ? 1 : 0,
-            actorObject.constructor.name === 'Service' ? 1 : 0,
-            actorObject.discoverable ? 1 : 0,
-            inboxUrl, sharedInboxUrl,
-            0, 0, 0, now,
-          ).run();
-
-          row = await env.DB.prepare(
-            'SELECT * FROM accounts WHERE username = ?1 AND domain = ?2',
-          ).bind(preferredUsername, acctDomain).first();
-        }
-      }
-    } catch (e) {
-      console.error(`[lookup] WebFinger resolve failed for ${username}@${acctDomain}:`, e);
-    }
-  }
+  // Lookup is an exact read of locally known accounts. Network discovery is
+  // deliberately confined to the authenticated search `resolve` path, where
+  // OAuth scope, blocked-domain, and fetched-identity policies are enforced.
 
   if (!row) throw new AppError(404, 'Record not found');
+  await assertAccountViewable(row.id as string);
   const domain = row.domain as string | null;
 
   const emojis = parseCustomEmojiTagsJson(row.emoji_tags as string | null, instanceDomain);
@@ -148,6 +73,8 @@ app.get('/lookup', async (c) => {
     following_count: (row.following_count as number) || 0,
     statuses_count: (row.statuses_count as number) || 0,
     last_status_at: (row.last_status_at as string) || null,
+    ...(row.silenced_at ? { limited: true } : {}),
+    ...(row.memorial ? { memorial: true } : {}),
     emojis,
     fields: safeJsonParse(row.fields as string | null, []),
   });

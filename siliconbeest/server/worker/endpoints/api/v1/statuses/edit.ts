@@ -4,7 +4,8 @@ import { env } from 'cloudflare:workers';
 import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
-import { sendToFollowers } from '../../../../federation/helpers/send';
+import { sendToRecipients } from '../../../../federation/helpers/send';
+import { getStatusFederationAudience } from '../../../../federation/helpers/status-audience';
 import { editStatus } from '../../../../services/status';
 import { serializeAccount } from '../../../../utils/mastodonSerializer';
 import type { AccountRow } from '../../../../types/db';
@@ -69,6 +70,17 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
       const followersUri = `${actorUri}/followers`;
       const editVisibility = (updatedRow.visibility as string) || 'public';
       const now = updatedRow.edited_at as string;
+      const editAudience = await getStatusFederationAudience({
+        id: updatedRow.id,
+        accountId: updatedRow.account_id,
+        visibility: updatedRow.visibility,
+        local: updatedRow.local,
+        accountDomain: null,
+        inReplyToAccountId: updatedRow.in_reply_to_account_id,
+      });
+      const recipientUrls = editAudience.recipients.flatMap((recipient) =>
+        recipient.id ? [recipient.id] : [],
+      );
 
       // -- Addressing --
       const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
@@ -88,7 +100,7 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
           ccUrls = [];
           break;
         case 'direct':
-          toUrls = [];
+          toUrls = recipientUrls;
           ccUrls = [];
           break;
         default:
@@ -206,7 +218,7 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
       // -- Send via Fedify --
       const fed = c.get('federation');
-      await sendToFollowers(fed, accountRow!.username as string, update);
+      await sendToRecipients(fed, accountRow!.username as string, editAudience.recipients, update);
     } catch (e) {
       console.error('Federation delivery failed for status edit:', e);
     }
