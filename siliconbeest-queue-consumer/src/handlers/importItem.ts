@@ -11,6 +11,7 @@
 import { env } from 'cloudflare:workers';
 import type { ImportItemMessage } from '../shared/types/queue';
 import { generateUlid } from '../../../packages/shared/utils/ulid';
+import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
 
 const AP_CONTEXT = 'https://www.w3.org/ns/activitystreams';
 
@@ -93,6 +94,12 @@ export async function handleImportItem(
 
   // If not found and it's a remote account, try WebFinger and enqueue fetch
   if (!targetAccount && domain) {
+    const suspendedDomains = await getSuspendedDomains(env.DB, [domain]);
+    if (suspendedDomains.has(domain)) {
+      console.log(`[import] Skipping remote lookup for suspended domain ${domain}`);
+      return;
+    }
+
     // Use the domain-lowercased acct: it feeds both the WebFinger host and the
     // acct: resource, which some remote servers match case-sensitively.
     const actorUri = await webfingerResolve(normalizedAcct);

@@ -11,11 +11,26 @@ import { createFed } from '../fedify';
 import type { FetchRemoteStatusMessage } from '../shared/types/queue';
 import { pickSignerUsername } from '../../../packages/shared/services/signer';
 import { parseQuotePolicyFromInteractionPolicy } from '../../../packages/shared/utils/quotePolicy';
+import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
 
 export async function handleFetchRemoteStatus(
   msg: FetchRemoteStatusMessage,
 ): Promise<void> {
   const { statusUri, signerAccountId } = msg;
+
+  let statusDomain: string;
+  try {
+    statusDomain = new URL(statusUri).hostname.toLowerCase();
+  } catch {
+    console.error(`Invalid status URI: ${statusUri}`);
+    return;
+  }
+
+  const suspendedDomains = await getSuspendedDomains(env.DB, [statusDomain]);
+  if (suspendedDomains.has(statusDomain)) {
+    console.log(`[remote-status] Skipping lookup for suspended domain ${statusDomain}`);
+    return;
+  }
 
   // Check if we already have this status
   const existing = await env.DB.prepare(
