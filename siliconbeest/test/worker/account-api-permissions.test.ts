@@ -36,6 +36,7 @@ describe('account API permissions', () => {
   let muted: TestUser;
   let reverseBlocked: TestUser;
   let mutedStatus: { id: string; uri: string };
+  const localSystemAccountId = 'acctperm-system';
 
   beforeAll(async () => {
     await applyMigration();
@@ -94,6 +95,16 @@ describe('account API permissions', () => {
         .bind(memorial.accountId),
       env.DB.prepare('UPDATE accounts SET moved_to_account_id = ?1 WHERE id = ?2')
         .bind(active.accountId, moved.accountId),
+      env.DB.prepare(
+        `INSERT INTO accounts
+         (id, username, domain, display_name, note, uri, url, created_at, updated_at)
+         VALUES (?1, 'acctpermsystem', NULL, 'System', '', ?2, ?3, ?4, ?4)`,
+      ).bind(
+        localSystemAccountId,
+        `${BASE}/users/acctpermsystem`,
+        `${BASE}/@acctpermsystem`,
+        new Date().toISOString(),
+      ),
     ]);
   });
 
@@ -134,6 +145,12 @@ describe('account API permissions', () => {
     const memorialResponse = await SELF.fetch(`${BASE}/api/v1/accounts/${memorial.accountId}`);
     expect(memorialResponse.status).toBe(200);
     expect((await memorialResponse.json<AccountEntity>()).memorial).toBe(true);
+
+    const systemResponse = await SELF.fetch(
+      `${BASE}/api/v1/accounts/${localSystemAccountId}`,
+    );
+    expect(systemResponse.status).toBe(200);
+    expect((await systemResponse.json<AccountEntity>()).id).toBe(localSystemAccountId);
   });
 
   it('binds SQL-shaped account IDs and names without rejecting the legitimate cached account', async () => {
