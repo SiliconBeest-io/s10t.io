@@ -25,7 +25,7 @@ async function getStatus(id: string): Promise<string | null> {
   return row?.status ?? null;
 }
 
-describe('Admin federation DLQ bulk API', () => {
+describe('Admin federation DLQ API', () => {
   let adminToken: string;
   let userToken: string;
 
@@ -33,6 +33,71 @@ describe('Admin federation DLQ bulk API', () => {
     await applyMigration();
     adminToken = (await createTestUser('dlqbulkadmin', { role: 'admin' })).token;
     userToken = (await createTestUser('dlqbulkuser')).token;
+  });
+
+  it('redacts secrets and authored text from listed message bodies', async () => {
+    const rawBody = JSON.stringify({
+      type: 'forward_activity',
+      rawBody: '{"type":"Create","content":"private post"}',
+      originalHeaders: {
+        authorization: 'Bearer top-secret-token',
+        signature: 'keyId="https://remote.example/actor#main-key",signature="abc"',
+        'content-type': 'application/activity+json',
+      },
+      activity: {
+        id: 'https://remote.example/activities/1',
+        content: '<p>private post</p>',
+        summary: 'private warning',
+        source: { content: 'private source', mediaType: 'text/markdown' },
+        publicKey: { id: 'https://remote.example/actor#main-key' },
+        privateKey: 'private-key-material',
+      },
+      nested: [{ access_token: 'access-token-value', passwordHash: 'password-hash' }],
+    });
+    await insertDlqMessage('dlq-redacted-body', 'parked', rawBody);
+
+    const res = await SELF.fetch(`${BASE}/api/v1/admin/federation/dlq?status=parked&limit=200`, {
+      headers: authHeaders(adminToken),
+    });
+
+    expect(res.status).toBe(200);
+    const response = await res.json() as { items: Array<{ id: string; body: unknown }> };
+    const item = response.items.find((candidate) => candidate.id === 'dlq-redacted-body');
+    expect(item?.body).toEqual({
+      type: 'forward_activity',
+      rawBody: '[REDACTED]',
+      originalHeaders: {
+        authorization: '[REDACTED]',
+        signature: '[REDACTED]',
+        'content-type': 'application/activity+json',
+      },
+      activity: {
+        id: 'https://remote.example/activities/1',
+        content: '[REDACTED]',
+        summary: '[REDACTED]',
+        source: '[REDACTED]',
+        publicKey: { id: 'https://remote.example/actor#main-key' },
+        privateKey: '[REDACTED]',
+      },
+      nested: [{ access_token: '[REDACTED]', passwordHash: '[REDACTED]' }],
+    });
+
+    const stored = await env.DB.prepare(
+      'SELECT body FROM federation_dlq_parked WHERE id = ?1',
+    ).bind('dlq-redacted-body').first<{ body: string }>();
+    expect(stored?.body).toBe(rawBody);
+  });
+
+  it('does not expose unstructured message bodies', async () => {
+    await insertDlqMessage('dlq-unstructured-body', 'parked', 'plain secret text');
+
+    const res = await SELF.fetch(`${BASE}/api/v1/admin/federation/dlq?status=parked&limit=200`, {
+      headers: authHeaders(adminToken),
+    });
+
+    expect(res.status).toBe(200);
+    const response = await res.json() as { items: Array<{ id: string; body: unknown }> };
+    expect(response.items.find((item) => item.id === 'dlq-unstructured-body')?.body).toBe('[REDACTED]');
   });
 
   it('discards only the selected parked messages', async () => {

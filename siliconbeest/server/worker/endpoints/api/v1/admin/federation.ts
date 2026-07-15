@@ -17,6 +17,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired, adminRequired } from '../../../../middleware/auth';
 import { AppError } from '../../../../middleware/errorHandler';
+import { redactDlqBodyForDisplay } from '../../../../utils/redactSensitive';
 import {
   listInstances,
   getInstance,
@@ -79,15 +80,10 @@ app.get('/dlq', async (c) => {
 
   return c.json({
     counts,
-    items: items.map((row) => {
-      let body: unknown = row.body;
-      try {
-        body = JSON.parse(row.body);
-      } catch {
-        // keep raw string if the stored body is not valid JSON
-      }
-      return { ...row, body };
-    }),
+    items: items.map((row) => ({
+      ...row,
+      body: redactDlqBodyForDisplay(row.body),
+    })),
   });
 });
 
