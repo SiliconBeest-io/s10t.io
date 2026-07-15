@@ -116,6 +116,9 @@ export async function handleFetchRemoteAccount(
   let canonicalDomain: string;
   try {
     canonicalDomain = new URL(id).hostname.toLowerCase();
+    if (!canonicalDomain) {
+      throw new Error('Canonical actor id has no hostname');
+    }
   } catch {
     console.warn(`Actor ${actorUri} has an invalid canonical id, dropping`);
     return;
@@ -201,6 +204,7 @@ export async function handleFetchRemoteAccount(
        ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now')
      )
      ON CONFLICT(uri) DO UPDATE SET
+       domain = excluded.domain,
        display_name = excluded.display_name,
        note = excluded.note,
        url = excluded.url,
