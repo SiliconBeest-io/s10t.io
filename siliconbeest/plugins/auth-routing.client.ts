@@ -17,6 +17,7 @@ const AUTH_ONLY_PREFIXES = [
   '/follow-requests',
   '/followed_tags',
   '/settings',
+  '/invitations',
 ];
 
 const ADMIN_PREFIXES = ['/admin'];
