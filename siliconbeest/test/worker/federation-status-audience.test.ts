@@ -287,4 +287,24 @@ describe('status federation audience resolver', () => {
 			[sharedInbox],
 		)).resolves.toEqual(new Set([sharedInbox]));
 	});
+
+	it('uses both inbox indexes for batched delivery identity lookups', async () => {
+		const { results } = await env.DB.prepare(
+			`EXPLAIN QUERY PLAN
+			 WITH requested(inbox_url) AS (VALUES (?1), (?2))
+			 SELECT DISTINCT requested.inbox_url, accounts.domain
+			 FROM requested
+			 JOIN accounts
+			   ON accounts.inbox_url = requested.inbox_url
+			   OR accounts.shared_inbox_url = requested.inbox_url
+			 WHERE accounts.domain IS NOT NULL`,
+		).bind(
+			'https://delivery-one.example/inbox',
+			'https://delivery-two.example/inbox',
+		).all<{ detail: string }>();
+
+		const plan = (results ?? []).map((row) => row.detail).join('\n');
+		expect(plan).toContain('idx_accounts_inbox_url');
+		expect(plan).toContain('idx_accounts_shared_inbox_url');
+	});
 });

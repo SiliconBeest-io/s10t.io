@@ -87,6 +87,22 @@ export async function handleFetchRemoteStatus(
     return;
   }
 
+  let authorDomain: string;
+  try {
+    authorDomain = new URL(authorUri).hostname.toLowerCase();
+  } catch {
+    console.warn(`Status ${statusUri} has an invalid attributedTo URL, dropping`);
+    return;
+  }
+
+  const suspendedAuthorDomains = await getSuspendedDomains(env.DB, [authorDomain]);
+  if (suspendedAuthorDomains.has(authorDomain)) {
+    console.log(
+      `[remote-status] Skipping status ${statusUri} attributed to suspended domain ${authorDomain}`,
+    );
+    return;
+  }
+
   // Resolve author account — check if we know them
   let authorAccountId: string | null = null;
   const authorRow = await env.DB.prepare(
@@ -106,7 +122,6 @@ export async function handleFetchRemoteStatus(
     });
     // We still need an account_id — create a placeholder
     authorAccountId = crypto.randomUUID();
-    const authorDomain = new URL(authorUri).hostname;
     await env.DB.prepare(
       `INSERT OR IGNORE INTO accounts (id, username, domain, uri, created_at, updated_at)
        VALUES (?, '', ?, ?, datetime('now'), datetime('now'))`,

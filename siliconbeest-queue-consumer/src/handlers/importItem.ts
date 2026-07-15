@@ -137,6 +137,15 @@ export async function handleImportItem(
 
   switch (action) {
     case 'following': {
+      if (targetAccount.domain) {
+        const targetDomain = targetAccount.domain.toLowerCase();
+        const suspendedDomains = await getSuspendedDomains(env.DB, [targetDomain]);
+        if (suspendedDomains.has(targetDomain)) {
+          console.log(`[import] Skipping follow import for suspended domain ${targetDomain}`);
+          return;
+        }
+      }
+
       // Check if already following or requested
       const existing = await env.DB.prepare(
         `SELECT id FROM follows WHERE account_id = ? AND target_account_id = ?`,

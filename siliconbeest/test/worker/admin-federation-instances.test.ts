@@ -1,5 +1,4 @@
-import { env } from 'cloudflare:workers';
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { applyMigration, authHeaders, createTestUser } from './helpers';
 
