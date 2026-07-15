@@ -3,6 +3,7 @@ import { generateUlid } from '../utils/ulid';
 import { AppError } from '../middleware/errorHandler';
 import type { AccountRow, FollowRequestRow } from '../types/db';
 import type { Relationship } from '../types/mastodon';
+import { toD1LikePattern } from '../utils/d1';
 import { canViewAccountRelationship } from '../../../../packages/shared/permissions';
 import {
 	assertAccountFeatureable,
@@ -327,7 +328,8 @@ export async function searchAccounts(
 	offset: number = 0,
 	options?: { followedBy?: string; viewerAccountId?: string },
 ): Promise<AccountRow[]> {
-	const searchTerm = `%${query}%`;
+	const searchTerm = toD1LikePattern(query);
+	if (searchTerm === null) return [];
 	const discovery = buildAccountSearchSqlPredicate(
 		'account',
 		options?.viewerAccountId ?? null,

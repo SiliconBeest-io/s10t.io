@@ -85,8 +85,8 @@ class UpdateProcessor extends BaseProcessor {
 			return;
 		}
 
-		// Handle Note or Question update
-		if (obj.type === 'Note' || obj.type === 'Question') {
+		// Handle Article, Note, or Question update
+		if (obj.type === 'Article' || obj.type === 'Note' || obj.type === 'Question') {
 			if (!obj.id) {
 				console.warn(`[update] ${obj.type} has no id`);
 				return;

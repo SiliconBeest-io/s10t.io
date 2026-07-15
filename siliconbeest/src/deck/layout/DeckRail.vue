@@ -130,7 +130,10 @@ function isRouteActive(path: string): boolean {
 
 <template>
   <nav
-    class="dk-hairline-r w-[78px] flex-none flex-col items-center gap-1.5 px-2.5 py-3.5"
+    class="dk-hairline-r min-h-0 w-[78px] flex-none flex-col items-center gap-1.5 px-2.5 py-3.5"
+    :class="showColumnConfig || showMore || showAccount
+      ? 'overflow-visible'
+      : 'overflow-x-hidden overflow-y-auto overscroll-y-contain'"
     :aria-label="t('nav.main_navigation')"
   >
     <!-- Deck (multi-column) + column configuration -->

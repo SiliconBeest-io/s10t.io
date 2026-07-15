@@ -1,7 +1,7 @@
 /**
- * Inbox Processor: Create(Note | Question)
+ * Inbox Processor: Create(Article | Note | Question)
  *
- * Handles incoming Create activities containing a Note or Question object.
+ * Handles incoming Create activities containing an Article, Note, or Question object.
  * Inserts the remote status, resolves the author account, processes
  * mentions, and fans out to local followers' timelines.
  * For Question objects (polls), also extracts poll options and metadata.
@@ -119,8 +119,8 @@ class CreateProcessor extends BaseProcessor {
 		}
 
 		const note = object as APObject;
-		if (note.type !== 'Note' && note.type !== 'Question') {
-			console.log(`[create] Ignoring non-Note object type: ${note.type}`);
+		if (note.type !== 'Article' && note.type !== 'Note' && note.type !== 'Question') {
+			console.log(`[create] Ignoring unsupported status object type: ${note.type}`);
 			return false;
 		}
 

@@ -47,4 +47,14 @@ describe('DeckRail', () => {
     expect(mobile.get('#deck-column-picker-button').attributes('aria-describedby'))
       .toBeUndefined();
   });
+
+  it('allows the desktop rail to scroll when the viewport is too short', async () => {
+    const rail = await mountRail(false);
+
+    expect(rail.classes()).toEqual(expect.arrayContaining([
+      'min-h-0',
+      'overflow-y-auto',
+      'overscroll-y-contain',
+    ]));
+  });
 });

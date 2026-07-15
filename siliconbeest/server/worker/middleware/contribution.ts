@@ -91,17 +91,28 @@ export const contributionMiddleware = createMiddleware<MiddlewareEnv>(async (c, 
 	// not enough evidence and would let repeated no-op requests farm points.
 	if (event === 'generic_mutation' && c.get('contributionApplied') !== true) return;
 
+	const record = recordContributionEvent(currentUser.account_id, event, {
+		requestId: c.get('requestId'),
+		method,
+		path,
+	}).then(
+		() => undefined,
+		(error: unknown) => {
+			console.error('Unable to record contribution event', {
+				event,
+				accountId: currentUser.account_id,
+				error,
+			});
+		},
+	);
+
 	try {
-		await recordContributionEvent(currentUser.account_id, event, {
-			requestId: c.get('requestId'),
-			method,
-			path,
-		});
-	} catch (error) {
-		console.error('Unable to record contribution event', {
-			event,
-			accountId: currentUser.account_id,
-			error,
-		});
+		// Contribution scoring does not affect the API response. Keep the Worker
+		// alive for the D1 writes without adding them to the request latency.
+		c.executionCtx.waitUntil(record);
+	} catch {
+		// Hono can be invoked without an ExecutionContext in local/test harnesses.
+		// Preserve reliable scoring there instead of leaving a floating promise.
+		await record;
 	}
 });

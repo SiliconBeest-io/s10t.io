@@ -14,10 +14,11 @@ import {
 } from '../../../services/permissions';
 import { generateUlid } from '../../../utils/ulid';
 import { getFedifyContext } from '../../../federation/helpers/send';
-import { isActor, Note, Question } from '@fedify/fedify/vocab';
+import { Article, isActor, Note, Question } from '@fedify/fedify/vocab';
 import { pickSignerUsername } from '../../../../../../packages/shared/services/signer';
 import { processCreate } from '../../../federation/inboxProcessors/create';
 import { resolveRemoteAccount } from '../../../federation/resolveRemoteAccount';
+import { toD1LikePattern } from '../../../utils/d1';
 import type { AccountRow, StatusRow, TagRow } from '../../../types/db';
 import type { APActivity, APObject } from '../../../types/activitypub';
 import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../../packages/shared/utils/quotePolicy';
@@ -75,14 +76,24 @@ function idsFrom(value: unknown): string[] {
   return [];
 }
 
-function normalizeApObject(jsonLd: unknown, fallbackId: string, fallbackType: 'Note' | 'Question'): APObject {
+function normalizeApObject(
+  jsonLd: unknown,
+  fallbackId: string,
+  fallbackType: 'Article' | 'Note' | 'Question',
+): APObject {
   const obj = { ...(jsonLd as Record<string, unknown>) };
   if (typeof obj.id !== 'string') {
     obj.id = typeof obj['@id'] === 'string' ? obj['@id'] : fallbackId;
   }
   if (typeof obj.type !== 'string') {
     const typeId = typeof obj['@type'] === 'string' ? obj['@type'] : '';
-    obj.type = typeId.endsWith('#Question') || typeId.endsWith('/Question') ? 'Question' : fallbackType;
+    if (typeId.endsWith('#Article') || typeId.endsWith('/Article')) {
+      obj.type = 'Article';
+    } else if (typeId.endsWith('#Question') || typeId.endsWith('/Question')) {
+      obj.type = 'Question';
+    } else {
+      obj.type = fallbackType;
+    }
   }
   return obj as APObject;
 }
@@ -236,17 +247,25 @@ async function resolveRemoteStatusFromUrl(
     return existingVisible ? existing?.id ?? null : null;
   }
 
-  const isStatusObject = remoteObject instanceof Note || remoteObject instanceof Question
-    || (remoteObject && typeof remoteObject === 'object' && ['Note', 'Question'].includes((remoteObject as { constructor?: { name?: string } }).constructor?.name ?? ''));
+  const isStatusObject = remoteObject instanceof Article
+    || remoteObject instanceof Note
+    || remoteObject instanceof Question
+    || (remoteObject && typeof remoteObject === 'object'
+      && ['Article', 'Note', 'Question'].includes(
+        (remoteObject as { constructor?: { name?: string } }).constructor?.name ?? '',
+      ));
   if (!isStatusObject) return existingVisible ? existing?.id ?? null : null;
 
-  const statusObject = remoteObject as Note | Question;
+  const statusObject = remoteObject as Article | Note | Question;
   const objectId = statusObject.id?.href;
   if (!objectId) return existingVisible ? existing?.id ?? null : null;
 
-  const fallbackType = remoteObject instanceof Question || (remoteObject as { constructor?: { name?: string } }).constructor?.name === 'Question'
-    ? 'Question'
-    : 'Note';
+  const constructorName = (remoteObject as { constructor?: { name?: string } }).constructor?.name;
+  const fallbackType = remoteObject instanceof Article || constructorName === 'Article'
+    ? 'Article'
+    : remoteObject instanceof Question || constructorName === 'Question'
+      ? 'Question'
+      : 'Note';
   const jsonLd = await statusObject.toJsonLd({ contextLoader: docLoader });
   const object = normalizeApObject(jsonLd, objectId, fallbackType);
   const actor = statusObject.attributionId?.href ?? idsFrom((object as Record<string, unknown>).attributedTo)[0];
@@ -374,10 +393,10 @@ app.get('/', authOptional, async (c) => {
 
   // Strip leading @ for account username search (DB stores "admin" not "@admin")
   const normalizedQ = q.replace(/^@/, '');
-  const searchTerm = `%${normalizedQ}%`;
+  const searchTerm = toD1LikePattern(normalizedQ);
 
   // Search accounts
-  if (!type || type === 'accounts') {
+  if (((!type && !urlQuery) || type === 'accounts') && searchTerm !== null) {
     const accountPermission = buildAccountSearchSqlPredicate(
       'account',
       currentAccount?.id ?? null,
@@ -631,7 +650,7 @@ app.get('/', authOptional, async (c) => {
         );
         if (resolvedRow) statusRows.push(resolvedRow);
       }
-    } else {
+    } else if (searchTerm !== null) {
       const permissionNow = new Date().toISOString();
       const visibility = buildStatusVisibilitySqlPredicate(
         'status',
@@ -751,7 +770,7 @@ app.get('/', authOptional, async (c) => {
   }
 
   // Search hashtags
-  if (!type || type === 'hashtags') {
+  if (((!type && !urlQuery) || type === 'hashtags') && searchTerm !== null) {
     const { results } = await env.DB.prepare(`
       SELECT * FROM tags
       WHERE name LIKE ?1

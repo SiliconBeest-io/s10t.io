@@ -1,5 +1,11 @@
-import { env, SELF } from 'cloudflare:test';
+import {
+	createExecutionContext,
+	env,
+	SELF,
+	waitOnExecutionContext,
+} from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import app from '../../server/worker/index';
 import {
 	adjustContributionScore,
 	reconcileContributionAwards,
@@ -25,6 +31,16 @@ type AuditRow = {
 };
 
 const BASE = 'https://test.siliconbeest.local';
+
+async function fetchAndWaitForBackground(
+	input: RequestInfo | URL,
+	init?: RequestInit,
+): Promise<Response> {
+	const context = createExecutionContext();
+	const response = await app.fetch(new Request(input, init), env, context);
+	await waitOnExecutionContext(context);
+	return response;
+}
 
 async function setContributionSettings(entries: Readonly<Record<string, string>>): Promise<void> {
 	const now = new Date().toISOString();
@@ -295,7 +311,7 @@ describe('contribution scoring', () => {
 			invite_contribution_points_list_create: '10',
 		});
 
-		const successful = await SELF.fetch(`${BASE}/api/v1/lists`, {
+		const successful = await fetchAndWaitForBackground(`${BASE}/api/v1/lists`, {
 			method: 'POST',
 			headers: authHeaders(member.token),
 			body: JSON.stringify({ title: 'Contributors' }),
@@ -303,7 +319,7 @@ describe('contribution scoring', () => {
 		expect(successful.status).toBe(200);
 		expect(await getBalance(member.accountId)).toMatchObject({ contribution_score: 10 });
 
-		const failed = await SELF.fetch(`${BASE}/api/v1/lists`, {
+		const failed = await fetchAndWaitForBackground(`${BASE}/api/v1/lists`, {
 			method: 'POST',
 			headers: authHeaders(member.token),
 			body: JSON.stringify({}),
@@ -320,7 +336,7 @@ describe('contribution scoring', () => {
 			invite_contribution_points_status_reblog: '10',
 			invite_contribution_points_status_bookmark: '10',
 		});
-		const created = await SELF.fetch(`${BASE}/api/v1/statuses`, {
+		const created = await fetchAndWaitForBackground(`${BASE}/api/v1/statuses`, {
 			method: 'POST',
 			headers: authHeaders(reportTarget.token),
 			body: JSON.stringify({ status: 'A contribution idempotency target', visibility: 'public' }),
@@ -333,12 +349,12 @@ describe('contribution scoring', () => {
 			`/api/v1/statuses/${status.id}/bookmark`,
 		];
 		for (const path of paths) {
-			const first = await SELF.fetch(`${BASE}${path}`, {
+			const first = await fetchAndWaitForBackground(`${BASE}${path}`, {
 				method: 'POST',
 				headers: authHeaders(member.token),
 			});
 			expect(first.status).toBe(200);
-			const repeated = await SELF.fetch(`${BASE}${path}`, {
+			const repeated = await fetchAndWaitForBackground(`${BASE}${path}`, {
 				method: 'POST',
 				headers: authHeaders(member.token),
 			});
@@ -360,7 +376,7 @@ describe('contribution scoring', () => {
 			"DELETE FROM user_preferences WHERE user_id = ?1 AND key = 'ui:columns'",
 		).bind(member.userId).run();
 
-		const request = () => SELF.fetch(`${BASE}/api/v1/preferences`, {
+		const request = () => fetchAndWaitForBackground(`${BASE}/api/v1/preferences`, {
 			method: 'PATCH',
 			headers: authHeaders(member.token),
 			body: JSON.stringify({ 'ui:columns': 'advanced' }),
@@ -379,7 +395,7 @@ describe('contribution scoring', () => {
 			invite_contribution_enabled: '1',
 			invite_contribution_points_generic_mutation: '10',
 		});
-		const created = await SELF.fetch(`${BASE}/api/v1/lists`, {
+		const created = await fetchAndWaitForBackground(`${BASE}/api/v1/lists`, {
 			method: 'POST',
 			headers: authHeaders(member.token),
 			body: JSON.stringify({ title: 'Generic mutation guard' }),
@@ -388,7 +404,7 @@ describe('contribution scoring', () => {
 		const list = await created.json<{ id: string }>();
 
 		for (const title of ['Generic mutation guard', 'Updated title', 'Updated title']) {
-			const response = await SELF.fetch(`${BASE}/api/v1/lists/${list.id}`, {
+			const response = await fetchAndWaitForBackground(`${BASE}/api/v1/lists/${list.id}`, {
 				method: 'PUT',
 				headers: authHeaders(member.token),
 				body: JSON.stringify({ title }),
@@ -422,7 +438,7 @@ describe('contribution scoring', () => {
 		).run();
 
 		for (const policy of ['all', 'none', 'none']) {
-			const response = await SELF.fetch(`${BASE}/api/v1/push/subscription`, {
+			const response = await fetchAndWaitForBackground(`${BASE}/api/v1/push/subscription`, {
 				method: 'PUT',
 				headers: authHeaders(member.token),
 				body: JSON.stringify({ data: { policy } }),
