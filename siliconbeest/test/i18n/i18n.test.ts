@@ -112,6 +112,28 @@ describe('i18n', () => {
         expect(messages.invitation_guide.audit_admin).toBeTruthy();
       }
     });
+
+    it('renders account handles without treating @ as linked-message syntax', () => {
+      const locales = { en, ko, ja, 'zh-CN': zhCN, 'zh-TW': zhTW };
+      const i18n = createI18n({
+        legacy: false,
+        locale: 'en',
+        fallbackLocale: 'en',
+        messages: locales,
+        missingWarn: false,
+        fallbackWarn: false,
+      });
+
+      for (const locale of Object.keys(locales)) {
+        i18n.global.locale.value = locale;
+        expect(i18n.global.t('auth.registration_confirmation_description', {
+          username: 'alice',
+        })).toContain('@alice');
+        expect(i18n.global.t('admin_invitation_credits.adjust_account', {
+          username: 'alice',
+        })).toContain('@alice');
+      }
+    });
   });
 
   describe('Fallback behavior', () => {
