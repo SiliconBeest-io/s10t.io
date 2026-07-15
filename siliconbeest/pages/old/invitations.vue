@@ -7,7 +7,7 @@ definePageMeta({ name: 'old-invitations' })
 
 <template>
   <AppShell>
-    <main class="mx-auto w-full max-w-4xl px-4 py-6">
+    <main class="mx-auto min-h-full w-full max-w-4xl px-4 py-6">
       <SettingsInvitationsView />
     </main>
   </AppShell>

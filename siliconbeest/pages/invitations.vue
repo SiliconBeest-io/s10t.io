@@ -7,7 +7,7 @@ definePageMeta({ name: 'invitations' })
 
 <template>
   <DeckPageShell width="wide">
-    <div class="px-3 py-4 md:px-0">
+    <div class="min-h-full px-3 py-4 md:px-0">
       <SettingsInvitationsView />
     </div>
   </DeckPageShell>
