@@ -4,15 +4,20 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { parsePaginationParams, buildLinkHeader } from '../../../../utils/pagination';
 import { serializeAccount, serializeStatus } from '../../../../utils/mastodonSerializer';
 import { enrichStatuses } from '../../../../utils/statusEnrichment';
 import { getSocialTimeline } from '../../../../services/timeline';
+import {
+  buildStatusRelationshipSqlPredicate,
+  buildStatusVisibilitySqlPredicate,
+} from '../../../../services/permissions';
 import type { AccountRow, StatusRow } from '../../../../types/db';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
   const account = c.get('currentAccount')!;
   const pag = parsePaginationParams({
     max_id: c.req.query('max_id'),
@@ -44,6 +49,12 @@ app.get('/', authRequired, async (c) => {
   const reblogMap = new Map<string, any>();
   if (uniqueReblogIds.length > 0) {
     const ph = uniqueReblogIds.map(() => '?').join(',');
+    const reblogVisibility = buildStatusVisibilitySqlPredicate('status', account.id);
+    const reblogRelationship = buildStatusRelationshipSqlPredicate(
+      'status',
+      account.id,
+      new Date().toISOString(),
+    );
     const { results: reblogResults } = await env.DB.prepare(
       `SELECT s.*, a.id AS a_id, a.username AS a_username, a.domain AS a_domain,
               a.display_name AS a_display_name, a.note AS a_note, a.uri AS a_uri,
@@ -56,8 +67,14 @@ app.get('/', authRequired, async (c) => {
               a.memorial AS a_memorial, a.moved_to_account_id AS a_moved_to_account_id,
            a.emoji_tags AS a_emoji_tags
        FROM statuses s JOIN accounts a ON a.id = s.account_id
-       WHERE s.id IN (${ph}) AND s.deleted_at IS NULL`,
-    ).bind(...uniqueReblogIds).all();
+       WHERE s.id IN (${ph})
+         AND ${reblogVisibility.sql}
+         AND ${reblogRelationship.sql}`,
+    ).bind(
+      ...uniqueReblogIds,
+      ...reblogVisibility.bindings,
+      ...reblogRelationship.bindings,
+    ).all();
 
     for (const rr of (reblogResults ?? []) as Record<string, unknown>[]) {
       const origAccountRow: AccountRow = {

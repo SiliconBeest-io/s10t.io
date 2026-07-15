@@ -9,6 +9,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import {
 	getFollowingForExport,
 	getFollowersForExport,
@@ -48,7 +49,7 @@ function csvResponse(body: string): Response {
 // GET /following.csv
 // ---------------------------------------------------------------------------
 
-app.get('/following.csv', authRequired, async (c) => {
+app.get('/following.csv', authRequired, requireScope('read:follows'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getFollowingForExport(account.id);
   const rows = results.map((r) => `${formatAcct(r.username, r.domain)},true`);
@@ -59,7 +60,7 @@ app.get('/following.csv', authRequired, async (c) => {
 // GET /followers.csv
 // ---------------------------------------------------------------------------
 
-app.get('/followers.csv', authRequired, async (c) => {
+app.get('/followers.csv', authRequired, requireScope('read:follows'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getFollowersForExport(account.id);
   const rows = results.map((r) => formatAcct(r.username, r.domain));
@@ -70,7 +71,7 @@ app.get('/followers.csv', authRequired, async (c) => {
 // GET /blocks.csv
 // ---------------------------------------------------------------------------
 
-app.get('/blocks.csv', authRequired, async (c) => {
+app.get('/blocks.csv', authRequired, requireScope('read:blocks'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getBlocksForExport(account.id);
   const rows = results.map((r) => formatAcct(r.username, r.domain));
@@ -81,7 +82,7 @@ app.get('/blocks.csv', authRequired, async (c) => {
 // GET /mutes.csv
 // ---------------------------------------------------------------------------
 
-app.get('/mutes.csv', authRequired, async (c) => {
+app.get('/mutes.csv', authRequired, requireScope('read:mutes'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getMutesForExport(account.id);
   const rows = results.map((r) => formatAcct(r.username, r.domain));
@@ -92,7 +93,7 @@ app.get('/mutes.csv', authRequired, async (c) => {
 // GET /bookmarks.csv
 // ---------------------------------------------------------------------------
 
-app.get('/bookmarks.csv', authRequired, async (c) => {
+app.get('/bookmarks.csv', authRequired, requireScope('read:bookmarks'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getBookmarksForExport(account.id);
   return csvResponse(`${results.join('\n')}\n`);
@@ -102,7 +103,7 @@ app.get('/bookmarks.csv', authRequired, async (c) => {
 // GET /lists.csv
 // ---------------------------------------------------------------------------
 
-app.get('/lists.csv', authRequired, async (c) => {
+app.get('/lists.csv', authRequired, requireScope('read:lists'), async (c) => {
   const account = c.get('currentAccount')!;
   const results = await getListsForExport(account.id);
   const rows = results.map((r) => `${r.title},${formatAcct(r.username, r.domain)}`);

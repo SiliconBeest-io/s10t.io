@@ -20,6 +20,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { resolveRemoteAccount } from '../../../../federation/resolveRemoteAccount';
 import { sendToFollowers, getFedifyContext } from '../../../../federation/helpers/send';
 import { isActor } from '@fedify/fedify/vocab';
@@ -29,7 +30,7 @@ import { getAccountUri, setMovedTo } from '../../../../services/account';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.post('/migration', authRequired, async (c) => {
+app.post('/migration', authRequired, requireScope('write:accounts'), async (c) => {
 	const currentUser = c.get('currentUser')!;
 	const accountId = currentUser.account_id;
 	const domain = env.INSTANCE_DOMAIN;

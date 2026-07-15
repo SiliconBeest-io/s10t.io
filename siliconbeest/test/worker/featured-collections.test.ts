@@ -35,29 +35,55 @@ describe('Featured Collections (ActivityPub)', () => {
       // Fedify omits orderedItems when empty (no items to show)
     });
 
-    it('includes pinned statuses in the collection', async () => {
-      // Create a status and pin it
+    it('includes only public pinned statuses in the unsigned collection', async () => {
       const createRes = await SELF.fetch(`${BASE}/api/v1/statuses`, {
         method: 'POST',
         headers: authHeaders(user.token),
         body: JSON.stringify({ status: 'This is a pinned post!', visibility: 'public' }),
       });
       expect(createRes.status).toBe(200);
-      const status = await createRes.json<Record<string, any>>();
+      const status = await createRes.json<{ id: string }>();
 
-      // Pin the status directly in DB
-      await env.DB.prepare('UPDATE statuses SET pinned = 1 WHERE id = ?1').bind(status.id).run();
+      const privateRes = await SELF.fetch(`${BASE}/api/v1/statuses`, {
+        method: 'POST',
+        headers: authHeaders(user.token),
+        body: JSON.stringify({ status: 'private pinned secret', visibility: 'private' }),
+      });
+      expect(privateRes.status).toBe(200);
+      const privateStatus = await privateRes.json<{ id: string }>();
+      const privatePin = await SELF.fetch(
+        `${BASE}/api/v1/statuses/${privateStatus.id}/pin`,
+        { method: 'POST', headers: authHeaders(user.token) },
+      );
+      expect(privatePin.status).toBe(200);
+
+      const directRes = await SELF.fetch(`${BASE}/api/v1/statuses`, {
+        method: 'POST',
+        headers: authHeaders(user.token),
+        body: JSON.stringify({ status: 'direct pinned secret', visibility: 'direct' }),
+      });
+      expect(directRes.status).toBe(200);
+      const directStatus = await directRes.json<{ id: string }>();
+
+      // Direct pins are invalid now, but legacy rows must also fail closed.
+      await env.DB.prepare(
+        'UPDATE statuses SET pinned = 1 WHERE id IN (?1, ?2)',
+      ).bind(status.id, directStatus.id).run();
 
       const res = await SELF.fetch(`${BASE}/users/featureduser/collections/featured`, {
         headers: { Accept: 'application/activity+json' },
       });
 
       expect(res.status).toBe(200);
-      const body = await res.json<Record<string, any>>();
+      const body = await res.json<{
+        orderedItems: Array<{ type: string; content: string }>;
+      }>();
 
       expect(body.orderedItems.length).toBe(1);
       expect(body.orderedItems[0].type).toBe('Note');
       expect(body.orderedItems[0].content).toContain('pinned post');
+      expect(JSON.stringify(body)).not.toContain('private pinned secret');
+      expect(JSON.stringify(body)).not.toContain('direct pinned secret');
     });
 
     it('returns 404 for unknown user', async () => {

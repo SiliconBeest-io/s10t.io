@@ -11,6 +11,7 @@ import type { APActivity } from '../../types/activitypub';
 import { generateUlid } from '../../utils/ulid';
 import { buildAcceptActivity } from '../helpers/build-activity';
 import { BaseProcessor } from './BaseProcessor';
+import { canReceiveIncomingFollow } from '../../services/permissions';
 
 class FollowProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -32,6 +33,18 @@ class FollowProcessor extends BaseProcessor {
 		const followerAccountId = await this.resolveActor(activity.actor);
 		if (!followerAccountId) {
 			console.error('[follow] Could not resolve remote follower');
+			return;
+		}
+
+		const recipientAccountId = this.recipientAccountId === ''
+			? null
+			: this.recipientAccountId;
+		if (!await canReceiveIncomingFollow(
+			followerAccountId,
+			targetAccount.id,
+			recipientAccountId,
+		)) {
+			console.warn('[follow] Follow permission denied');
 			return;
 		}
 

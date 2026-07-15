@@ -21,10 +21,6 @@ app.post('/:id/unpin', authRequired, requireScope('write:accounts'), async (c) =
   ).bind(statusId).first();
   if (!row) throw new AppError(404, 'Record not found');
 
-  if ((row as Record<string, unknown>).account_id !== currentAccountId) {
-    throw new AppError(403, 'Forbidden', 'You can only unpin your own statuses');
-  }
-
   await unpinStatus(currentAccountId, statusId);
 
   const status = await serializeStatusEnriched(row as Record<string, unknown>, domain, currentAccountId, env.CACHE);

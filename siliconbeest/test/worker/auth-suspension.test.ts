@@ -41,6 +41,37 @@ describe('Auth middleware — suspension & disabled checks', () => {
     expect(res.status).toBe(401);
   });
 
+  it('returns 401 for a memorial account', async () => {
+    const { accountId, token } = await createTestUser('memorial_user');
+    const activeResponse = await SELF.fetch(`${BASE}/api/v1/accounts/verify_credentials`, {
+      headers: authHeaders(token),
+    });
+    expect(activeResponse.status).toBe(200);
+
+    await env.DB.prepare('UPDATE accounts SET memorial = 1 WHERE id = ?1')
+      .bind(accountId)
+      .run();
+
+    const res = await SELF.fetch(`${BASE}/api/v1/accounts/verify_credentials`, {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for a pending, unapproved user even with an existing token', async () => {
+    const { userId, token } = await createTestUser('pending_token_user');
+    await env.DB.prepare('UPDATE users SET approved = 0 WHERE id = ?1')
+      .bind(userId)
+      .run();
+
+    const res = await SELF.fetch(`${BASE}/api/v1/accounts/verify_credentials`, {
+      headers: authHeaders(token),
+    });
+
+    expect(res.status).toBe(401);
+  });
+
   it('still allows a normal, active user', async () => {
     const { token } = await createTestUser('active_user');
 

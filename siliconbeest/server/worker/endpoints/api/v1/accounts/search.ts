@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { searchAccounts } from '../../../../services/account';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 
@@ -9,7 +10,7 @@ type HonoEnv = { Variables: AppVariables };
 
 const app = new Hono<HonoEnv>();
 
-app.get('/search', authRequired, async (c) => {
+app.get('/search', authRequired, requireScope('read:accounts'), async (c) => {
   const query = c.req.query();
   const q = (query.q || '').trim();
   const limit = Math.min(parseInt(query.limit || '40', 10) || 40, 80);
@@ -19,7 +20,10 @@ app.get('/search', authRequired, async (c) => {
 
   if (!q) return c.json([]);
 
-  const results = await searchAccounts(q, limit, 0, following ? { followedBy: currentAccountId } : undefined);
+  const results = await searchAccounts(q, limit, 0, {
+    viewerAccountId: currentAccountId,
+    ...(following ? { followedBy: currentAccountId } : {}),
+  });
 
   const accounts = results.map((row) => {
     const acct = row.domain ? `${row.username}@${row.domain}` : (row.username as string);
@@ -47,6 +51,8 @@ app.get('/search', authRequired, async (c) => {
       following_count: (row.following_count as number) || 0,
       statuses_count: (row.statuses_count as number) || 0,
       last_status_at: (row.last_status_at as string) || null,
+      ...(row.silenced_at ? { limited: true } : {}),
+      ...(row.memorial ? { memorial: true } : {}),
       emojis,
       fields: [],
     };

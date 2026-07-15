@@ -10,6 +10,8 @@ const baseProps = {
   favourited: false,
   reblogged: false,
   bookmarked: false,
+  accountCanAct: true,
+  visibility: 'public',
   quotePolicyAllows: true,
 };
 
@@ -84,5 +86,27 @@ describe('DeckStatusActions', () => {
     expect(repost.attributes('disabled')).toBeDefined();
     await repost.trigger('click');
     expect(wrapper.emitted('reblog')).toBeFalsy();
+  });
+
+  it('keeps private-owner quote available when the API permits it', async () => {
+    const wrapper = mountWithPlugins(DeckStatusActions, {
+      props: { ...baseProps, isOwnStatus: true, visibility: 'private' },
+    });
+    await wrapper.findAll('button')[1]!.trigger('click');
+    expect(buttonByText(wrapper, 'Boost')!.attributes('disabled')).toBeDefined();
+    expect(buttonByText(wrapper, 'Quote')!.attributes('disabled')).toBeUndefined();
+  });
+
+  it('does not offer authenticated actions to a logged-out viewer', () => {
+    const wrapper = mountWithPlugins(DeckStatusActions, {
+      props: { ...baseProps, accountCanAct: false },
+    });
+    const buttons = wrapper.findAll('button');
+    expect(buttons).toHaveLength(4);
+    expect(buttons[0]!.attributes('disabled')).toBeDefined();
+    expect(buttons[1]!.attributes('disabled')).toBeDefined();
+    expect(buttons[2]!.attributes('disabled')).toBeDefined();
+    // The final menu remains because sharing a public post is anonymous-safe.
+    expect(buttons[3]!.attributes('disabled')).toBeUndefined();
   });
 });

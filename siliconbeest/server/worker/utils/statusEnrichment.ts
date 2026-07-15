@@ -11,6 +11,11 @@ import { serializeAccount, serializeMediaAttachment, serializePoll, serializeSta
 import type { AccountRow, MediaAttachmentRow, PollRow, StatusRow } from '../types/db';
 import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 import { AS_PUBLIC } from '../../../../packages/shared/utils/quotePolicy';
+import { canEmbedQuote } from '../../../../packages/shared/permissions';
+import {
+  buildStatusRelationshipSqlPredicate,
+  buildStatusVisibilitySqlPredicate,
+} from '../services/permissions';
 
 export type MentionInfo = {
   id: string;
@@ -106,6 +111,15 @@ export async function enrichStatuses(
 
   const placeholders = statusIds.map(() => '?').join(',');
   const result = new Map<string, StatusEnrichment>();
+  const quoteVisibility = buildStatusVisibilitySqlPredicate(
+    'quoted_status',
+    currentAccountId ?? null,
+  );
+  const quoteRelationship = buildStatusRelationshipSqlPredicate(
+    'quoted_status',
+    currentAccountId ?? null,
+    new Date().toISOString(),
+  );
 
   // Initialize all entries
   for (const id of statusIds) {
@@ -450,6 +464,8 @@ export async function enrichStatuses(
     env.DB
       .prepare(
         `SELECT owner.id AS owner_status_id,
+                owner.quote_id AS owner_quote_id,
+                owner.quote_approval_status AS owner_quote_approval_status,
                 qs.*,
                 a.id AS account_id, a.username, a.domain, a.display_name, a.note, a.uri AS account_uri,
                 a.url AS account_url, a.avatar_url, a.avatar_static_url, a.header_url, a.header_static_url,
@@ -460,14 +476,24 @@ export async function enrichStatuses(
          FROM statuses owner
          JOIN statuses qs ON qs.id = owner.quote_id AND qs.deleted_at IS NULL
          JOIN accounts a ON a.id = qs.account_id
-         WHERE owner.id IN (${placeholders})`,
+         WHERE owner.id IN (${placeholders})
+           AND ${quoteVisibility.sql}
+           AND ${quoteRelationship.sql}`,
       )
-      .bind(...statusIds)
+      .bind(
+        ...statusIds,
+        ...quoteVisibility.bindings,
+        ...quoteRelationship.bindings,
+      )
       .all<Record<string, unknown>>()
       .then(({ results }) => {
         for (const row of results ?? []) {
           const entry = result.get(row.owner_status_id as string);
           if (!entry) continue;
+          if (!canEmbedQuote({
+            quoteStatusId: row.owner_quote_id as string | null,
+            quoteApprovalStatus: row.owner_quote_approval_status as string | null,
+          })) continue;
           const accountRow: AccountRow = {
             id: row.account_id as string,
             username: row.username as string,

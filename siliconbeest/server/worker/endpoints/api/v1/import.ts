@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 
 type HonoEnv = { Variables: AppVariables };
@@ -19,7 +20,7 @@ const app = new Hono<HonoEnv>();
 // POST /api/v1/import
 // ---------------------------------------------------------------------------
 
-app.post('/', authRequired, async (c) => {
+app.post('/', authRequired, requireScope('write'), async (c) => {
   const account = c.get('currentAccount')!;
 
   const formData = await c.req.formData();

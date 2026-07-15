@@ -1,8 +1,16 @@
 import { env } from 'cloudflare:workers';
 import { generateUlid } from '../utils/ulid';
 import { AppError } from '../middleware/errorHandler';
-import type { AccountRow, FollowRow, FollowRequestRow, BlockRow, MuteRow } from '../types/db';
+import type { AccountRow, FollowRequestRow } from '../types/db';
 import type { Relationship } from '../types/mastodon';
+import { canViewAccountRelationship } from '../../../../packages/shared/permissions';
+import {
+	assertAccountFeatureable,
+	assertAccountRelationshipMutable,
+	assertFollowRequestActionable,
+	buildActionableFollowRequestSqlPredicate,
+	buildAccountSearchSqlPredicate,
+} from './permissions';
 
 // ----------------------------------------------------------------
 // Get account by ID
@@ -95,88 +103,189 @@ export async function updateProfile(
 // Get relationship between two accounts
 // ----------------------------------------------------------------
 
-export async function getRelationship(accountId: string, targetId: string): Promise<Relationship> {
-	const [follow, followedBy, followReq, followReqBy, block, blockedBy, mute, targetAccount] = await Promise.all([
-		env.DB
-			.prepare('SELECT * FROM follows WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(accountId, targetId)
-			.first() as Promise<FollowRow | null>,
-		env.DB
-			.prepare('SELECT * FROM follows WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(targetId, accountId)
-			.first() as Promise<FollowRow | null>,
-		env.DB
-			.prepare('SELECT * FROM follow_requests WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(accountId, targetId)
-			.first() as Promise<FollowRequestRow | null>,
-		env.DB
-			.prepare('SELECT * FROM follow_requests WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(targetId, accountId)
-			.first() as Promise<FollowRequestRow | null>,
-		env.DB
-			.prepare('SELECT * FROM blocks WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(accountId, targetId)
-			.first() as Promise<BlockRow | null>,
-		env.DB
-			.prepare('SELECT * FROM blocks WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(targetId, accountId)
-			.first() as Promise<BlockRow | null>,
-		env.DB
-			.prepare('SELECT * FROM mutes WHERE account_id = ? AND target_account_id = ? LIMIT 1')
-			.bind(accountId, targetId)
-			.first() as Promise<MuteRow | null>,
-		env.DB
-			.prepare('SELECT domain FROM accounts WHERE id = ? LIMIT 1')
-			.bind(targetId)
-			.first<{ domain: string | null }>(),
-	]);
+const RELATIONSHIP_QUERY_BATCH_SIZE = 50;
 
-	// Queries for tables added in migration 0023 (graceful fallback)
-	let endorsed = false;
-	let noteComment = '';
-	let domainBlocking = false;
+interface RelationshipBaseRow {
+	target_id: string;
+	target_suspended_at: string | null;
+	outgoing_follow_id: string | null;
+	outgoing_show_reblogs: number | null;
+	outgoing_notify: number | null;
+	outgoing_languages: string | null;
+	incoming_follow_id: string | null;
+	outgoing_request_id: string | null;
+	incoming_request_id: string | null;
+	outgoing_block_id: string | null;
+	incoming_block_id: string | null;
+	outgoing_mute_id: string | null;
+	outgoing_mute_notifications: number | null;
+}
+
+interface RelationshipOptionalRow {
+	target_id: string;
+	endorsement_id: string | null;
+	note_comment: string | null;
+	domain_blocking: number;
+}
+
+interface RelationshipState extends RelationshipBaseRow {
+	endorsed: boolean;
+	note: string;
+	domainBlocking: boolean;
+}
+
+function parseRelationshipLanguages(value: string | null | undefined): string[] | null {
+	if (!value) return null;
 	try {
-		const [endorsedRow, accountNote] = await Promise.all([
-			env.DB
-				.prepare('SELECT id FROM account_pins WHERE account_id = ? AND target_account_id = ?')
-				.bind(accountId, targetId)
-				.first(),
-			env.DB
-				.prepare('SELECT comment FROM account_notes WHERE account_id = ? AND target_account_id = ?')
-				.bind(accountId, targetId)
-				.first<{ comment: string }>(),
-		]);
-		endorsed = !!endorsedRow;
-		noteComment = accountNote?.comment ?? '';
-
-		if (targetAccount?.domain) {
-			const dbRow = await env.DB
-				.prepare('SELECT id FROM user_domain_blocks WHERE account_id = ? AND domain = ?')
-				.bind(accountId, targetAccount.domain)
-				.first();
-			domainBlocking = !!dbRow;
-		}
+		const parsed: unknown = JSON.parse(value);
+		return Array.isArray(parsed) && parsed.every((language) => typeof language === 'string')
+			? parsed
+			: null;
 	} catch {
-		// Tables may not exist yet (pre-migration 0023)
+		return null;
 	}
+}
 
+function buildRelationship(
+	targetId: string,
+	state: RelationshipState | null,
+): Relationship {
+	const followState = state?.outgoing_follow_id != null ? state : null;
+	const muteState = state?.outgoing_mute_id != null ? state : null;
 	return {
 		id: targetId,
-		following: !!follow,
-		showing_reblogs: follow ? !!follow.show_reblogs : true,
-		notifying: follow ? !!follow.notify : false,
-		followed_by: !!followedBy,
-		blocking: !!block,
-		blocked_by: !!blockedBy,
-		muting: !!mute,
-		muting_notifications: mute ? !!mute.hide_notifications : false,
-		requested: !!followReq,
-		requested_by: !!followReqBy,
-		domain_blocking: domainBlocking,
-		endorsed,
-		note: noteComment,
-		languages: (() => { try { return follow?.languages ? JSON.parse(follow.languages) : null; } catch { return null; } })(),
+		following: followState !== null,
+		showing_reblogs: followState ? followState.outgoing_show_reblogs !== 0 : true,
+		notifying: followState ? followState.outgoing_notify !== 0 : false,
+		followed_by: state?.incoming_follow_id != null,
+		blocking: state?.outgoing_block_id != null,
+		blocked_by: state?.incoming_block_id != null,
+		muting: muteState !== null,
+		muting_notifications: muteState ? muteState.outgoing_mute_notifications !== 0 : false,
+		requested: state?.outgoing_request_id != null,
+		requested_by: state?.incoming_request_id != null,
+		domain_blocking: state?.domainBlocking ?? false,
+		endorsed: state?.endorsed ?? false,
+		note: state?.note ?? '',
+		languages: parseRelationshipLanguages(state?.outgoing_languages),
 	};
+}
+
+async function fetchRelationshipBaseRows(
+	accountId: string,
+	targetIds: string[],
+	now: string,
+): Promise<RelationshipBaseRow[]> {
+	const placeholders = targetIds
+		.map((_, index) => `?${index + 3}`)
+		.join(', ');
+	const { results } = await env.DB.prepare(
+		`SELECT target.id AS target_id,
+		        target.suspended_at AS target_suspended_at,
+		        outgoing_follow.id AS outgoing_follow_id,
+		        outgoing_follow.show_reblogs AS outgoing_show_reblogs,
+		        outgoing_follow.notify AS outgoing_notify,
+		        outgoing_follow.languages AS outgoing_languages,
+		        incoming_follow.id AS incoming_follow_id,
+		        outgoing_request.id AS outgoing_request_id,
+		        incoming_request.id AS incoming_request_id,
+		        outgoing_block.id AS outgoing_block_id,
+		        incoming_block.id AS incoming_block_id,
+		        outgoing_mute.id AS outgoing_mute_id,
+		        outgoing_mute.hide_notifications AS outgoing_mute_notifications
+		 FROM accounts target
+		 LEFT JOIN follows outgoing_follow
+		   ON outgoing_follow.account_id = ?1
+		  AND outgoing_follow.target_account_id = target.id
+		 LEFT JOIN follows incoming_follow
+		   ON incoming_follow.account_id = target.id
+		  AND incoming_follow.target_account_id = ?1
+		 LEFT JOIN follow_requests outgoing_request
+		   ON outgoing_request.account_id = ?1
+		  AND outgoing_request.target_account_id = target.id
+		 LEFT JOIN follow_requests incoming_request
+		   ON incoming_request.account_id = target.id
+		  AND incoming_request.target_account_id = ?1
+		 LEFT JOIN blocks outgoing_block
+		   ON outgoing_block.account_id = ?1
+		  AND outgoing_block.target_account_id = target.id
+		 LEFT JOIN blocks incoming_block
+		   ON incoming_block.account_id = target.id
+		  AND incoming_block.target_account_id = ?1
+		 LEFT JOIN mutes outgoing_mute
+		   ON outgoing_mute.account_id = ?1
+		  AND outgoing_mute.target_account_id = target.id
+		  AND (outgoing_mute.expires_at IS NULL OR outgoing_mute.expires_at > ?2)
+		 WHERE target.id IN (${placeholders})`,
+	).bind(accountId, now, ...targetIds).all<RelationshipBaseRow>();
+	return results ?? [];
+}
+
+async function fetchRelationshipOptionalRows(
+	accountId: string,
+	targetIds: string[],
+): Promise<RelationshipOptionalRow[]> {
+	const placeholders = targetIds
+		.map((_, index) => `?${index + 2}`)
+		.join(', ');
+	try {
+		const { results } = await env.DB.prepare(
+			`SELECT target.id AS target_id,
+			        endorsement.id AS endorsement_id,
+			        account_note.comment AS note_comment,
+			        CASE WHEN target.domain IS NOT NULL AND EXISTS (
+			          SELECT 1 FROM user_domain_blocks domain_block
+			          WHERE domain_block.account_id = ?1
+			            AND lower(domain_block.domain) = lower(target.domain)
+			        ) THEN 1 ELSE 0 END AS domain_blocking
+			 FROM accounts target
+			 LEFT JOIN account_pins endorsement
+			   ON endorsement.account_id = ?1
+			  AND endorsement.target_account_id = target.id
+			 LEFT JOIN account_notes account_note
+			   ON account_note.account_id = ?1
+			  AND account_note.target_account_id = target.id
+			 WHERE target.id IN (${placeholders})`,
+		).bind(accountId, ...targetIds).all<RelationshipOptionalRow>();
+		return results ?? [];
+	} catch {
+		// Tables may not exist yet (pre-migration 0023).
+		return [];
+	}
+}
+
+async function fetchRelationshipStates(
+	accountId: string,
+	targetIds: string[],
+	now: string,
+): Promise<Map<string, RelationshipState>> {
+	const states = new Map<string, RelationshipState>();
+	const uniqueTargetIds = [...new Set(targetIds)];
+	for (let offset = 0; offset < uniqueTargetIds.length; offset += RELATIONSHIP_QUERY_BATCH_SIZE) {
+		const batchIds = uniqueTargetIds.slice(offset, offset + RELATIONSHIP_QUERY_BATCH_SIZE);
+		const [baseRows, optionalRows] = await Promise.all([
+			fetchRelationshipBaseRows(accountId, batchIds, now),
+			fetchRelationshipOptionalRows(accountId, batchIds),
+		]);
+		const optionalByTarget = new Map(
+			optionalRows.map((row) => [row.target_id, row] as const),
+		);
+		for (const row of baseRows) {
+			const optional = optionalByTarget.get(row.target_id);
+			states.set(row.target_id, {
+				...row,
+				endorsed: optional?.endorsement_id != null,
+				note: optional?.note_comment ?? '',
+				domainBlocking: optional?.domain_blocking === 1,
+			});
+		}
+	}
+	return states;
+}
+
+export async function getRelationship(accountId: string, targetId: string): Promise<Relationship> {
+	const states = await fetchRelationshipStates(accountId, [targetId], new Date().toISOString());
+	return buildRelationship(targetId, states.get(targetId) ?? null);
 }
 
 // ----------------------------------------------------------------
@@ -186,8 +295,26 @@ export async function getRelationship(accountId: string, targetId: string): Prom
 export async function getRelationships(
 	accountId: string,
 	targetIds: string[],
+	options?: { withSuspended?: boolean },
 ): Promise<Relationship[]> {
-	return Promise.all(targetIds.map((targetId) => getRelationship(accountId, targetId)));
+	if (targetIds.length === 0) return [];
+	const states = await fetchRelationshipStates(
+		accountId,
+		targetIds,
+		new Date().toISOString(),
+	);
+	return targetIds.flatMap((targetId) => {
+		const state = states.get(targetId);
+		const canView = canViewAccountRelationship({
+			targetExists: state !== undefined,
+			targetSuspended: state ? state.target_suspended_at !== null : null,
+			includeSuspended: options?.withSuspended === true,
+		});
+		if (!canView || !state) {
+			return [];
+		}
+		return [buildRelationship(targetId, state)];
+	});
 }
 
 // ----------------------------------------------------------------
@@ -198,9 +325,14 @@ export async function searchAccounts(
 	query: string,
 	limit: number = 40,
 	offset: number = 0,
-	options?: { followedBy?: string },
+	options?: { followedBy?: string; viewerAccountId?: string },
 ): Promise<AccountRow[]> {
 	const searchTerm = `%${query}%`;
+	const discovery = buildAccountSearchSqlPredicate(
+		'account',
+		options?.viewerAccountId ?? null,
+		new Date().toISOString(),
+	);
 
 	if (options?.followedBy) {
 		const results = await env.DB
@@ -209,10 +341,18 @@ export async function searchAccounts(
 				JOIN follows f ON f.target_account_id = a.id
 				WHERE f.account_id = ?
 					AND (a.username LIKE ? OR a.display_name LIKE ?)
+					AND ${discovery.sql}
 				ORDER BY a.username ASC
 				LIMIT ? OFFSET ?`,
 			)
-			.bind(options.followedBy, searchTerm, searchTerm, limit, offset)
+			.bind(
+				options.followedBy,
+				searchTerm,
+				searchTerm,
+				...discovery.bindings,
+				limit,
+				offset,
+			)
 			.all<AccountRow>();
 
 		return results.results || [];
@@ -220,15 +360,15 @@ export async function searchAccounts(
 
 	const results = await env.DB
 		.prepare(
-			`SELECT * FROM accounts
-			WHERE (username LIKE ? OR display_name LIKE ?)
-			AND suspended_at IS NULL
+			`SELECT a.* FROM accounts a
+			WHERE (a.username LIKE ? OR a.display_name LIKE ?)
+			AND ${discovery.sql}
 			ORDER BY
-				CASE WHEN domain IS NULL THEN 0 ELSE 1 END,
-				followers_count DESC
+				CASE WHEN a.domain IS NULL THEN 0 ELSE 1 END,
+				a.followers_count DESC
 			LIMIT ? OFFSET ?`,
 		)
-		.bind(searchTerm, searchTerm, limit, offset)
+		.bind(searchTerm, searchTerm, ...discovery.bindings, limit, offset)
 		.all<AccountRow>();
 
 	return results.results || [];
@@ -334,6 +474,11 @@ export async function removeFollow(
 			env.DB.prepare('DELETE FROM follows WHERE id = ?1').bind(follow.id as string),
 			env.DB.prepare('UPDATE accounts SET following_count = MAX(0, following_count - 1) WHERE id = ?1').bind(accountId),
 			env.DB.prepare('UPDATE accounts SET followers_count = MAX(0, followers_count - 1) WHERE id = ?1').bind(targetId),
+			env.DB.prepare(
+				`DELETE FROM list_accounts
+				 WHERE account_id = ?1
+				   AND list_id IN (SELECT id FROM lists WHERE account_id = ?2)`,
+			).bind(targetId, accountId),
 		]);
 		deletedFollow = { id: follow.id as string, uri: (follow.uri as string | null) };
 	}
@@ -362,30 +507,67 @@ export async function createBlock(
 	accountId: string,
 	targetId: string,
 ): Promise<void> {
-	if (accountId === targetId) {
-		throw new AppError(422, 'Validation failed', 'You cannot block yourself');
-	}
+	await assertAccountRelationshipMutable(accountId, targetId);
 
 	const existing = await env.DB
 		.prepare('SELECT id FROM blocks WHERE account_id = ?1 AND target_account_id = ?2')
 		.bind(accountId, targetId)
 		.first();
 
-	if (!existing) {
-		const now = new Date().toISOString();
-		const id = generateUlid();
+	const now = new Date().toISOString();
+	const id = existing ? existing.id as string : generateUlid();
 
-		// Block and remove any existing follows in both directions
-		await env.DB.batch([
-			env.DB
-				.prepare('INSERT INTO blocks (id, account_id, target_account_id, created_at) VALUES (?1, ?2, ?3, ?4)')
-				.bind(id, accountId, targetId, now),
-			env.DB.prepare('DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(accountId, targetId),
-			env.DB.prepare('DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(targetId, accountId),
-			env.DB.prepare('DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2').bind(accountId, targetId),
-			env.DB.prepare('DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2').bind(targetId, accountId),
-		]);
-	}
+	// Blocking tears down both relationship directions and their derived counts.
+	// Conditional count updates run before deletion so idempotent re-blocks do
+	// not drift counters.
+	await env.DB.batch([
+		env.DB
+			.prepare('INSERT OR IGNORE INTO blocks (id, account_id, target_account_id, created_at) VALUES (?1, ?2, ?3, ?4)')
+			.bind(id, accountId, targetId, now),
+		env.DB.prepare(
+			`UPDATE accounts SET following_count = MAX(0, following_count - 1)
+			 WHERE id = ?1 AND EXISTS (
+			   SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2
+			 )`,
+		).bind(accountId, targetId),
+		env.DB.prepare(
+			`UPDATE accounts SET followers_count = MAX(0, followers_count - 1)
+			 WHERE id = ?2 AND EXISTS (
+			   SELECT 1 FROM follows WHERE account_id = ?1 AND target_account_id = ?2
+			 )`,
+		).bind(accountId, targetId),
+		env.DB.prepare(
+			`UPDATE accounts SET following_count = MAX(0, following_count - 1)
+			 WHERE id = ?2 AND EXISTS (
+			   SELECT 1 FROM follows WHERE account_id = ?2 AND target_account_id = ?1
+			 )`,
+		).bind(accountId, targetId),
+		env.DB.prepare(
+			`UPDATE accounts SET followers_count = MAX(0, followers_count - 1)
+			 WHERE id = ?1 AND EXISTS (
+			   SELECT 1 FROM follows WHERE account_id = ?2 AND target_account_id = ?1
+			 )`,
+		).bind(accountId, targetId),
+		env.DB.prepare('DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(accountId, targetId),
+		env.DB.prepare('DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(targetId, accountId),
+		env.DB.prepare('DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2').bind(accountId, targetId),
+		env.DB.prepare('DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2').bind(targetId, accountId),
+		env.DB.prepare(
+			`DELETE FROM list_accounts
+			 WHERE account_id = ?1
+			   AND list_id IN (SELECT id FROM lists WHERE account_id = ?2)`,
+		).bind(targetId, accountId),
+		env.DB.prepare(
+			`DELETE FROM list_accounts
+			 WHERE account_id = ?1
+			   AND list_id IN (SELECT id FROM lists WHERE account_id = ?2)`,
+		).bind(accountId, targetId),
+		env.DB.prepare(
+			`DELETE FROM account_pins
+			 WHERE (account_id = ?1 AND target_account_id = ?2)
+			    OR (account_id = ?2 AND target_account_id = ?1)`,
+		).bind(accountId, targetId),
+	]);
 }
 
 // ----------------------------------------------------------------
@@ -409,9 +591,7 @@ export async function createMute(
 	notifications: boolean = true,
 	expiresAt: string | null = null,
 ): Promise<void> {
-	if (accountId === targetId) {
-		throw new AppError(422, 'Validation failed', 'You cannot mute yourself');
-	}
+	await assertAccountRelationshipMutable(accountId, targetId);
 
 	const hideNotifications = notifications ? 1 : 0;
 	const now = new Date().toISOString();
@@ -457,7 +637,7 @@ export interface AcceptFollowRequestResult {
 	followId: string;
 	followUri: string;
 	/** The original follow_request row (including uri for federation) */
-	followRequest: Record<string, unknown>;
+	followRequest: FollowRequestRow;
 }
 
 export async function acceptFollowRequest(
@@ -465,14 +645,7 @@ export async function acceptFollowRequest(
 	accountId: string,
 	targetAccountId: string,
 ): Promise<AcceptFollowRequestResult> {
-	const fr = await env.DB
-		.prepare('SELECT * FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2')
-		.bind(accountId, targetAccountId)
-		.first();
-
-	if (!fr) {
-		throw new AppError(404, 'Record not found');
-	}
+	const fr = await assertFollowRequestActionable(accountId, targetAccountId);
 
 	const now = new Date().toISOString();
 	const followId = generateUlid();
@@ -485,26 +658,45 @@ export async function acceptFollowRequest(
 	const targetUsername = targetAccount?.username ?? 'unknown';
 	const followUri = `https://${domain}/users/${targetUsername}/followers/${followId}`;
 
-	await env.DB.batch([
+	const actionable = buildActionableFollowRequestSqlPredicate();
+	const results = await env.DB.batch([
 		// Create the follow
 		env.DB.prepare(
 			`INSERT INTO follows (id, account_id, target_account_id, uri, show_reblogs, notify, languages, created_at, updated_at)
-			 VALUES (?1, ?2, ?3, ?4, 1, 0, NULL, ?5, ?5)`,
-		).bind(followId, accountId, targetAccountId, followUri, now),
+			 SELECT ?1, fr.account_id, fr.target_account_id, ?4, 1, 0, NULL, ?5, ?5
+			 FROM follow_requests fr
+			 JOIN accounts a ON a.id = fr.account_id
+			 LEFT JOIN users requester_user ON requester_user.account_id = a.id
+			 WHERE fr.account_id = ?2
+			   AND fr.target_account_id = ?3
+			   AND ${actionable.sql}
+			   AND NOT EXISTS (
+			     SELECT 1 FROM follows existing_follow
+			     WHERE existing_follow.account_id = fr.account_id
+			       AND existing_follow.target_account_id = fr.target_account_id
+			   )`,
+		).bind(followId, accountId, targetAccountId, followUri, now, ...actionable.bindings),
 		// Update follower/following counts
 		env.DB.prepare(
-			'UPDATE accounts SET following_count = following_count + 1 WHERE id = ?1',
-		).bind(accountId),
+			`UPDATE accounts SET following_count = following_count + 1
+			 WHERE id = ?1 AND EXISTS (SELECT 1 FROM follows WHERE id = ?2)`,
+		).bind(accountId, followId),
 		env.DB.prepare(
-			'UPDATE accounts SET followers_count = followers_count + 1 WHERE id = ?1',
-		).bind(targetAccountId),
+			`UPDATE accounts SET followers_count = followers_count + 1
+			 WHERE id = ?1 AND EXISTS (SELECT 1 FROM follows WHERE id = ?2)`,
+		).bind(targetAccountId, followId),
 		// Remove the follow request
 		env.DB.prepare(
-			'DELETE FROM follow_requests WHERE account_id = ?1 AND target_account_id = ?2',
-		).bind(accountId, targetAccountId),
+			`DELETE FROM follow_requests
+			 WHERE account_id = ?1 AND target_account_id = ?2
+			   AND EXISTS (SELECT 1 FROM follows WHERE id = ?3)`,
+		).bind(accountId, targetAccountId, followId),
 	]);
+	if ((results[0]?.meta.changes ?? 0) !== 1) {
+		throw new AppError(403, 'This action is not allowed');
+	}
 
-	return { followId, followUri, followRequest: fr as Record<string, unknown> };
+	return { followId, followUri, followRequest: fr };
 }
 
 // ----------------------------------------------------------------
@@ -575,15 +767,7 @@ export async function pinAccount(
 	accountId: string,
 	targetId: string,
 ): Promise<void> {
-	const target = await env.DB.prepare('SELECT * FROM accounts WHERE id = ?1').bind(targetId).first();
-	if (!target) throw new AppError(404, 'Record not found');
-
-	// Must be following to endorse
-	const follow = await env.DB
-		.prepare('SELECT id FROM follows WHERE account_id = ?1 AND target_account_id = ?2')
-		.bind(accountId, targetId)
-		.first();
-	if (!follow) throw new AppError(422, 'Validation failed: you must be following this account to endorse it');
+	await assertAccountFeatureable(accountId, targetId);
 
 	const existing = await env.DB
 		.prepare('SELECT id FROM account_pins WHERE account_id = ?1 AND target_account_id = ?2')
@@ -597,6 +781,42 @@ export async function pinAccount(
 			.bind(generateUlid(), accountId, targetId, now)
 			.run();
 	}
+}
+
+// ----------------------------------------------------------------
+// Remove follower
+// ----------------------------------------------------------------
+
+/**
+ * Removes only a relationship owned by the target follower. Counters are
+ * changed iff that exact relationship existed, keeping the idempotent API from
+ * decrementing unrelated counts on repeated requests.
+ */
+export async function removeFollower(
+	accountId: string,
+	targetId: string,
+): Promise<void> {
+	const target = await env.DB.prepare(
+		'SELECT id FROM accounts WHERE id = ?1 LIMIT 1',
+	).bind(targetId).first<{ id: string }>();
+	if (!target) throw new AppError(404, 'Record not found');
+
+	const follow = await env.DB.prepare(
+		`SELECT id FROM follows
+		 WHERE account_id = ?1 AND target_account_id = ?2
+		 LIMIT 1`,
+	).bind(targetId, accountId).first<{ id: string }>();
+	if (!follow) return;
+
+	await env.DB.batch([
+		env.DB.prepare('DELETE FROM follows WHERE id = ?1').bind(follow.id),
+		env.DB.prepare(
+			'UPDATE accounts SET followers_count = MAX(0, followers_count - 1) WHERE id = ?1',
+		).bind(accountId),
+		env.DB.prepare(
+			'UPDATE accounts SET following_count = MAX(0, following_count - 1) WHERE id = ?1',
+		).bind(targetId),
+	]);
 }
 
 // ----------------------------------------------------------------

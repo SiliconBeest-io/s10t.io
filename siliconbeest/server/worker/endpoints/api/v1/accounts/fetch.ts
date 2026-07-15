@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { getAccountById } from '../../../../services/account';
+import { assertAccountViewable } from '../../../../services/permissions';
 import { parseCustomEmojiTagsJson, proxyCustomEmojiUrl } from '../../../../../../../packages/shared/utils/customEmoji';
 
 type HonoEnv = { Variables: AppVariables };
@@ -20,6 +21,7 @@ app.get('/:id', async (c) => {
 
   const row = await getAccountById(id);
   if (!row) throw new AppError(404, 'Record not found');
+  await assertAccountViewable(row.id);
 
   const acct = row.domain ? `${row.username}@${row.domain}` : (row.username as string);
   const displayName = (row.display_name as string) || '';
@@ -78,6 +80,8 @@ app.get('/:id', async (c) => {
     following_count: (row.following_count as number) || 0,
     statuses_count: (row.statuses_count as number) || 0,
     last_status_at: (row.last_status_at as string) || null,
+    ...(row.silenced_at ? { limited: true } : {}),
+    ...(row.memorial ? { memorial: true } : {}),
     emojis,
     fields: safeJsonParse(row.fields as string | null, []),
   });

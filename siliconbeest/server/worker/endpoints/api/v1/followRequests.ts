@@ -10,6 +10,7 @@ import { acceptFollowRequest, rejectFollowRequest } from '../../../services/acco
 import { sendToRecipient } from '../../../federation/helpers/send';
 import { Accept, Reject, Follow } from '@fedify/fedify/vocab';
 import type { AccountRow } from '../../../types/db';
+import { buildActionableFollowRequestSqlPredicate } from '../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -28,9 +29,10 @@ app.get('/', authRequired, requireScope('read:follows'), async (c) => {
   });
 
   const { whereClause, orderClause, limitValue, params } = buildPaginationQuery(pag, 'fr.id');
+  const actionable = buildActionableFollowRequestSqlPredicate();
 
-  const conditions: string[] = ['fr.target_account_id = ?'];
-  const binds: (string | number)[] = [currentAccount.id];
+  const conditions: string[] = ['fr.target_account_id = ?', actionable.sql];
+  const binds: (string | number)[] = [currentAccount.id, ...actionable.bindings];
 
   if (whereClause) {
     conditions.push(whereClause);
@@ -41,16 +43,17 @@ app.get('/', authRequired, requireScope('read:follows'), async (c) => {
     SELECT fr.id AS fr_id, a.*
     FROM follow_requests fr
     JOIN accounts a ON a.id = fr.account_id
+    LEFT JOIN users requester_user ON requester_user.account_id = a.id
     WHERE ${conditions.join(' AND ')}
     ORDER BY ${orderClause}
     LIMIT ?
   `;
   binds.push(limitValue);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<AccountRow>();
 
-  const accounts = (results ?? []).map((row: any) => {
-    return serializeAccount(row as AccountRow, { instanceDomain: env.INSTANCE_DOMAIN });
+  const accounts = (results ?? []).map((row) => {
+    return serializeAccount(row, { instanceDomain: env.INSTANCE_DOMAIN });
   });
 
   if (pag.minId) accounts.reverse();

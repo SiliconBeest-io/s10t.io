@@ -58,6 +58,23 @@ describe('OAuth Flow', () => {
       appToken = json.access_token;
     });
 
+    it('allows granular scopes inherited from the registered broad scopes', async () => {
+      const requestedScope = 'read:accounts write:statuses';
+      const res = await SELF.fetch(`${BASE}/oauth/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+          scope: requestedScope,
+        }).toString(),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json<{ scope: string }>()).toMatchObject({ scope: requestedScope });
+    });
+
     it('GET /api/v1/apps/verify_credentials succeeds with the token', async () => {
       const res = await SELF.fetch(`${BASE}/api/v1/apps/verify_credentials`, {
         headers: { Authorization: `Bearer ${appToken}` },
@@ -72,6 +89,23 @@ describe('OAuth Flow', () => {
   // Missing / invalid fields
   // -------------------------------------------------------------------
   describe('POST /oauth/token validation', () => {
+		it('rejects client-credentials scopes outside the registered application scopes', async () => {
+			const body = new URLSearchParams();
+			body.set('grant_type', 'client_credentials');
+			body.set('client_id', clientId);
+			body.set('client_secret', clientSecret);
+			body.set('scope', 'admin:read:accounts');
+
+			const res = await SELF.fetch(`${BASE}/oauth/token`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+				body: body.toString(),
+			});
+
+			expect(res.status).toBe(400);
+			expect(await res.json<Record<string, string>>()).toMatchObject({ error: 'invalid_scope' });
+		});
+
     it('returns 400 without grant_type', async () => {
       const body = new URLSearchParams();
       body.set('client_id', clientId);

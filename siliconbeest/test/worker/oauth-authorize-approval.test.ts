@@ -1,6 +1,7 @@
 import { SELF, env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applyMigration, createTestUser, authHeaders } from './helpers';
+import { hashPassword } from '../../server/worker/utils/crypto';
 
 const BASE = 'https://test.siliconbeest.local';
 
@@ -92,6 +93,49 @@ describe('OAuth Authorize — App Approval Flow', () => {
     expect(body.redirect_uri).toContain('state=test_state_123');
   });
 
+  it('issues an auth code for granular scopes inherited from broad app scopes', async () => {
+    const res = await SELF.fetch(`${BASE}/oauth/authorize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        redirect_uri: 'https://example.com/callback',
+        scope: 'read:accounts write:statuses',
+        response_type: 'code',
+        decision: 'approve',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json<{ redirect_uri: string }>();
+    expect(new URL(body.redirect_uri).searchParams.get('code')).toBeTruthy();
+  });
+
+	it('does not issue an authorization code for scopes outside the app registration', async () => {
+		const response = await SELF.fetch(`${BASE}/oauth/authorize`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${token}`,
+			},
+			body: JSON.stringify({
+				client_id: clientId,
+				redirect_uri: 'https://example.com/callback',
+				scope: 'admin:write:accounts',
+				response_type: 'code',
+				decision: 'approve',
+			}),
+		});
+
+		expect(response.status).toBe(400);
+		expect(await response.json<Record<string, string>>()).toMatchObject({
+			error: 'invalid_scope',
+		});
+	});
+
   it('returns access_denied on POST deny with bearer token', async () => {
     const res = await SELF.fetch(`${BASE}/oauth/authorize`, {
       method: 'POST',
@@ -153,5 +197,33 @@ describe('OAuth Authorize — App Approval Flow', () => {
     const tokenBody = await tokenRes.json<Record<string, any>>();
     expect(tokenBody.access_token).toBeDefined();
     expect(tokenBody.token_type).toBe('Bearer');
+  });
+
+  it('does not issue an authorization code to a pending account', async () => {
+    const email = 'oauth-pending@test.local';
+    const password = 'PendingPassword123!';
+    const pending = await createTestUser('oauth_pending_user', { email });
+    await env.DB.prepare(
+      'UPDATE users SET approved = 0, encrypted_password = ?1 WHERE id = ?2',
+    ).bind(await hashPassword(password), pending.userId).run();
+
+    const response = await SELF.fetch(`${BASE}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: 'https://example.com/callback',
+        scope: 'read write',
+        response_type: 'code',
+        email,
+        password,
+      }).toString(),
+    });
+    expect(response.status).toBe(403);
+
+    const issued = await env.DB.prepare(
+      'SELECT COUNT(*) AS count FROM oauth_authorization_codes WHERE user_id = ?1',
+    ).bind(pending.userId).first<{ count: number }>();
+    expect(issued?.count).toBe(0);
   });
 });

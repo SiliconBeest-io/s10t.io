@@ -19,6 +19,7 @@ export type Account = {
 	bot: number;
 	discoverable: number;
 	manually_approves_followers: number;
+	hide_collections: number;
 	statuses_count: number;
 	followers_count: number;
 	following_count: number;
@@ -103,6 +104,7 @@ export const create = async (input: CreateAccountInput): Promise<Account> => {
 		bot: input.bot ?? 0,
 		discoverable: input.discoverable ?? 1,
 		manually_approves_followers: input.manually_approves_followers ?? 0,
+		hide_collections: input.hide_collections ?? 0,
 		statuses_count: input.statuses_count ?? 0,
 		followers_count: input.followers_count ?? 0,
 		following_count: input.following_count ?? 0,
@@ -121,11 +123,11 @@ export const create = async (input: CreateAccountInput): Promise<Account> => {
 				id, username, domain, display_name, note, uri, url,
 				avatar_url, avatar_static_url, header_url, header_static_url,
 				inbox_url, shared_inbox_url,
-				locked, bot, discoverable, manually_approves_followers,
+				locked, bot, discoverable, manually_approves_followers, hide_collections,
 				statuses_count, followers_count, following_count,
 				last_status_at, created_at, updated_at,
 				suspended_at, silenced_at, memorial, moved_to_account_id
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			account.id, account.username, account.domain,
@@ -134,7 +136,7 @@ export const create = async (input: CreateAccountInput): Promise<Account> => {
 			account.header_url, account.header_static_url,
 			account.inbox_url, account.shared_inbox_url,
 			account.locked, account.bot, account.discoverable,
-			account.manually_approves_followers,
+			account.manually_approves_followers, account.hide_collections,
 			account.statuses_count, account.followers_count, account.following_count,
 			account.last_status_at, account.created_at, account.updated_at,
 			account.suspended_at, account.silenced_at, account.memorial,

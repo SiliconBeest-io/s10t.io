@@ -341,6 +341,7 @@
     "lockAccount": "アカウントをロック（フォロワーを手動で承認）",
     "botAccount": "これはBotアカウントです",
     "discoverable": "アカウントをおすすめに表示する",
+    "hideCollections": "フォロワーとフォロー中の一覧を非表示にする",
     "profileFields": "プロフィール補足情報",
     "addField": "フィールドを追加",
     "fieldName": "ラベル",

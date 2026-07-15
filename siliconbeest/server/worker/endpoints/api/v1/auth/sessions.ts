@@ -7,19 +7,20 @@
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { listSessions, revokeSession, revokeAllOtherSessions } from '../../../../services/session';
 import { AppError } from '../../../../middleware/errorHandler';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 	const tokenId = c.get('tokenId');
 	const sessions = await listSessions(user.id, tokenId);
 	return c.json(sessions);
 });
 
-app.delete('/:id', authRequired, async (c) => {
+app.delete('/:id', authRequired, requireScope('write:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 	const tokenId = c.req.param('id');
 
@@ -31,7 +32,7 @@ app.delete('/:id', authRequired, async (c) => {
 	return c.json({ success: true });
 });
 
-app.post('/revoke_all', authRequired, async (c) => {
+app.post('/revoke_all', authRequired, requireScope('write:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 	const currentTokenId = c.get('tokenId');
 	if (!currentTokenId) {

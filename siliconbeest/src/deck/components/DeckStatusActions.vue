@@ -6,6 +6,7 @@
 // the card raises its z-index above sibling cards while one is open).
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getStatusActionPermissions } from '@/utils/permissions'
 
 const { t } = useI18n()
 
@@ -17,6 +18,7 @@ const props = defineProps<{
   favourited?: boolean
   reblogged?: boolean
   bookmarked?: boolean
+  accountCanAct?: boolean
   isOwnStatus?: boolean
   accountId?: string
   accountAcct?: string
@@ -44,15 +46,15 @@ const emit = defineEmits<{
   overlay: [open: boolean]
 }>()
 
-const canReblog = computed(() => {
-  const v = props.visibility ?? 'public'
-  return v === 'public' || v === 'unlisted'
-})
+const permissions = computed(() => getStatusActionPermissions({
+  accountCanAct: props.accountCanAct === true,
+  isOwnStatus: props.isOwnStatus === true,
+  visibility: props.visibility,
+  quotePolicyAllows: props.quotePolicyAllows,
+}))
 
-const canQuote = computed(() => {
-  const v = props.visibility ?? 'public'
-  return (v === 'public' || v === 'unlisted') && props.quotePolicyAllows !== false
-})
+const canReblog = computed(() => permissions.value.reblog)
+const canQuote = computed(() => permissions.value.quote)
 
 const quoteTooltip = computed(() => {
   if (canQuote.value) return t('status.quote')
@@ -70,6 +72,15 @@ const showStarMenu = ref(false)
 const showMoreMenu = ref(false)
 
 const anyMenuOpen = computed(() => showBoostMenu.value || showStarMenu.value || showMoreMenu.value)
+const hasMoreActions = computed(() => (
+  permissions.value.bookmark
+  || permissions.value.share
+  || permissions.value.edit
+  || permissions.value.delete
+  || permissions.value.report
+  || permissions.value.block
+  || permissions.value.mute
+))
 
 watch(anyMenuOpen, (open) => emit('overlay', open))
 
@@ -103,9 +114,17 @@ function pick(action: () => void) {
 }
 
 function handleReport() {
-  if (props.accountId && props.accountAcct) {
+  if (permissions.value.report && props.accountId && props.accountAcct) {
     emit('report', { accountId: props.accountId, accountAcct: props.accountAcct, statusId: props.statusId })
   }
+}
+
+function handleBlock() {
+  if (permissions.value.block && props.accountId) emit('block', props.accountId)
+}
+
+function handleMute() {
+  if (permissions.value.mute && props.accountId) emit('mute', props.accountId)
 }
 
 function formatCount(n: number): string {
@@ -123,9 +142,10 @@ function formatCount(n: number): string {
     <!-- Reply -->
     <button
       type="button"
+      :disabled="!permissions.reply"
       class="dk-mono dk-dim-text inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
       :aria-label="t('status.reply')"
-      @click="emit('reply', statusId)"
+      @click="permissions.reply && emit('reply', statusId)"
     >
       <span class="text-[17px] leading-none" aria-hidden="true">↩</span>
       <span class="tabular-nums">{{ formatCount(repliesCount) }}</span>
@@ -135,12 +155,13 @@ function formatCount(n: number): string {
     <div class="relative">
       <button
         type="button"
+        :disabled="!canReblog && !canQuote"
         class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)]"
         :style="reblogged ? 'color: var(--dk-acc)' : 'color: var(--dk-dim)'"
         :aria-label="t('status.boost')"
         :aria-expanded="showBoostMenu"
         :aria-pressed="reblogged"
-        @click="openBoostMenu"
+        @click="(canReblog || canQuote) && openBoostMenu()"
       >
         <span class="text-[17px] leading-none" aria-hidden="true">⇄</span>
         <span class="tabular-nums">{{ formatCount(reblogsCount) }}</span>
@@ -176,12 +197,13 @@ function formatCount(n: number): string {
       <button
         ref="starBtnRef"
         type="button"
+        :disabled="!permissions.favourite && !permissions.react"
         class="dk-mono inline-flex cursor-pointer items-center gap-1.5 rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)]"
         :style="favourited ? 'color: var(--dk-acc)' : 'color: var(--dk-dim)'"
         :aria-label="t('status.favourite')"
         :aria-expanded="showStarMenu"
         :aria-pressed="favourited"
-        @click="openStarMenu"
+        @click="(permissions.favourite || permissions.react) && openStarMenu()"
       >
         <span class="text-[17px] leading-none" aria-hidden="true">{{ favourited ? '★' : '☆' }}</span>
         <span class="tabular-nums">{{ formatCount(favouritesCount) }}</span>
@@ -190,8 +212,8 @@ function formatCount(n: number): string {
         <button
           type="button"
           class="dk-menu-item"
-          :disabled="loadingFavourite"
-          @click="pick(() => emit('favourite', statusId))"
+          :disabled="!permissions.favourite || loadingFavourite"
+          @click="permissions.favourite && pick(() => emit('favourite', statusId))"
         >
           <span aria-hidden="true">{{ favourited ? '★' : '☆' }}</span>
           <span>{{ favourited ? t('deck.unfavourite') : t('status.favourite') }}</span>
@@ -199,7 +221,8 @@ function formatCount(n: number): string {
         <button
           type="button"
           class="dk-menu-item"
-          @click="pick(() => emit('react', statusId, starBtnRef ?? undefined))"
+          :disabled="!permissions.react"
+          @click="permissions.react && pick(() => emit('react', statusId, starBtnRef ?? undefined))"
         >
           <span aria-hidden="true">😀</span>
           <span>{{ t('deck.react') }}</span>
@@ -210,7 +233,7 @@ function formatCount(n: number): string {
     <div class="flex-1" />
 
     <!-- More: share + management -->
-    <div class="relative">
+    <div v-if="hasMoreActions" class="relative">
       <button
         type="button"
         class="dk-mono dk-dim-text inline-flex cursor-pointer items-center rounded-[10px] border-0 bg-transparent px-3 py-2 text-[13.5px] transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
@@ -222,25 +245,31 @@ function formatCount(n: number): string {
       </button>
       <div v-if="showMoreMenu" class="dk-menu absolute bottom-full right-0 z-50 mb-1.5 w-52">
         <button
+          v-if="permissions.bookmark"
           type="button"
           class="dk-menu-item"
-          :disabled="loadingBookmark"
+          :disabled="!permissions.bookmark || loadingBookmark"
           :style="bookmarked ? 'color: var(--dk-acc)' : ''"
           @click="pick(() => emit('bookmark', statusId))"
         >
           <span aria-hidden="true">🔖</span>
           <span>{{ bookmarked ? t('deck.unbookmark') : t('status.bookmark') }}</span>
         </button>
-        <button type="button" class="dk-menu-item" @click="pick(() => emit('share', statusId))">
+        <button
+          v-if="permissions.share"
+          type="button"
+          class="dk-menu-item"
+          @click="pick(() => emit('share', statusId))"
+        >
           <span aria-hidden="true">↗</span>
           <span>{{ t('status.share') }}</span>
         </button>
-        <button v-if="isOwnStatus" type="button" class="dk-menu-item" @click="pick(() => emit('edit', statusId))">
+        <button v-if="permissions.edit" type="button" class="dk-menu-item" @click="pick(() => emit('edit', statusId))">
           <span aria-hidden="true">✎</span>
           <span>{{ t('status.edit') }}</span>
         </button>
         <button
-          v-if="isOwnStatus"
+          v-if="permissions.delete"
           type="button"
           class="dk-menu-item"
           style="color: #f87171"
@@ -250,26 +279,26 @@ function formatCount(n: number): string {
           <span>{{ t('status.delete_action') }}</span>
         </button>
         <button
-          v-if="!isOwnStatus && accountId"
+          v-if="permissions.mute && accountId"
           type="button"
           class="dk-menu-item"
-          @click="pick(() => emit('mute', accountId!))"
+          @click="pick(handleMute)"
         >
           <span aria-hidden="true">🔇</span>
           <span>{{ t('profile.mute') }}</span>
         </button>
         <button
-          v-if="!isOwnStatus && accountId"
+          v-if="permissions.block && accountId"
           type="button"
           class="dk-menu-item"
           style="color: #f87171"
-          @click="pick(() => emit('block', accountId!))"
+          @click="pick(handleBlock)"
         >
           <span aria-hidden="true">🚫</span>
           <span>{{ t('profile.block') }}</span>
         </button>
         <button
-          v-if="!isOwnStatus"
+          v-if="permissions.report"
           type="button"
           class="dk-menu-item"
           style="color: #f87171"

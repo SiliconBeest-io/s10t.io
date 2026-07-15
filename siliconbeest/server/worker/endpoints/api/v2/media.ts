@@ -159,7 +159,7 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
 });
 
 // GET /api/v1/media/:id — check upload status
-app.get('/:id', authRequired, requireScope('read:media'), async (c) => {
+app.get('/:id', authRequired, requireScope('write:media'), async (c) => {
   const currentUser = c.get('currentUser')!;
   const domain = env.INSTANCE_DOMAIN;
   const mediaId = c.req.param('id');

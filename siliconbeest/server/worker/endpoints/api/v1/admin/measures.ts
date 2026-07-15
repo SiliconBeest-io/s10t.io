@@ -3,12 +3,14 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired, adminRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 
 type HonoEnv = { Variables: AppVariables };
 
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScope('admin:read'));
 
 type MeasureKey =
 	| 'active_users'

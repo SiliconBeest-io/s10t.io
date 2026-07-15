@@ -4,6 +4,7 @@ import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
 import EmojiPicker from '../common/EmojiPicker.vue'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const props = defineProps<{
   status: Status
@@ -14,6 +15,12 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: authStore.isAuthenticated,
+  accountLoaded: authStore.currentUser !== null,
+  accountSuspended: authStore.currentUser?.suspended,
+  accountMemorial: authStore.currentUser?.memorial,
+}))
 const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
 const showPicker = ref(false)
@@ -45,7 +52,7 @@ watch(() => props.status.id, () => {
 
 // 리액션 토글 (추가/제거)
 async function toggleReaction(reaction: EmojiReaction) {
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   try {
@@ -70,7 +77,7 @@ async function toggleReaction(reaction: EmojiReaction) {
 // 이모지 피커에서 선택
 async function handleEmojiSelect(emoji: string) {
   showPicker.value = false
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   // 커스텀 이모지는 :shortcode: 형식으로 전달됨 → 백엔드에도 그대로 전달
@@ -87,6 +94,7 @@ async function handleEmojiSelect(emoji: string) {
 }
 
 function togglePicker() {
+  if (!accountCanAct.value || loading.value) return
   showPicker.value = !showPicker.value
   if (showPicker.value) {
     nextTick(() => {
@@ -138,14 +146,14 @@ function getShortcode(name: string): string {
 </script>
 
 <template>
-  <div v-if="hasReactions || authStore.isAuthenticated" class="flex flex-wrap items-center gap-1.5">
+  <div v-if="hasReactions || accountCanAct" class="flex flex-wrap items-center gap-1.5">
     <!-- 리액션 칩들 -->
     <TransitionGroup name="reaction">
       <button
         v-for="reaction in reactions"
         :key="reaction.name"
         @click="!isRemoteCustomEmoji(reaction) && toggleReaction(reaction)"
-        :disabled="loading || !authStore.isAuthenticated || isRemoteCustomEmoji(reaction)"
+        :disabled="loading || !accountCanAct || isRemoteCustomEmoji(reaction)"
         class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-all duration-200 select-none"
         :class="[
           isRemoteCustomEmoji(reaction)
@@ -153,7 +161,7 @@ function getShortcode(name: string): string {
             : reaction.me
               ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-300 dark:border-indigo-600 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50'
               : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600/50',
-          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : authStore.isAuthenticated ? 'cursor-pointer' : 'cursor-default',
+          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : accountCanAct ? 'cursor-pointer' : 'cursor-default',
         ]"
         :title="isRemoteCustomEmoji(reaction) ? `${reaction.name} (다른 서버의 이모지)` : reaction.name"
       >
@@ -173,7 +181,7 @@ function getShortcode(name: string): string {
     </TransitionGroup>
 
     <!-- + 버튼 (이모지 피커 열기) -->
-    <div v-if="authStore.isAuthenticated" class="relative">
+    <div v-if="accountCanAct" class="relative">
       <button
         ref="pickerBtnRef"
         @click.stop="togglePicker"

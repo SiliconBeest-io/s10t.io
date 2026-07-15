@@ -11,6 +11,24 @@ import { generateUlid } from '../utils/ulid';
 import { hashPassword, verifyPassword as verifyPasswordHash, generateToken, sha256, generateEd25519KeyPair } from '../utils/crypto';
 import { AppError } from '../middleware/errorHandler';
 import type { AccountRow, UserRow } from '../types/db';
+import {
+	canActAsAccount,
+	getInternalSessionOAuthScopes,
+} from '../../../../packages/shared/permissions';
+
+function canUseAccount(
+	userDisabled: number | null | undefined,
+	userApproved: number | null | undefined,
+	accountSuspendedAt: string | null | undefined,
+	memorial: number | null | undefined,
+): boolean {
+	return canActAsAccount({
+		userDisabled: userDisabled === null || userDisabled === undefined ? null : userDisabled !== 0,
+		userApproved: userApproved === null || userApproved === undefined ? null : userApproved !== 0,
+		accountSuspended: accountSuspendedAt === undefined ? null : accountSuspendedAt !== null,
+		memorial: memorial === null || memorial === undefined ? null : memorial !== 0,
+	});
+}
 
 // ----------------------------------------------------------------
 // Input schemas
@@ -166,15 +184,13 @@ export async function verifyPassword(
 	const valid = await verifyPasswordHash(password, user.encrypted_password);
 	if (!valid) return null;
 
-	if (user.disabled) return null;
-
 	const account = (await env.DB
 		.prepare('SELECT * FROM accounts WHERE id = ?')
 		.bind(user.account_id)
 		.first()) as AccountRow | null;
 
 	if (!account) return null;
-	if (account.suspended_at) return null;
+	if (!canUseAccount(user.disabled, user.approved, account.suspended_at, account.memorial)) return null;
 
 	return { user, account };
 }
@@ -215,15 +231,13 @@ export async function verifyPasswordByUsernameOrEmail(
 
 	const valid = await verifyPasswordHash(password, user.encrypted_password);
 	if (!valid) return null;
-	if (user.disabled) return null;
-
 	const account = (await env.DB
 		.prepare('SELECT * FROM accounts WHERE id = ?')
 		.bind(user.account_id)
 		.first()) as AccountRow | null;
 
 	if (!account) return null;
-	if (account.suspended_at) return null;
+	if (!canUseAccount(user.disabled, user.approved, account.suspended_at, account.memorial)) return null;
 
 	return { user, account };
 }
@@ -266,13 +280,23 @@ export async function resolveToken(
 		// Verify the account is not suspended/disabled (prevents stale-cache abuse)
 		const check = await env.DB
 			.prepare(
-				`SELECT u.disabled, a.suspended_at
+				`SELECT u.disabled, u.approved, a.suspended_at, a.memorial
 				 FROM users u JOIN accounts a ON a.id = u.account_id
 				 WHERE u.id = ? LIMIT 1`,
 			)
 			.bind(payload.user.id)
-			.first();
-		if (!check || check.disabled || check.suspended_at) {
+			.first<{
+				disabled: number | null;
+				approved: number | null;
+				suspended_at: string | null;
+				memorial: number | null;
+			}>();
+		if (!check || !canUseAccount(
+			check.disabled,
+			check.approved,
+			check.suspended_at,
+			check.memorial,
+		)) {
 			await env.CACHE.delete(cacheKey);
 			return null;
 		}
@@ -288,19 +312,27 @@ export async function resolveToken(
 		   a.id       AS account_id,
 		   a.username,
 		   a.domain,
+		   u.disabled AS user_disabled,
+		   u.approved AS user_approved,
+		   a.suspended_at,
+		   a.memorial,
 		   t.scopes
 		 FROM oauth_access_tokens t
 		 JOIN users    u ON u.id = t.user_id
 		 JOIN accounts a ON a.id = u.account_id
 		 WHERE t.revoked_at IS NULL
-		   AND u.disabled = 0
-		   AND a.suspended_at IS NULL
 		   AND (t.token_hash = ?1 OR t.token = ?2)
 		 LIMIT 1`;
 
 	const row = await env.DB.prepare(tokenQuery).bind(tokenHash, rawToken ?? tokenHash).first();
 
 	if (!row) return null;
+	if (!canUseAccount(
+		row.user_disabled as number | null,
+		row.user_approved as number | null,
+		row.suspended_at as string | null,
+		row.memorial as number | null,
+	)) return null;
 
 	const payload: ResolvedToken = {
 		tokenId: row.token_id as string,
@@ -322,6 +354,29 @@ export async function resolveToken(
 	await env.CACHE.put(cacheKey, JSON.stringify(payload), { expirationTtl: 300 });
 
 	return payload;
+}
+
+/** Revalidates every user/account state before issuing delegated credentials. */
+export async function canUserAccessAccount(userId: string): Promise<boolean> {
+	const row = await env.DB.prepare(
+		`SELECT u.disabled, u.approved, a.suspended_at, a.memorial
+		 FROM users u
+		 JOIN accounts a ON a.id = u.account_id
+		 WHERE u.id = ?1
+		 LIMIT 1`,
+	).bind(userId).first<{
+		disabled: number | null;
+		approved: number | null;
+		suspended_at: string | null;
+		memorial: number | null;
+	}>();
+
+	return row !== null && canUseAccount(
+		row.disabled,
+		row.approved,
+		row.suspended_at,
+		row.memorial,
+	);
 }
 
 // ----------------------------------------------------------------
@@ -629,8 +684,15 @@ export async function getOrCreateInternalApp(): Promise<{ id: string; client_id:
 		const now = new Date().toISOString();
 		await env.DB.prepare(
 			`INSERT INTO oauth_applications (id, name, redirect_uri, client_id, client_secret, scopes, created_at, updated_at)
-			 VALUES (?1, ?2, 'urn:ietf:wg:oauth:2.0:oob', ?3, ?4, 'read write follow push', ?5, ?5)`,
-		).bind(appId, INTERNAL_APP_NAME, clientId, clientSecret, now).run();
+			 VALUES (?1, ?2, 'urn:ietf:wg:oauth:2.0:oob', ?3, ?4, ?5, ?6, ?6)`,
+		).bind(
+			appId,
+			INTERNAL_APP_NAME,
+			clientId,
+			clientSecret,
+			getInternalSessionOAuthScopes('admin'),
+			now,
+		).run();
 		appRecord = { id: appId, client_id: clientId };
 	}
 

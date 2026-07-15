@@ -1,20 +1,31 @@
 import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
-import { AppError } from '../../../../middleware/errorHandler';
+import { authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import {
+  assertAccountSurfaceable,
+  buildAccountDiscoverySqlPredicate,
+  canViewAccountCollectionById,
+} from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
 const app = new Hono<HonoEnv>();
 
-app.get('/:id/followers', async (c) => {
+app.get('/:id/followers', authOptional, requireScope('read:accounts'), async (c) => {
   const accountId = c.req.param('id');
   const domain = env.INSTANCE_DOMAIN;
 
-  const account = await env.DB.prepare('SELECT id FROM accounts WHERE id = ?1').bind(accountId).first();
-  if (!account) throw new AppError(404, 'Record not found');
+  await assertAccountSurfaceable(accountId, c.get('currentAccount')?.id ?? null);
+  if (!await canViewAccountCollectionById(
+    accountId,
+    c.get('currentAccount')?.id ?? null,
+  )) {
+    return c.json([]);
+  }
 
   const query = c.req.query();
   const pagination = parsePaginationParams({
@@ -28,6 +39,13 @@ app.get('/:id/followers', async (c) => {
 
   const conditions = ['f.target_account_id = ?'];
   const params: unknown[] = [accountId];
+  const accountPermission = buildAccountDiscoverySqlPredicate(
+    'account',
+    c.get('currentAccount')?.id ?? null,
+    new Date().toISOString(),
+  );
+  conditions.push(accountPermission.sql);
+  params.push(...accountPermission.bindings);
 
   if (pag.whereClause) {
     conditions.push(pag.whereClause);
@@ -69,6 +87,8 @@ app.get('/:id/followers', async (c) => {
       following_count: (row.following_count as number) || 0,
       statuses_count: (row.statuses_count as number) || 0,
       last_status_at: (row.last_status_at as string) || null,
+      ...(row.silenced_at ? { limited: true } : {}),
+      ...(row.memorial ? { memorial: true } : {}),
       emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
       fields: [],
     };

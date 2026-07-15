@@ -14,6 +14,7 @@ import {
 	resolveReport,
 	getUserEmailByAccountId,
 } from '../../../../../services/admin';
+import { assertAccountModeratable } from '../../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -48,6 +49,7 @@ app.post('/:id/action', async (c) => {
 	const account = await getAccountForModeration(id);
 
 	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 	const sendEmail = body.send_email_notification !== false; // default true
 	const warningText = body.text || '';
 

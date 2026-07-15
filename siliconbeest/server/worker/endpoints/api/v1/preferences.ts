@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import * as userPreferences from '../../../repositories/userPreferences';
 
 const UI_KEYS = ['ui:columns', 'ui:show_trending'] as const;
@@ -12,7 +13,7 @@ function isUiKey(key: string): key is UiKey {
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:accounts'), async (c) => {
   const user = c.get('currentUser')!;
 
   const allPrefs = await userPreferences.getByUserId(user.id);
@@ -38,7 +39,7 @@ app.get('/', authRequired, async (c) => {
   return c.json(prefs);
 });
 
-app.patch('/', authRequired, async (c) => {
+app.patch('/', authRequired, requireScope('write:accounts'), async (c) => {
   const user = c.get('currentUser')!;
   const body = await c.req.json<Record<string, string>>();
 

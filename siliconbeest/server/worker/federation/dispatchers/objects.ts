@@ -24,6 +24,10 @@ import {
   toTemporalInstant,
   AS_PUBLIC,
 } from './collections';
+import {
+  canExposeActivityPubPublicStatusRecord,
+  canExposeLocalAccountActivityPubResources,
+} from '../../services/permissions';
 import { env } from 'cloudflare:workers';
 
 // ============================================================
@@ -40,19 +44,24 @@ export function setupObjectDispatchers(
       const { identifier, id } = values;
 
       const row = await env.DB.prepare(
-        `SELECT qa.*, a.username, a.domain AS account_domain, a.uri AS account_uri
+        `SELECT qa.*, a.id AS account_id, a.username,
+                a.domain AS account_domain, a.uri AS account_uri
          FROM quote_authorizations qa
          JOIN accounts a ON a.id = qa.attributed_to_account_id
          WHERE qa.id = ?1 AND a.username = ?2 AND a.domain IS NULL AND qa.revoked_at IS NULL
          LIMIT 1`,
       ).bind(id, identifier).first<{
+        account_id: string;
         uri: string;
         account_uri: string;
         interacting_object_uri: string;
         interaction_target_uri: string;
       }>();
 
-      if (!row) return null;
+      if (
+        !row
+        || !await canExposeLocalAccountActivityPubResources(row.account_id)
+      ) return null;
 
       return new QuoteAuthorization({
         id: new URL(row.uri),
@@ -83,7 +92,10 @@ export function setupObjectDispatchers(
         .first<StatusRow & { username: string; account_domain: string | null }>();
 
       if (!row) return null;
-      if (row.deleted_at) return null;
+      const authorAvailable = await canExposeLocalAccountActivityPubResources(
+        row.account_id,
+      );
+      if (!canExposeActivityPubPublicStatusRecord(row, authorAvailable)) return null;
       // Reblogs are Announce activities, not Note objects
       if (row.reblog_of_id) return null;
 
@@ -167,7 +179,10 @@ export async function handleActivityRequest(
     .bind(id, identifier)
     .first<StatusRow & { username: string; account_domain: string | null }>();
 
-  if (!row || row.deleted_at) {
+  const authorAvailable = row === null
+    ? false
+    : await canExposeLocalAccountActivityPubResources(row.account_id);
+  if (!row || !canExposeActivityPubPublicStatusRecord(row, authorAvailable)) {
     return new Response(JSON.stringify({ error: 'Record not found' }), {
       status: 404,
       headers: { 'Content-Type': 'application/activity+json' },
@@ -324,7 +339,8 @@ export async function handleStatusCollectionRequest(
 
   const domain = env.INSTANCE_DOMAIN;
   const row = await env.DB.prepare(
-    `SELECT s.id, s.uri, s.replies_count, s.reblogs_count, s.favourites_count
+    `SELECT s.id, s.uri, s.account_id, s.visibility, s.deleted_at,
+            s.replies_count, s.reblogs_count, s.favourites_count
      FROM statuses s
      JOIN accounts a ON a.id = s.account_id
      WHERE s.id = ?1
@@ -337,12 +353,18 @@ export async function handleStatusCollectionRequest(
   ).bind(id, identifier).first<{
     id: string;
     uri: string;
+    account_id: string;
+    visibility: string;
+    deleted_at: string | null;
     replies_count: number;
     reblogs_count: number;
     favourites_count: number;
   }>();
 
-  if (!row) {
+  const authorAvailable = row === null
+    ? false
+    : await canExposeLocalAccountActivityPubResources(row.account_id);
+  if (!row || !canExposeActivityPubPublicStatusRecord(row, authorAvailable)) {
     return collectionResponse({ error: 'Record not found' }, 404);
   }
 

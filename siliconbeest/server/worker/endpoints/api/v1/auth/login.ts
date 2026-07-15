@@ -16,6 +16,7 @@ import {
 	updateSignInTracking,
 } from '../../../../services/auth';
 import { setAuthTokenCookie } from '../../../../utils/authCookie';
+import { getInternalSessionOAuthScopes } from '../../../../../../../packages/shared/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -69,8 +70,9 @@ app.post('/', async (c) => {
 	const appRecord = await getOrCreateInternalApp();
 	const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
 	const userAgent = c.req.header('User-Agent') || '';
+	const scopes = getInternalSessionOAuthScopes(user.role);
 	const { tokenValue, createdAt } = await createAccessToken(appRecord.id, user.id, {
-		ip, userAgent, email: user.email, locale: user.locale,
+		ip, userAgent, email: user.email, locale: user.locale, scopes,
 	});
 
 	await updateSignInTracking(user.id, ip);
@@ -80,7 +82,7 @@ app.post('/', async (c) => {
 	return c.json({
 		access_token: tokenValue,
 		token_type: 'Bearer',
-		scope: 'read write follow push',
+		scope: scopes,
 		created_at: Math.floor(new Date(createdAt).getTime() / 1000),
 	});
 });

@@ -5,12 +5,13 @@
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../../types';
 import { authRequired } from '../../../../../middleware/auth';
+import { requireScope } from '../../../../../middleware/scopeCheck';
 import { verifyAndEnableMfa } from '../../../../../services/mfa';
 import { AppError } from '../../../../../middleware/errorHandler';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.post('/', authRequired, async (c) => {
+app.post('/', authRequired, requireScope('write:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 	const body = await c.req.json<{ code?: string }>().catch((): { code?: string } => ({}));
 	const { code } = body;

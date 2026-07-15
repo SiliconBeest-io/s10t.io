@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../types';
 import { authOptional, authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 
 type HonoEnv = { Variables: AppVariables };
@@ -62,7 +63,7 @@ app.get('/', authOptional, async (c) => {
 });
 
 // POST /api/v1/announcements/:id/dismiss — dismiss announcement
-app.post('/:id/dismiss', authRequired, async (c) => {
+app.post('/:id/dismiss', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const announcementId = c.req.param('id');
 

@@ -11,17 +11,24 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authRequired, authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 
 type HonoEnv = { Variables: AppVariables };
 import { AppError } from '../../../../middleware/errorHandler';
 import { STATUS_JOIN_SQL, serializeStatusEnriched } from './fetch';
-import { sendToRecipient, sendToFollowers } from '../../../../federation/helpers/send';
+import { sendToRecipient, sendToFollowers, sendToRecipients } from '../../../../federation/helpers/send';
 import { Like, Undo, Emoji as APEmoji, Image as APImage } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import type { CustomEmojiRow } from '../../../../types/db';
 import { addReaction, removeReaction } from '../../../../services/status';
 import { broadcastReactionEvent } from '../../../../services/streaming';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import {
+	assertStatusViewable,
+	assertStatusInteractable,
+	canViewStatusById,
+} from '../../../../services/permissions';
+import { getStatusFederationAudience } from '../../../../federation/helpers/status-audience';
 
 const app = new Hono<HonoEnv>();
 
@@ -55,7 +62,7 @@ async function lookupCustomEmojiTag(
 }
 
 // PUT /:id/react/:emoji — Add emoji reaction
-app.put('/:id/react/:emoji', authRequired, async (c) => {
+app.put('/:id/react/:emoji', authRequired, requireScope('write:favourites'), async (c) => {
 	const statusId = c.req.param('id');
 	const emoji = decodeURIComponent(c.req.param('emoji'));
 	const currentAccountId = c.get('currentUser')!.account_id;
@@ -67,6 +74,7 @@ app.put('/:id/react/:emoji', authRequired, async (c) => {
 		.bind(statusId)
 		.first();
 	if (!row) throw new AppError(404, 'Record not found');
+	await assertStatusInteractable(statusId, currentAccountId);
 
 	// Validate custom emoji exists
 	const isCustom = emoji.startsWith(':') && emoji.endsWith(':');
@@ -104,16 +112,30 @@ app.put('/:id/react/:emoji', authRequired, async (c) => {
 		if (authorAccount) {
 			await sendToRecipient(fed, username!, authorAccount.uri, like);
 		}
+		if (statusRow.visibility === 'public' || statusRow.visibility === 'unlisted') {
+			await sendToFollowers(fed, username!, like);
+		}
+	} else {
+		const audience = await getStatusFederationAudience(
+			{
+				id: statusId,
+				accountId: statusRow.account_id as string,
+				visibility: statusRow.visibility as string,
+				local: statusRow.local as number | null,
+				accountDomain: null,
+				inReplyToAccountId: statusRow.in_reply_to_account_id as string | null,
+			},
+			{ includeActorFollowersAccountId: currentAccountId },
+		);
+		await sendToRecipients(fed, username!, audience.recipients, like);
 	}
-	// Always fan out to followers (so remote followers see the reaction)
-	await sendToFollowers(fed, username!, like);
 
 	const status = await serializeStatusEnriched(statusRow, domain, currentAccountId, env.CACHE);
 	return c.json(status);
 });
 
 // DELETE /:id/react/:emoji — Remove reaction
-app.delete('/:id/react/:emoji', authRequired, async (c) => {
+app.delete('/:id/react/:emoji', authRequired, requireScope('write:favourites'), async (c) => {
 	const statusId = c.req.param('id');
 	const emoji = decodeURIComponent(c.req.param('emoji'));
 	const currentAccountId = c.get('currentUser')!.account_id;
@@ -126,6 +148,7 @@ app.delete('/:id/react/:emoji', authRequired, async (c) => {
 		.first();
 	if (!row) throw new AppError(404, 'Record not found');
 
+	const canView = await canViewStatusById(statusId, currentAccountId);
 	const { changes } = await removeReaction(currentAccountId, statusId, emoji);
 
 	// Live-update connected clients
@@ -161,28 +184,37 @@ app.delete('/:id/react/:emoji', authRequired, async (c) => {
 			if (authorAccount) {
 				await sendToRecipient(fed, username!, authorAccount.uri, undo);
 			}
+			if (statusRow.visibility === 'public' || statusRow.visibility === 'unlisted') {
+				await sendToFollowers(fed, username!, undo);
+			}
+		} else {
+			const audience = await getStatusFederationAudience(
+				{
+					id: statusId,
+					accountId: statusRow.account_id as string,
+					visibility: statusRow.visibility as string,
+					local: statusRow.local as number | null,
+					accountDomain: null,
+					inReplyToAccountId: statusRow.in_reply_to_account_id as string | null,
+				},
+				{ includeActorFollowersAccountId: currentAccountId },
+			);
+			await sendToRecipients(fed, username!, audience.recipients, undo);
 		}
-		// Always fan out to followers
-		await sendToFollowers(fed, username!, undo);
 	}
 
+	if (!canView) throw new AppError(404, 'Record not found');
 	const status = await serializeStatusEnriched(statusRow, domain, currentAccountId, env.CACHE);
 	return c.json(status);
 });
 
 // GET /:id/reactions — List reactions for a status
-app.get('/:id/reactions', authOptional, async (c) => {
+app.get('/:id/reactions', authOptional, requireScope('read:statuses'), async (c) => {
 	const statusId = c.req.param('id');
 	const currentAccountId = c.get('currentUser')?.account_id ?? null;
 	const domain = env.INSTANCE_DOMAIN;
 
-	// Verify status exists
-	const status = await env.DB.prepare(
-		'SELECT id FROM statuses WHERE id = ?1 AND deleted_at IS NULL',
-	)
-		.bind(statusId)
-		.first();
-	if (!status) throw new AppError(404, 'Record not found');
+	await assertStatusViewable(statusId, currentAccountId);
 
 	// Fetch all reactions with account info and custom emoji data via LEFT JOIN
 	const { results } = await env.DB.prepare(

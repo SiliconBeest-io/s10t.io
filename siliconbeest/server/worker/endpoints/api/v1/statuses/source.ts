@@ -2,12 +2,18 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { env } from 'cloudflare:workers';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
+import {
+  assertStatusMutationAllowedForRecord,
+  type StatusMutationPermissionRecord,
+} from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
-interface StatusSourceRow {
+interface StatusSourceRow extends StatusMutationPermissionRecord {
   id: string;
+  account_id: string;
   text: string | null;
   content: string | null;
   content_warning: string | null;
@@ -16,17 +22,21 @@ interface StatusSourceRow {
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/statuses/:id/source — get plaintext source of a status
-app.get('/:id/source', authRequired, async (c) => {
+app.get('/:id/source', authRequired, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
+  const currentAccountId = c.get('currentUser')!.account_id;
 
   const status = await env.DB.prepare(
-    `SELECT id, text, content_warning, content FROM statuses
-     WHERE id = ?1 AND deleted_at IS NULL`,
+    `SELECT id, account_id, visibility, deleted_at, local, reblog_of_id,
+            text, content_warning, content
+     FROM statuses
+     WHERE id = ?1`,
   )
     .bind(statusId)
     .first<StatusSourceRow>();
 
   if (!status) throw new AppError(404, 'Record not found');
+  assertStatusMutationAllowedForRecord(status, currentAccountId, 'source');
 
   return c.json({
     id: status.id,

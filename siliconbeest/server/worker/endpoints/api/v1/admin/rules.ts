@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired, adminOnlyRequired as adminRequired } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import { getRules, getRule, createRule, updateRule, deleteRule } from '../../../../services/instance';
 import type { RuleRow } from '../../../../types/db';
 
@@ -10,6 +11,7 @@ type HonoEnv = { Variables: AppVariables };
 const app = new Hono<HonoEnv>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 /**
  * GET /api/v1/admin/rules — list all instance rules.

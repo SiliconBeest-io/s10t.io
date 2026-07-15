@@ -12,6 +12,7 @@ import { getStatusFederationAudience } from '../../../../federation/helpers/stat
 import { Like } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { favouriteStatus } from '../../../../services/status';
+import { assertStatusInteractable } from '../../../../services/permissions';
 
 const app = new Hono<HonoEnv>();
 
@@ -24,6 +25,7 @@ app.post('/:id/favourite', authRequired, requireScope('write:favourites'), async
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
   ).bind(statusId).first();
   if (!row) throw new AppError(404, 'Record not found');
+  await assertStatusInteractable(statusId, currentAccountId);
 
   const { created } = await favouriteStatus(currentAccountId, statusId);
 
@@ -58,8 +60,9 @@ app.post('/:id/favourite', authRequired, requireScope('write:favourites'), async
         if (row.account_domain) {
           const authorUri = row.account_uri as string;
           await sendToRecipient(fed, currentAccount.username as string, authorUri, like);
-          // Remote-origin statuses keep the normal actor follower fanout.
-          await sendToFollowers(fed, currentAccount.username as string, like);
+          if (row.visibility === 'public' || row.visibility === 'unlisted') {
+            await sendToFollowers(fed, currentAccount.username as string, like);
+          }
         } else {
           const audience = await getStatusFederationAudience(
             {

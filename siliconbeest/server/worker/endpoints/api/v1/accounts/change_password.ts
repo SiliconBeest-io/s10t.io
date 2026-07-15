@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppVariables } from '../../../../types';
 import { AppError } from '../../../../middleware/errorHandler';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { changePassword } from '../../../../services/auth';
 
 type HonoEnv = { Variables: AppVariables };
@@ -14,7 +15,7 @@ const app = new Hono<HonoEnv>();
  *
  * On success: sends notification email + revokes all other sessions.
  */
-app.post('/change_password', authRequired, async (c) => {
+app.post('/change_password', authRequired, requireScope('write:accounts'), async (c) => {
 	const currentUser = c.get('currentUser');
 	if (!currentUser) throw new AppError(401, 'The access token is invalid');
 

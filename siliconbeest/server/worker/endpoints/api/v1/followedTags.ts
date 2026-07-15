@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -13,7 +14,7 @@ interface TagFollowRow {
 const app = new Hono<HonoEnv>();
 
 // GET /api/v1/followed_tags — list hashtags the user follows
-app.get('/', authRequired, async (c) => {
+app.get('/', authRequired, requireScope('read:follows'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
 

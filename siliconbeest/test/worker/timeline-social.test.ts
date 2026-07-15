@@ -29,12 +29,12 @@ describe('GET /api/v1/timelines/social', () => {
     expect(res.status).toBe(401);
   });
 
-  it('merges local public posts with home timeline entries', async () => {
+  it('re-checks private status access for stale home timeline entries', async () => {
     // Local public post by someone the viewer does NOT follow → local branch
     const localPublic = await post(poster.token, 'hello social timeline', 'public');
 
-    // Private post: only visible via a home timeline entry (fanout).
-    // The queue consumer does the fanout in prod — simulate its insert here.
+    // The queue consumer does the fanout in prod — simulate a stale entry that
+    // remains after the viewer no longer follows the author.
     const homePrivate = await post(poster.token, 'private but in home', 'private');
     await env.DB.prepare(
       `INSERT INTO home_timeline_entries (id, account_id, status_id, created_at)
@@ -51,8 +51,35 @@ describe('GET /api/v1/timelines/social', () => {
     const ids = ((await res.json()) as { id: string }[]).map((s) => s.id);
 
     expect(ids).toContain(localPublic.id);
-    expect(ids).toContain(homePrivate.id);
+    expect(ids).not.toContain(homePrivate.id);
     expect(ids).not.toContain(hiddenPrivate.id);
+
+    const followRes = await SELF.fetch(`${BASE}/api/v1/accounts/${poster.accountId}/follow`, {
+      method: 'POST',
+      headers: authHeaders(viewer.token),
+    });
+    expect(followRes.status).toBe(200);
+
+    const followedRes = await SELF.fetch(`${BASE}/api/v1/timelines/social`, {
+      headers: authHeaders(viewer.token),
+    });
+    expect(followedRes.status).toBe(200);
+    const followedIds = ((await followedRes.json()) as { id: string }[]).map((s) => s.id);
+    expect(followedIds).toContain(homePrivate.id);
+    expect(followedIds).not.toContain(hiddenPrivate.id);
+
+    const unfollowRes = await SELF.fetch(`${BASE}/api/v1/accounts/${poster.accountId}/unfollow`, {
+      method: 'POST',
+      headers: authHeaders(viewer.token),
+    });
+    expect(unfollowRes.status).toBe(200);
+
+    const revokedRes = await SELF.fetch(`${BASE}/api/v1/timelines/social`, {
+      headers: authHeaders(viewer.token),
+    });
+    expect(revokedRes.status).toBe(200);
+    const revokedIds = ((await revokedRes.json()) as { id: string }[]).map((s) => s.id);
+    expect(revokedIds).not.toContain(homePrivate.id);
   });
 
   it('paginates with max_id', async () => {

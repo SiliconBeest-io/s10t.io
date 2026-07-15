@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
-import { requireScope } from '../../../../middleware/scopeCheck';
+import { requireAnyScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
@@ -16,7 +16,7 @@ function safeJsonParse<T>(val: string | null, fallback: T): T {
 
 const app = new Hono<HonoEnv>();
 
-app.get('/verify_credentials', authRequired, requireScope('read:accounts'), async (c) => {
+app.get('/verify_credentials', authRequired, requireAnyScope('profile', 'read:accounts'), async (c) => {
   const user = c.get('currentUser')!;
   const domain = env.INSTANCE_DOMAIN;
 
@@ -61,6 +61,7 @@ app.get('/verify_credentials', authRequired, requireScope('read:accounts'), asyn
       note: (row.note as string) || '',
       fields: safeJsonParse(row.fields as string | null, []),
       follow_requests_count: 0,
+      hide_collections: !!(row.hide_collections),
       quote_policy: normalizeQuotePolicy(row.default_quote_policy),
     },
     role: {

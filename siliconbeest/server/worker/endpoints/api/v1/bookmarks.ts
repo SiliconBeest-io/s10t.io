@@ -7,6 +7,7 @@ import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '..
 import { serializeAccount, serializeStatus } from '../../../utils/mastodonSerializer';
 import { enrichStatuses } from '../../../utils/statusEnrichment';
 import type { AccountRow, StatusRow } from '../../../types/db';
+import { buildStatusVisibilitySqlPredicate } from '../../../services/permissions';
 
 interface BookmarkJoinRow extends StatusRow {
   b_id: string;
@@ -56,6 +57,9 @@ app.get('/', authRequired, requireScope('read:bookmarks'), async (c) => {
     conditions.push(whereClause);
     binds.push(...params);
   }
+  const visibility = buildStatusVisibilitySqlPredicate('status', account.id);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
 
   const sql = `
     SELECT b.id AS b_id, s.*, a.id AS a_id, a.username AS a_username, a.domain AS a_domain,

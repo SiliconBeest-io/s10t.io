@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppVariables } from '../../../../../types';
 import { authRequired, adminRequired } from '../../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../../middleware/scopeCheck';
 
 import list from './list';
 import fetch from './fetch';
@@ -10,6 +11,7 @@ import assign from './assign';
 const app = new Hono<{ Variables: AppVariables }>();
 
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read:reports', 'admin:write:reports'));
 
 // GET / — list reports
 app.route('/', list);

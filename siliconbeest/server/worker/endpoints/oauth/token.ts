@@ -4,6 +4,7 @@ import type { AppVariables } from '../../types';
 import { exchangeCode } from '../../services/oauth';
 import { createAccessToken } from '../../services/auth';
 import { AppError } from '../../middleware/errorHandler';
+import { areOAuthScopesAllowed } from '../../../../../packages/shared/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -105,6 +106,13 @@ app.post('/', async (c) => {
 			return c.json(
 				{ error: 'invalid_client', error_description: 'Invalid client_secret' },
 				401,
+			);
+		}
+
+		if (!areOAuthScopesAllowed(oauthApp.scopes, scope)) {
+			return c.json(
+				{ error: 'invalid_scope', error_description: 'Requested scope exceeds the application registration' },
+				400,
 			);
 		}
 

@@ -64,6 +64,12 @@ export R2_BUCKET_NAME=my-media-bucket
 ./scripts/deploy.sh --domain social.example.com
 ```
 
+`SKIP_SIGNATURE_VERIFICATION` is also available as an explicit `true`/`false`
+operator setting in `scripts/config.env`. It defaults to `false`, and
+`sync-config.sh --apply` writes the same value to both federation workers.
+Keep it `false` in production; `true` disables inbound HTTP signature
+verification and is intended only for controlled testing or troubleshooting.
+
 ---
 
 ## Script Reference

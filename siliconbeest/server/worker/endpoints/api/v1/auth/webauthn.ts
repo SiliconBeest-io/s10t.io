@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { generateUlid } from '../../../../utils/ulid';
 import { generateSecureRandom } from '../../../../utils/crypto';
 import { getInstanceTitle } from '../../../../services/instance';
@@ -37,6 +38,7 @@ import {
 	getWebAuthnCredentialsByEmail,
 } from '../../../../services/auth';
 import { setAuthTokenCookie } from '../../../../utils/authCookie';
+import { getInternalSessionOAuthScopes } from '../../../../../../../packages/shared/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -60,7 +62,7 @@ async function getRpName(): Promise<string> {
 // POST /register/options — Generate registration options (authRequired)
 // ---------------------------------------------------------------------------
 
-app.post('/register/options', authRequired, async (c) => {
+app.post('/register/options', authRequired, requireScope('write:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 
 	// Generate 32-byte random challenge
@@ -116,7 +118,7 @@ app.post('/register/options', authRequired, async (c) => {
 // POST /register/verify — Verify registration response (authRequired)
 // ---------------------------------------------------------------------------
 
-app.post('/register/verify', authRequired, async (c) => {
+app.post('/register/verify', authRequired, requireScope('write:accounts'), async (c) => {
   try {
 	const user = c.get('currentUser')!;
 
@@ -419,8 +421,9 @@ app.post('/authenticate/verify', async (c) => {
 	const appRecord = await getOrCreateInternalApp();
 	const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
 	const userAgent = c.req.header('User-Agent') || '';
+	const scopes = getInternalSessionOAuthScopes(user.role);
 	const { tokenValue, createdAt } = await createAccessToken(appRecord.id, user.id, {
-		ip, userAgent, email: user.email, locale: user.locale,
+		ip, userAgent, email: user.email, locale: user.locale, scopes,
 	});
 
 	// 14. Update sign-in tracking
@@ -431,7 +434,7 @@ app.post('/authenticate/verify', async (c) => {
 	return c.json({
 		access_token: tokenValue,
 		token_type: 'Bearer',
-		scope: 'read write follow push',
+		scope: scopes,
 		created_at: Math.floor(new Date(createdAt).getTime() / 1000),
 	});
   } catch (err) {
@@ -444,7 +447,7 @@ app.post('/authenticate/verify', async (c) => {
 // GET /credentials — List user's passkeys (authRequired)
 // ---------------------------------------------------------------------------
 
-app.get('/credentials', authRequired, async (c) => {
+app.get('/credentials', authRequired, requireScope('read:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 
 	const credentials = await listWebAuthnCredentials(user.id);
@@ -467,7 +470,7 @@ app.get('/credentials', authRequired, async (c) => {
 // DELETE /credentials/:id — Delete a passkey (authRequired)
 // ---------------------------------------------------------------------------
 
-app.delete('/credentials/:id', authRequired, async (c) => {
+app.delete('/credentials/:id', authRequired, requireScope('write:accounts'), async (c) => {
 	const user = c.get('currentUser')!;
 	const credId = c.req.param('id');
 

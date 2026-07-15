@@ -22,11 +22,14 @@ import DeckStatusReactions from './DeckStatusReactions.vue'
 import ReportDialog from '@/components/common/ReportDialog.vue'
 import ImageViewer from '@/components/common/ImageViewer.vue'
 import { emojifyPlainText } from '@/utils/customEmoji'
+import { canUseAuthenticatedActions, getStatusActionPermissions } from '@/utils/permissions'
+import { blockAccount, muteAccount } from '@/api/mastodon/accounts'
 
 const { t } = useI18n()
 const statusesStore = useStatusesStore()
 const timelinesStore = useTimelinesStore()
 const authStore = useAuthStore()
+const accountsStore = useAccountsStore()
 const composeStore = useComposeStore()
 const uiStore = useUiStore()
 const instanceStore = useInstanceStore()
@@ -77,6 +80,7 @@ function openImageViewer(index: number) {
 const reportTarget = ref<{ accountId: string; accountAcct: string; statusId: string } | null>(null)
 
 function handleReport(payload: { accountId: string; accountAcct: string; statusId: string }) {
+  if (!statusActionPermissions.value.report) return
   reportTarget.value = payload
   showReportDialog.value = true
 }
@@ -84,6 +88,41 @@ function handleReport(payload: { accountId: string; accountAcct: string; statusI
 const isOwnStatus = computed(() => {
   return authStore.currentUser?.id === displayStatus.value.account.id
 })
+
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: authStore.isAuthenticated,
+  accountLoaded: authStore.currentUser !== null,
+  accountSuspended: authStore.currentUser?.suspended,
+  accountMemorial: authStore.currentUser?.memorial,
+}))
+const statusActionPermissions = computed(() => getStatusActionPermissions({
+  accountCanAct: accountCanAct.value,
+  isOwnStatus: isOwnStatus.value,
+  visibility: displayStatus.value.visibility,
+  quotePolicyAllows: displayStatus.value.quote_policy_allows,
+}))
+
+async function handleBlock(accountId: string) {
+  if (!accountCanAct.value || !authStore.token) return
+  try {
+    const { data } = await blockAccount(accountId, authStore.token)
+    accountsStore.updateRelationship(data)
+    timelinesStore.removeAccountStatuses(accountId)
+  } catch {
+    // Keep the current UI when the relationship update is rejected.
+  }
+}
+
+async function handleMute(accountId: string) {
+  if (!accountCanAct.value || !authStore.token) return
+  try {
+    const { data } = await muteAccount(accountId, authStore.token)
+    accountsStore.updateRelationship(data)
+    timelinesStore.removeAccountStatuses(accountId)
+  } catch {
+    // Keep the current UI when the relationship update is rejected.
+  }
+}
 
 const relativeTime = computed(() => {
   const date = new Date(displayStatus.value.created_at)
@@ -137,7 +176,6 @@ const replyToDisplay = computed(() => {
   if (status.in_reply_to_account_id === status.account.id) {
     return `@${status.account.acct}`
   }
-  const accountsStore = useAccountsStore()
   const cached = accountsStore.getCached(status.in_reply_to_account_id!)
   if (cached) return `@${cached.acct}`
   if (status.in_reply_to_account_id) {
@@ -147,7 +185,7 @@ const replyToDisplay = computed(() => {
 })
 
 async function handleFavourite() {
-  if (loadingFavourite.value) return
+  if (!statusActionPermissions.value.favourite || loadingFavourite.value) return
   loadingFavourite.value = true
   try {
     const target = cachedStatus.value.reblog ?? cachedStatus.value
@@ -158,7 +196,7 @@ async function handleFavourite() {
 }
 
 async function handleReblog() {
-  if (loadingReblog.value) return
+  if (!statusActionPermissions.value.reblog || loadingReblog.value) return
   loadingReblog.value = true
   try {
     const target = cachedStatus.value.reblog ?? cachedStatus.value
@@ -169,7 +207,7 @@ async function handleReblog() {
 }
 
 async function handleBookmark() {
-  if (loadingBookmark.value) return
+  if (!statusActionPermissions.value.bookmark || loadingBookmark.value) return
   loadingBookmark.value = true
   try {
     const target = cachedStatus.value.reblog ?? cachedStatus.value
@@ -180,12 +218,14 @@ async function handleBookmark() {
 }
 
 function handleReply() {
+  if (!statusActionPermissions.value.reply) return
   const target = cachedStatus.value.reblog ?? cachedStatus.value
   composeStore.setReplyTo(target)
   uiStore.openComposeModal()
 }
 
 function handleQuote() {
+  if (!statusActionPermissions.value.quote) return
   const target = cachedStatus.value.reblog ?? cachedStatus.value
   composeStore.setQuote(target)
   uiStore.openComposeModal()
@@ -197,7 +237,8 @@ function handleCardClick() {
 }
 
 async function handleShare() {
-  const url = cachedStatus.value.url || `${window.location.origin}/@${cachedStatus.value.account.acct}/${cachedStatus.value.id}`
+  const target = displayStatus.value
+  const url = target.url || `${window.location.origin}/@${target.account.acct}/${target.id}`
   if (navigator.share) {
     try {
       await navigator.share({ url })
@@ -241,6 +282,7 @@ function stripHtml(html: string): string {
 }
 
 function handleEdit() {
+  if (!statusActionPermissions.value.edit) return
   const s = displayStatus.value
   editText.value = s.text || stripHtml(s.content || '')
   editSpoilerText.value = s.spoiler_text || ''
@@ -256,10 +298,10 @@ function cancelEdit() {
 }
 
 async function submitEdit() {
-  if (editLoading.value) return
+  if (!statusActionPermissions.value.edit || editLoading.value) return
   editLoading.value = true
   try {
-    await statusesStore.editStatus(cachedStatus.value.id, {
+    await statusesStore.editStatus(displayStatus.value.id, {
       status: editText.value,
       spoiler_text: editSpoilerText.value || undefined,
       sensitive: editSensitive.value,
@@ -291,15 +333,18 @@ const reactionsOverlayOpen = ref(false)
 const overlayOpen = computed(() => actionsOverlayOpen.value || reactionsOverlayOpen.value)
 
 function handleReact(_id: string, anchor?: HTMLElement) {
+  if (!statusActionPermissions.value.react) return
   reactionsRef.value?.openPicker(anchor)
 }
 
 async function handleDelete() {
+  if (!statusActionPermissions.value.delete) return
   if (!confirm(t('status.delete_confirm'))) return
+  const targetStatusId = displayStatus.value.id
   try {
-    await statusesStore.deleteStatus(cachedStatus.value.id)
-    timelinesStore.removeStatus(cachedStatus.value.id)
-    emit('deleted', cachedStatus.value.id)
+    const removedIds = await statusesStore.deleteStatus(targetStatusId)
+    for (const removedId of removedIds) timelinesStore.removeStatus(removedId)
+    emit('deleted', targetStatusId)
   } catch {
     // Error handling
   }
@@ -516,6 +561,7 @@ async function handleDelete() {
       :favourited="displayStatus.favourited"
       :reblogged="displayStatus.reblogged"
       :bookmarked="displayStatus.bookmarked"
+      :account-can-act="accountCanAct"
       :is-own-status="isOwnStatus"
       :account-id="displayStatus.account.id"
       :account-acct="displayStatus.account.acct"
@@ -535,6 +581,8 @@ async function handleDelete() {
       @edit="handleEdit"
       @delete="handleDelete"
       @report="handleReport"
+      @block="handleBlock"
+      @mute="handleMute"
       @react="handleReact"
       @overlay="actionsOverlayOpen = $event"
     />

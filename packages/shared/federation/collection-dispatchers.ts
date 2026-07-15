@@ -8,6 +8,10 @@
  */
 
 import { env } from 'cloudflare:workers';
+import {
+  canOriginateAccountActivity,
+  canViewAccountCollection,
+} from '../permissions';
 
 // ============================================================
 // STRUCTURAL TYPES (match Fedify's API without importing it)
@@ -18,10 +22,15 @@ interface CollectionContextLike<TData> {
   data: TData;
 }
 
+interface CollectionRequestContextLike<TData> extends CollectionContextLike<TData> {
+  getSignedKeyOwner(): Promise<{ readonly id: URL | null } | null>;
+}
+
 /** Matches the builder returned by Federation.setFollowersDispatcher(). */
 interface FollowersDispatcherBuilder<TData> {
   setCounter(handler: (ctx: CollectionContextLike<TData>, identifier: string) => Promise<bigint | number | null>): FollowersDispatcherBuilder<TData>;
   setFirstCursor(handler: (ctx: CollectionContextLike<TData>, identifier: string) => Promise<string | null>): FollowersDispatcherBuilder<TData>;
+  authorize(handler: (ctx: CollectionRequestContextLike<TData>, identifier: string) => Promise<boolean>): FollowersDispatcherBuilder<TData>;
 }
 
 /** Minimal shape of a Fedify Federation for the followers dispatcher. */
@@ -40,6 +49,63 @@ interface FederationLike<TData> {
 }
 
 const FOLLOWERS_PAGE_SIZE = 40;
+
+/**
+ * HTTP access to a hidden local social graph requires a verified signature
+ * owned by that exact actor. Collection dispatch itself remains unchanged so
+ * internal followers-only delivery can still expand the real relationship.
+ */
+export async function authorizeAccountCollectionRequest<TData>(
+  ctx: CollectionRequestContextLike<TData>,
+  identifier: string,
+): Promise<boolean> {
+  const account = await env.DB.prepare(
+    `SELECT a.uri, a.hide_collections, a.domain, a.suspended_at, a.memorial,
+            u.disabled AS user_disabled, u.approved AS user_approved
+     FROM accounts a
+     LEFT JOIN users u ON u.account_id = a.id
+     WHERE a.username = ?1 AND a.domain IS NULL
+     LIMIT 1`,
+  ).bind(identifier).first<{
+    uri: string;
+    hide_collections: number | null;
+    domain: string | null;
+    suspended_at: string | null;
+    memorial: number | null;
+    user_disabled: number | null;
+    user_approved: number | null;
+  }>();
+  if (!account) return false;
+  if (!canOriginateAccountActivity({
+    accountSuspended: account.suspended_at !== null,
+    accountMemorial: account.memorial === null ? null : account.memorial !== 0,
+    isLocalAccount: account.domain === null,
+    userDisabled: account.user_disabled === null ? null : account.user_disabled !== 0,
+    userApproved: account.user_approved === null ? null : account.user_approved !== 0,
+  })) return false;
+
+  const collectionsHidden = account.hide_collections === null
+    ? null
+    : account.hide_collections === 1;
+  if (canViewAccountCollection({
+    ownerAccountId: account.uri,
+    viewerAccountId: null,
+    collectionsHidden,
+  })) {
+    return true;
+  }
+
+  try {
+    const signedOwner = await ctx.getSignedKeyOwner();
+    return canViewAccountCollection({
+      ownerAccountId: account.uri,
+      viewerAccountId: signedOwner?.id?.href ?? null,
+      collectionsHidden,
+    });
+  } catch {
+    return false;
+  }
+}
 
 // ============================================================
 // SHARED LOGIC
@@ -121,5 +187,6 @@ export function setupFollowersDispatcher<TData>(
     })
     .setFirstCursor(async (_ctx, _identifier) => {
       return '';
-    });
+    })
+    .authorize(authorizeAccountCollectionRequest);
 }

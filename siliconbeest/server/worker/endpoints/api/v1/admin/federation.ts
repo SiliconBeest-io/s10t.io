@@ -28,6 +28,7 @@ import {
   adminRequired,
   adminOnlyRequired,
 } from '../../../../middleware/auth';
+import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { redactDlqBodyForDisplay } from '../../../../utils/redactSensitive';
 import { getUserAgent } from '../../../../utils/repository';
@@ -59,6 +60,7 @@ const DIAGNOSTIC_DNS_REBINDING_ROOTS = new Set([
 
 // Apply auth to all routes
 app.use('*', authRequired, adminRequired);
+app.use('*', requireScopeForMethod('admin:read', 'admin:write'));
 
 // GET /instances — list all instances with pagination and search
 app.get('/instances', async (c) => {

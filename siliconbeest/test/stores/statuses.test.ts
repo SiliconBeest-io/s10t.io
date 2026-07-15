@@ -200,4 +200,26 @@ describe('Statuses Store', () => {
       expect(home.statusIds).toEqual(['orig', 'other']);
     });
   });
+
+  describe('delete status', () => {
+    it('deletes the original and cached reblog wrappers as one rendered tree', async () => {
+      const { useAuthStore } = await import('@/stores/auth');
+      const { deleteStatus } = await import('@/api/mastodon/statuses');
+      const auth = useAuthStore();
+      auth.token = 'tok';
+
+      const store = useStatusesStore();
+      const original = makeStatus({ id: 'original' });
+      const wrapper = makeStatus({ id: 'wrapper', reblog: original });
+      store.cacheStatus(wrapper);
+      vi.mocked(deleteStatus).mockResolvedValue({ data: original } as never);
+
+      const removedIds = await store.deleteStatus('original');
+
+      expect(deleteStatus).toHaveBeenCalledWith('original', 'tok');
+      expect(removedIds).toEqual(['original', 'wrapper']);
+      expect(store.getCached('original')).toBeUndefined();
+      expect(store.getCached('wrapper')).toBeUndefined();
+    });
+  });
 });

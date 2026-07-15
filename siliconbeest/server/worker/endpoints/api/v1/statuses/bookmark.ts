@@ -6,6 +6,7 @@ import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { STATUS_JOIN_SQL, serializeStatusEnriched } from './fetch';
 import { bookmarkStatus } from '../../../../services/status';
+import { assertStatusViewable } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -20,6 +21,7 @@ app.post('/:id/bookmark', authRequired, requireScope('write:bookmarks'), async (
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
   ).bind(statusId).first();
   if (!row) throw new AppError(404, 'Record not found');
+  await assertStatusViewable(statusId, currentAccountId);
 
   await bookmarkStatus(currentAccountId, statusId);
 

@@ -95,7 +95,7 @@ interface FederationLike<TData> {
 	setInboxListeners(path: string, sharedPath: string): InboxListenerBuilder<TData>;
 }
 
-type ProcessorFn = (activity: any, accountId: string) => Promise<void>;
+type ProcessorFn = (activity: any, accountId: string) => Promise<boolean | void>;
 
 /** Fedify vocab activity classes — each caller passes their own to avoid dual-package hazard. */
 export interface InboxListenerVocab {
@@ -257,8 +257,8 @@ export function setupInboxListeners<TData>(
 				if (localAccountId === null) return;
 
 				const apActivity = await Promise.resolve(convert(activity));
-				await processor(apActivity, localAccountId);
-				if (afterProcess) {
+				const accepted = await processor(apActivity, localAccountId);
+				if (afterProcess && accepted === true) {
 					await afterProcess(ctx, activity, apActivity, localAccountId);
 				}
 			});
@@ -435,11 +435,13 @@ export function setupInboxListeners<TData>(
 						localAccountId,
 					);
 				} else {
-					await processors.processLike(
+					const accepted = await processors.processLike(
 						activity,
 						localAccountId,
 					);
-					await forwardActivityForLocalStatus(ctx, activity);
+					if (accepted === true) {
+						await forwardActivityForLocalStatus(ctx, activity);
+					}
 				}
 			});
 		})

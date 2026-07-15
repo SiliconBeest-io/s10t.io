@@ -8,6 +8,7 @@ import { useAccountsStore } from '@/stores/accounts'
 import Avatar from '../common/Avatar.vue'
 import FollowButton from './FollowButton.vue'
 import { emojifyPlainText } from '@/utils/customEmoji'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -32,8 +33,15 @@ const emojifiedName = computed(() => emojifyPlainText(
   'custom-emoji inline-block h-5 max-w-8 align-text-bottom',
 ))
 
+const canFollow = computed(() => canUseAuthenticatedActions({
+  authenticated: auth.isAuthenticated,
+  accountLoaded: auth.currentUser !== null,
+  accountSuspended: auth.currentUser?.suspended,
+  accountMemorial: auth.currentUser?.memorial,
+}) && auth.currentUser?.id !== props.account.id)
+
 async function handleToggle() {
-  if (!auth.token) return
+  if (!canFollow.value || !auth.token) return
   const rel = accountsStore.getRelationship(props.account.id)
   try {
     const { data } = rel?.following
@@ -60,7 +68,7 @@ async function handleToggle() {
     </div>
 
     <FollowButton
-      v-if="showFollowButton"
+      v-if="showFollowButton && canFollow"
       :account-id="account.id"
       :following="accountsStore.getRelationship(account.id)?.following"
       :requested="accountsStore.getRelationship(account.id)?.requested"

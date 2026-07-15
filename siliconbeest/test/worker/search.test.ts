@@ -8,14 +8,20 @@ const BASE = 'https://test.siliconbeest.local';
 describe('Search API', () => {
   let user: { accountId: string; userId: string; token: string };
   let other: { accountId: string; userId: string; token: string };
+  let restricted: { accountId: string; userId: string; token: string };
+  let searchableStatus: { id: string; uri: string };
 
   beforeAll(async () => {
     await applyMigration();
     user = await createTestUser('searchuser');
     other = await createTestUser('searchother');
+    restricted = await createTestUser('searchrestricted');
+    await env.DB.prepare(
+      "UPDATE oauth_access_tokens SET scopes = 'write' WHERE user_id = ?1",
+    ).bind(restricted.userId).run();
 
     // Create a status with a hashtag and text for searching
-    await SELF.fetch(`${BASE}/api/v1/statuses`, {
+    const statusResponse = await SELF.fetch(`${BASE}/api/v1/statuses`, {
       method: 'POST',
       headers: authHeaders(user.token),
       body: JSON.stringify({
@@ -23,6 +29,8 @@ describe('Search API', () => {
         visibility: 'public',
       }),
     });
+    expect(statusResponse.status).toBe(200);
+    searchableStatus = await statusResponse.json<{ id: string; uri: string }>();
   });
 
   // -------------------------------------------------------------------
@@ -132,6 +140,41 @@ describe('Search API', () => {
         expect(body.statuses.some((item: Record<string, any>) => item.id === status.id)).toBe(false);
       }
     });
+
+    it('keeps a locally-known exact public URL available anonymously without network resolution', async () => {
+      const res = await SELF.fetch(
+        `${BASE}/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json<{ statuses: Array<{ id: string }> }>();
+      expect(body.statuses.map((status) => status.id)).toContain(searchableStatus.id);
+    });
+
+    it('requires an authorized user for status full-text, offset, and remote resolution modes', async () => {
+      const paths = [
+        '/api/v2/search?q=Searching&type=statuses',
+        '/api/v2/search?q=searchuser&type=accounts&offset=0',
+        `/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses&resolve=true`,
+      ];
+
+      for (const path of paths) {
+        expect((await SELF.fetch(`${BASE}${path}`)).status).toBe(401);
+      }
+    });
+
+    it('requires read:search scope for authenticated-only search modes', async () => {
+      const paths = [
+        '/api/v2/search?q=Searching&type=statuses',
+        '/api/v2/search?q=searchuser&type=accounts&offset=0',
+        `/api/v2/search?q=${encodeURIComponent(searchableStatus.uri)}&type=statuses&resolve=true`,
+      ];
+
+      for (const path of paths) {
+        expect((await SELF.fetch(`${BASE}${path}`, {
+          headers: authHeaders(restricted.token),
+        })).status).toBe(403);
+      }
+    });
   });
 
   // -------------------------------------------------------------------
@@ -152,6 +195,8 @@ describe('Search API', () => {
     it('allows search without auth (public search)', async () => {
       const res = await SELF.fetch(`${BASE}/api/v2/search?q=test`);
       expect(res.status).toBe(200);
+      const body = await res.json<{ statuses: Array<{ id: string }> }>();
+      expect(body.statuses).toEqual([]);
     });
   });
 });

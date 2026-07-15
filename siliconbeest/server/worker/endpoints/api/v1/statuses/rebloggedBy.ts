@@ -4,19 +4,27 @@ import { env } from 'cloudflare:workers';
 import { AppError } from '../../../../middleware/errorHandler';
 import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../../utils/pagination';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { authOptional } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
+import {
+  assertStatusViewable,
+  buildAccountInteractionListSqlPredicate,
+} from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
 const app = new Hono<HonoEnv>();
 
-app.get('/:id/reblogged_by', async (c) => {
+app.get('/:id/reblogged_by', authOptional, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
+  const currentAccountId = c.get('currentUser')?.account_id ?? null;
   const domain = env.INSTANCE_DOMAIN;
 
   const status = await env.DB.prepare(
     'SELECT id FROM statuses WHERE id = ?1 AND deleted_at IS NULL',
   ).bind(statusId).first();
   if (!status) throw new AppError(404, 'Record not found');
+  await assertStatusViewable(statusId, currentAccountId);
 
   const query = c.req.query();
   const pagination = parsePaginationParams({
@@ -28,8 +36,19 @@ app.get('/:id/reblogged_by', async (c) => {
 
   const pag = buildPaginationQuery(pagination, 's.id');
 
-  const conditions = ['s.reblog_of_id = ?', 's.deleted_at IS NULL'];
+  const conditions = [
+    's.reblog_of_id = ?',
+    's.deleted_at IS NULL',
+    "s.visibility IN ('public', 'unlisted')",
+  ];
   const params: unknown[] = [statusId];
+  const accountPermission = buildAccountInteractionListSqlPredicate(
+    'account',
+    currentAccountId,
+    new Date().toISOString(),
+  );
+  conditions.push(accountPermission.sql);
+  params.push(...accountPermission.bindings);
 
   if (pag.whereClause) {
     conditions.push(pag.whereClause);

@@ -165,6 +165,12 @@ export function serializeAccount(
   if (row.suspended_at) {
     account.suspended = true;
   }
+  if (row.silenced_at) {
+    account.limited = true;
+  }
+  if (bool(row.memorial)) {
+    account.memorial = true;
+  }
 
   return account;
 }

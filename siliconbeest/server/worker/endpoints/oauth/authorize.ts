@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { areOAuthScopesAllowed } from '../../../../../packages/shared/permissions';
 import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../types';
 import { verifyPassword } from '../../utils/crypto';
@@ -6,6 +7,7 @@ import { generateToken } from '../../utils/crypto';
 import { createAuthorizationCode } from '../../services/oauth';
 import { getInstanceTitle } from '../../services/instance';
 import { verifyTurnstile, getTurnstileSettings } from '../../utils/turnstile';
+import { canUserAccessAccount, resolveToken } from '../../services/auth';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -183,22 +185,8 @@ async function resolveBearer(c: any): Promise<string | null> {
 	const hash = Array.from(
 		new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))),
 	).map((b: number) => b.toString(16).padStart(2, '0')).join('');
-	const cacheKey = `token:${hash}`;
-
-	// KV cache
-	const cached = await env.CACHE.get(cacheKey, 'json');
-	if (cached) return (cached as { user?: { id?: string } }).user?.id ?? null;
-
-	// D1 fallback (token_hash first, then legacy plaintext)
-	let row = await env.DB.prepare(
-		'SELECT t.user_id FROM oauth_access_tokens t WHERE t.token_hash = ?1 AND t.revoked_at IS NULL LIMIT 1',
-	).bind(hash).first();
-	if (!row) {
-		row = await env.DB.prepare(
-			'SELECT t.user_id FROM oauth_access_tokens t WHERE t.token = ?1 AND t.revoked_at IS NULL LIMIT 1',
-		).bind(token).first();
-	}
-	return row ? (row.user_id as string) : null;
+	const resolved = await resolveToken(hash, token);
+	return resolved?.user.id ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +234,9 @@ app.get('/', async (c) => {
 		if (!isAllowedRedirectUri(oauthApp.redirect_uri as string, redirectUri)) {
 			return c.json({ error: 'invalid_request', error_description: 'redirect_uri does not match the registered value' }, 400);
 		}
+		if (!areOAuthScopesAllowed(oauthApp.scopes as string, scope)) {
+			return c.json({ error: 'invalid_scope', error_description: 'Requested scope exceeds the application registration' }, 400);
+		}
 
 		// Check if user is authenticated via bearer token
 		const userId = await resolveBearer(c);
@@ -279,7 +270,7 @@ app.get('/', async (c) => {
 
 	// User is authenticated — validate the app and auto-approve
 	const oauthApp = await env.DB.prepare(
-		'SELECT id, redirect_uri FROM oauth_applications WHERE client_id = ?1 LIMIT 1',
+		'SELECT id, redirect_uri, scopes FROM oauth_applications WHERE client_id = ?1 LIMIT 1',
 	).bind(clientId).first();
 
 	if (!oauthApp) {
@@ -289,6 +280,9 @@ app.get('/', async (c) => {
 	// Validate redirect_uri against the registered value before issuing a code.
 	if (!isAllowedRedirectUri(oauthApp.redirect_uri as string, redirectUri)) {
 		return c.redirect(`/login?error=${encodeURIComponent('Invalid redirect_uri')}`);
+	}
+	if (!areOAuthScopesAllowed(oauthApp.scopes as string, scope)) {
+		return c.redirect(`/login?error=${encodeURIComponent('Invalid scope')}`);
 	}
 
 	// For server-side HTML requests from authenticated users, issue code directly
@@ -370,6 +364,23 @@ app.post('/', async (c) => {
 			400,
 		);
 	}
+	if (!areOAuthScopesAllowed(oauthApp.scopes as string, scope)) {
+		if (isJson) {
+			return c.json({ error: 'invalid_scope', error_description: 'Requested scope exceeds the application registration' }, 400);
+		}
+		return c.html(
+			loginPage({
+				clientId,
+				redirectUri,
+				scope,
+				state,
+				responseType,
+				error: 'Invalid scope',
+				instanceTitle: await getInstanceTitle(),
+			}),
+			400,
+		);
+	}
 
 	// ---------------------------------------------------------------------------
 	// Bearer token approval (from SPA / Vue frontend)
@@ -387,6 +398,9 @@ app.post('/', async (c) => {
 
 		// Approve: issue authorization code via service
 		if (isJson) {
+			if (!await canUserAccessAccount(userId)) {
+				return c.json({ error: 'access_denied' }, 403);
+			}
 			const code = await createAuthorizationCode(
 				oauthApp.id as string, userId, redirectUri, scope,
 			);
@@ -421,12 +435,13 @@ app.post('/', async (c) => {
 			if (tokenRow) tokenPayload = { user: { id: tokenRow.user_id, account_id: tokenRow.account_id } };
 		}
 		if (tokenPayload) {
-			// Issue authorization code via service
-			const codeValue = await createAuthorizationCode(
-				oauthApp.id as string, tokenPayload.user.id, redirectUri, scope,
-			);
-			const sep = redirectUri.includes('?') ? '&' : '?';
-			return c.redirect(`${redirectUri}${sep}code=${codeValue}${state ? '&state=' + encodeURIComponent(state) : ''}`);
+			return await issueAuthorizationCode(c, {
+				userId: tokenPayload.user.id,
+				applicationId: oauthApp.id as string,
+				redirectUri,
+				scope,
+				state,
+			});
 		}
 	}
 
@@ -691,6 +706,9 @@ async function issueAuthorizationCode(
 		state: string;
 	},
 ) {
+	if (!await canUserAccessAccount(opts.userId)) {
+		return c.json({ error: 'access_denied' }, 403);
+	}
 	const code = await createAuthorizationCode(
 		opts.applicationId,
 		opts.userId,

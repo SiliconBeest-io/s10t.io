@@ -9,6 +9,7 @@ import { getFedifyContext } from '../../../federation/helpers/send';
 import { Flag } from '@fedify/fedify/vocab';
 import type { Recipient } from '@fedify/fedify/vocab';
 import { notifyAdminsNewReport } from '../../../services/email';
+import { assertStatusesViewableForAccount } from '../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -57,7 +58,11 @@ app.post('/', authRequired, requireScope('write:reports'), async (c) => {
   const reportId = generateUlid();
   const now = new Date().toISOString();
   const comment = body.comment || '';
-  const statusIds = body.status_ids || [];
+  const statusIds = await assertStatusesViewableForAccount(
+    body.status_ids || [],
+    currentUser.account_id,
+    body.account_id,
+  );
   const forwarded = body.forward ? 1 : 0;
 
   await env.DB.prepare(

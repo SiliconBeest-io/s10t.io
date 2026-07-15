@@ -13,6 +13,8 @@ import { sanitizeHtml } from '../../utils/sanitize';
 import { BaseProcessor } from './BaseProcessor';
 import { env } from 'cloudflare:workers';
 import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
+import { areActivityPubUrisEquivalent } from '../../../../../packages/shared/permissions';
+import { canProcessIncomingActorUpdate } from '../../services/permissions';
 
 class UpdateProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -36,10 +38,11 @@ class UpdateProcessor extends BaseProcessor {
 		if (actorTypes.includes(obj.type)) {
 			const actor = obj as APActor;
 
-			if (actor.id && actor.id !== activity.actor) {
+			if (!actor.id || !areActivityPubUrisEquivalent(actor.id, activity.actor)) {
 				console.warn('[update] Actor URI mismatch — cannot update another actor');
 				return;
 			}
+			if (!await canProcessIncomingActorUpdate(actorAccount.id, actorAccount.id)) return;
 
 			const updates: UpdateAccountInput = {};
 
@@ -63,9 +66,22 @@ class UpdateProcessor extends BaseProcessor {
 				updates.url = typeof actor.url === 'string' ? actor.url : null;
 			}
 
+			// An Actor Update may change collection authorization without changing
+			// the advertised URLs. Hide immediately, then let the signed full fetch
+			// prove that both collection first pages remain public before reopening.
+			updates.hide_collections = 1;
+
 			if (Object.keys(updates).length === 0) return;
 
 			await this.accountRepo.update(actorAccount.id, updates);
+			await env.QUEUE_FEDERATION.send({
+				type: 'fetch_remote_account',
+				actorUri: activity.actor,
+				forceRefresh: true,
+				...(this.recipientAccountId
+					? { signerAccountId: this.recipientAccountId }
+					: {}),
+			});
 			return;
 		}
 
@@ -82,7 +98,7 @@ class UpdateProcessor extends BaseProcessor {
 				return;
 			}
 
-			if (status.account_id !== actorAccount.id) {
+			if (!await canProcessIncomingActorUpdate(actorAccount.id, status.account_id)) {
 				console.warn('[update] Actor does not own the status being updated');
 				return;
 			}

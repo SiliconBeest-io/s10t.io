@@ -10,6 +10,7 @@ import { env } from 'cloudflare:workers';
 import type { APActivity } from '../../types/activitypub';
 import { generateUlid } from '../../utils/ulid';
 import { BaseProcessor } from './BaseProcessor';
+import { canProcessIncomingAccountTarget } from '../../services/permissions';
 
 class BlockProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
@@ -21,7 +22,10 @@ class BlockProcessor extends BaseProcessor {
 		}
 
 		// Resolve the actor (blocker)
-		const actorAccount = await this.findAccountByUri(activity.actor);
+		const actorAccountId = await this.resolveActor(activity.actor);
+		const actorAccount = actorAccountId
+			? await this.accountRepo.findById(actorAccountId)
+			: null;
 		if (!actorAccount) {
 			console.warn(`[block] Actor not found: ${activity.actor}`);
 			return;
@@ -31,6 +35,18 @@ class BlockProcessor extends BaseProcessor {
 		const targetAccount = await this.findAccountByUri(targetUri);
 		if (!targetAccount) {
 			console.warn(`[block] Target not found: ${targetUri}`);
+			return;
+		}
+
+		const recipientAccountId = this.recipientAccountId === ''
+			? null
+			: this.recipientAccountId;
+		if (!await canProcessIncomingAccountTarget(
+			actorAccount.id,
+			targetAccount.id,
+			recipientAccountId,
+		)) {
+			console.warn('[block] Block permission denied');
 			return;
 		}
 

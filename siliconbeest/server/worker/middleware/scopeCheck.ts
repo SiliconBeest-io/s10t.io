@@ -1,5 +1,9 @@
 import { createMiddleware } from 'hono/factory';
 import type { AppVariables } from '../types';
+import {
+  hasAnyOAuthScope,
+  hasOAuthScope,
+} from '../../../../packages/shared/permissions';
 
 type MiddlewareEnv = { Variables: AppVariables };
 
@@ -11,34 +15,6 @@ type MiddlewareEnv = { Variables: AppVariables };
  *   read:mutes, write:mutes (legacy Mastodon scope)
  * - "push" grants push
  */
-function hasScope(grantedScopes: string, requiredScope: string): boolean {
-  const granted = grantedScopes.split(/\s+/);
-
-  // Direct match
-  if (granted.includes(requiredScope)) return true;
-
-  // Hierarchical match: "read" covers "read:*", "write" covers "write:*"
-  const [category] = requiredScope.split(':');
-  if (granted.includes(category)) return true;
-
-  // Legacy "follow" scope covers follow-related sub-scopes
-  if (granted.includes('follow')) {
-    const followScopes = [
-      'read:follows', 'write:follows',
-      'read:blocks', 'write:blocks',
-      'read:mutes', 'write:mutes',
-    ];
-    if (followScopes.includes(requiredScope)) return true;
-  }
-
-  // "admin" top-level covers admin:read and admin:write
-  if (granted.includes('admin')) {
-    if (requiredScope.startsWith('admin:')) return true;
-  }
-
-  return false;
-}
-
 /**
  * Middleware factory that requires a specific OAuth scope.
  * Must be used after authRequired or authOptional.
@@ -49,14 +25,15 @@ export function requireScope(scope: string) {
   return createMiddleware<MiddlewareEnv>(async (c, next) => {
     const tokenScopes = c.get('tokenScopes');
 
-    // If no scopes set (e.g. no token, authOptional path), allow through
-    // — the endpoint's own auth logic handles unauthenticated access.
-    if (!tokenScopes) {
+    // A null value means authOptional did not resolve a token, so the public
+    // endpoint's own authentication rules apply. An authenticated token with
+    // an empty scope string must still fail the scope check.
+    if (tokenScopes === null) {
       await next();
       return;
     }
 
-    if (!hasScope(tokenScopes, scope)) {
+    if (!hasOAuthScope(tokenScopes, scope)) {
       return c.json(
         {
           error: 'This action is outside the authorized scopes',
@@ -66,6 +43,61 @@ export function requireScope(scope: string) {
       );
     }
 
+    await next();
+  });
+}
+
+/** Require at least one of several endpoint-specific OAuth scopes. */
+export function requireAnyScope(...scopes: readonly string[]) {
+  return createMiddleware<MiddlewareEnv>(async (c, next) => {
+    const tokenScopes = c.get('tokenScopes');
+    if (tokenScopes === null) {
+      await next();
+      return;
+    }
+
+    if (!hasAnyOAuthScope(tokenScopes, scopes)) {
+      return c.json(
+        {
+          error: 'This action is outside the authorized scopes',
+          required_scopes: scopes,
+        },
+        403,
+      );
+    }
+
+    await next();
+  });
+}
+
+/** Apply the read or write scope for an entire resource router. */
+export function requireScopeForMethod(readScope: string, writeScope: string) {
+  return createMiddleware<MiddlewareEnv>(async (c, next) => {
+    const method = c.req.method;
+    const requiredScope = method === 'GET' || method === 'HEAD'
+      ? readScope
+      : method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE'
+        ? writeScope
+        : null;
+    if (requiredScope === null) {
+      await next();
+      return;
+    }
+
+    const tokenScopes = c.get('tokenScopes');
+    if (tokenScopes === null) {
+      await next();
+      return;
+    }
+    if (!hasOAuthScope(tokenScopes, requiredScope)) {
+      return c.json(
+        {
+          error: 'This action is outside the authorized scopes',
+          required_scope: requiredScope,
+        },
+        403,
+      );
+    }
     await next();
   });
 }

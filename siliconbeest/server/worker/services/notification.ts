@@ -2,6 +2,10 @@ import { env } from 'cloudflare:workers';
 import { generateUlid } from '../utils/ulid';
 import { AppError } from '../middleware/errorHandler';
 import type { NotificationRow } from '../types/db';
+import {
+  buildNotificationRelationshipSqlPredicate,
+  buildNotificationStatusSqlPredicate,
+} from './permissions';
 
 // -----------------------------------------------------------------
 // Shared types
@@ -81,6 +85,20 @@ export async function listNotifications(
 ): Promise<NotifWithAccountRow[]> {
   const conditions: string[] = ['n.account_id = ?'];
   const binds: (string | number)[] = [accountId];
+  const now = new Date().toISOString();
+  const senderPermission = buildNotificationRelationshipSqlPredicate('notification_sender', accountId, now);
+  const statusPermission = buildNotificationStatusSqlPredicate(
+    'notification_status',
+    accountId,
+    now,
+  );
+  conditions.push(senderPermission.sql);
+  binds.push(...senderPermission.bindings);
+  conditions.push(`(
+    n.status_id IS NULL
+    OR ${statusPermission.sql}
+  )`);
+  binds.push(...statusPermission.bindings);
 
   if (opts.whereClause) {
     conditions.push(opts.whereClause);
@@ -106,6 +124,7 @@ export async function listNotifications(
     SELECT ${ACCOUNT_JOIN_COLUMNS}
     FROM notifications n
     JOIN accounts a ON a.id = n.from_account_id
+    LEFT JOIN statuses permission_status ON permission_status.id = n.status_id
     WHERE ${conditions.join(' AND ')}
     ORDER BY ${orderClause}
     LIMIT ?
@@ -123,14 +142,33 @@ export async function getNotification(
   id: string,
   accountId: string,
 ): Promise<NotifWithAccountRow | null> {
+  const now = new Date().toISOString();
+  const senderPermission = buildNotificationRelationshipSqlPredicate('notification_sender', accountId, now);
+  const statusPermission = buildNotificationStatusSqlPredicate(
+    'notification_status',
+    accountId,
+    now,
+  );
   const sql = `
     SELECT ${ACCOUNT_JOIN_COLUMNS}
     FROM notifications n
     JOIN accounts a ON a.id = n.from_account_id
-    WHERE n.id = ?1 AND n.account_id = ?2
+    LEFT JOIN statuses permission_status ON permission_status.id = n.status_id
+    WHERE n.id = ?
+      AND n.account_id = ?
+      AND ${senderPermission.sql}
+      AND (
+        n.status_id IS NULL
+        OR ${statusPermission.sql}
+      )
     LIMIT 1
   `;
-  return env.DB.prepare(sql).bind(id, accountId).first<NotifWithAccountRow>();
+  return env.DB.prepare(sql).bind(
+    id,
+    accountId,
+    ...senderPermission.bindings,
+    ...statusPermission.bindings,
+  ).first<NotifWithAccountRow>();
 }
 
 // -----------------------------------------------------------------

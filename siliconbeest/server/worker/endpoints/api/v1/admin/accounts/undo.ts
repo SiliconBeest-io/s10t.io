@@ -11,6 +11,7 @@ import {
 	addAccountWarning,
 	getUserEmailByAccountId,
 } from '../../../../../services/admin';
+import { assertAccountModeratable } from '../../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -24,6 +25,7 @@ app.post('/:id/unsuspend', async (c) => {
 	await getAccountForModeration(id);
 
 	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	await unsuspendAccount(id);
 	await addAccountWarning(currentUser.account_id, id, 'unsuspend', '');
@@ -47,6 +49,7 @@ app.post('/:id/unsilence', async (c) => {
 	await getAccountForModeration(id);
 
 	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	await unsilenceAccount(id);
 	await addAccountWarning(currentUser.account_id, id, 'unsilence', '');
@@ -69,6 +72,7 @@ app.post('/:id/enable', async (c) => {
 	await getAccountForModeration(id);
 
 	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	await enableAccount(id);
 	await addAccountWarning(currentUser.account_id, id, 'enable', '');
@@ -91,6 +95,7 @@ app.post('/:id/unsensitize', async (c) => {
 	await getAccountForModeration(id);
 
 	const currentUser = c.get('currentUser')!;
+	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
 	await unsensitizeAccount(id);
 	await addAccountWarning(currentUser.account_id, id, 'unsensitize', '');

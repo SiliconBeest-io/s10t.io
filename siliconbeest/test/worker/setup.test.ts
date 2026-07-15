@@ -54,9 +54,10 @@ describe('initial setup bootstrap', () => {
     const res = await setupRequest({ setup_secret: 'test-setup-secret' });
 
     expect(res.status).toBe(200);
-    const body = await res.json<{ access_token?: string; token_type?: string }>();
+    const body = await res.json<{ access_token?: string; token_type?: string; scope?: string }>();
     expect(body.token_type).toBe('Bearer');
     expect(body.access_token).toBeTruthy();
+    expect(body.scope).toBe('read write follow push admin:read admin:write');
 
     const user = await env.DB.prepare('SELECT role, approved, confirmed_at FROM users WHERE email = ?1')
       .bind('admin@example.test')

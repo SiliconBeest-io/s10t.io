@@ -21,14 +21,22 @@ import unmuteApp from './unmute';
 import aliasesApp from './aliases';
 import migrationApp from './migration';
 import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
 import { serializeAccount } from '../../../../utils/mastodonSerializer';
-import { setAccountNote, pinAccount, unpinAccount } from '../../../../services/account';
+import {
+  getRelationship,
+  pinAccount,
+  removeFollower,
+  setAccountNote,
+  unpinAccount,
+} from '../../../../services/account';
 import type { AccountRow } from '../../../../types/db';
+import { buildAccountDiscoverySqlPredicate } from '../../../../services/permissions';
 
 const accounts = new Hono<{ Variables: AppVariables }>();
 
 // GET /api/v1/accounts/:id/lists — lists containing this account
-accounts.get('/:id/lists', authRequired, async (c) => {
+accounts.get('/:id/lists', authRequired, requireScope('read:lists'), async (c) => {
   const accountId = c.req.param('id');
   const currentAccountId = c.get('currentUser')!.account_id;
   const { results } = await env.DB.prepare(
@@ -42,7 +50,7 @@ accounts.get('/:id/lists', authRequired, async (c) => {
 });
 
 // POST /api/v1/accounts/:id/note — set personal note on account
-accounts.post('/:id/note', authRequired, async (c) => {
+accounts.post('/:id/note', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const targetId = c.req.param('id');
   const body = await c.req.json<{ comment?: string }>();
@@ -50,121 +58,40 @@ accounts.post('/:id/note', authRequired, async (c) => {
 
   await setAccountNote(currentAccount.id, targetId, comment);
 
-  // Return updated relationship
-  const [following, followedBy, blocking, muting] = await Promise.all([
-    env.DB.prepare('SELECT id FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(currentAccount.id, targetId).first(),
-    env.DB.prepare('SELECT id FROM follows WHERE account_id = ?1 AND target_account_id = ?2').bind(targetId, currentAccount.id).first(),
-    env.DB.prepare('SELECT id FROM blocks WHERE account_id = ?1 AND target_account_id = ?2').bind(currentAccount.id, targetId).first(),
-    env.DB.prepare('SELECT id FROM mutes WHERE account_id = ?1 AND target_account_id = ?2').bind(currentAccount.id, targetId).first(),
-  ]);
-
-  return c.json({
-    id: targetId,
-    following: !!following,
-    showing_reblogs: true,
-    notifying: false,
-    languages: null,
-    followed_by: !!followedBy,
-    blocking: !!blocking,
-    blocked_by: false,
-    muting: !!muting,
-    muting_notifications: false,
-    requested: false,
-    requested_by: false,
-    domain_blocking: false,
-    endorsed: false,
-    note: comment,
-  });
+  return c.json(await getRelationship(currentAccount.id, targetId));
 });
 
 // POST /api/v1/accounts/:id/remove_from_followers — force-remove a follower
-accounts.post('/:id/remove_from_followers', authRequired, async (c) => {
+accounts.post('/:id/remove_from_followers', authRequired, requireScope('write:follows'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const targetId = c.req.param('id');
 
-  await env.DB.prepare(
-    'DELETE FROM follows WHERE account_id = ?1 AND target_account_id = ?2',
-  ).bind(targetId, currentAccount.id).run();
-
-  // Decrement counters
-  await env.DB.batch([
-    env.DB.prepare('UPDATE accounts SET followers_count = MAX(0, followers_count - 1) WHERE id = ?1').bind(currentAccount.id),
-    env.DB.prepare('UPDATE accounts SET following_count = MAX(0, following_count - 1) WHERE id = ?1').bind(targetId),
-  ]);
-
-  return c.json({
-    id: targetId,
-    following: false,
-    showing_reblogs: true,
-    notifying: false,
-    languages: null,
-    followed_by: false,
-    blocking: false,
-    blocked_by: false,
-    muting: false,
-    muting_notifications: false,
-    requested: false,
-    requested_by: false,
-    domain_blocking: false,
-    endorsed: false,
-    note: '',
-  });
+  await removeFollower(currentAccount.id, targetId);
+  return c.json(await getRelationship(currentAccount.id, targetId));
 });
 
 // POST /api/v1/accounts/:id/pin — endorse/feature account on profile
-accounts.post('/:id/pin', authRequired, async (c) => {
+accounts.post('/:id/pin', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const targetId = c.req.param('id');
 
   await pinAccount(currentAccount.id, targetId);
 
-  return c.json({
-    id: targetId,
-    following: true,
-    showing_reblogs: true,
-    notifying: false,
-    languages: null,
-    followed_by: false,
-    blocking: false,
-    blocked_by: false,
-    muting: false,
-    muting_notifications: false,
-    requested: false,
-    requested_by: false,
-    domain_blocking: false,
-    endorsed: true,
-    note: '',
-  });
+  return c.json(await getRelationship(currentAccount.id, targetId));
 });
 
 // POST /api/v1/accounts/:id/unpin — remove endorsement
-accounts.post('/:id/unpin', authRequired, async (c) => {
+accounts.post('/:id/unpin', authRequired, requireScope('write:accounts'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const targetId = c.req.param('id');
 
   await unpinAccount(currentAccount.id, targetId);
 
-  return c.json({
-    id: targetId,
-    following: false,
-    showing_reblogs: true,
-    notifying: false,
-    languages: null,
-    followed_by: false,
-    blocking: false,
-    blocked_by: false,
-    muting: false,
-    muting_notifications: false,
-    requested: false,
-    requested_by: false,
-    domain_blocking: false,
-    endorsed: false,
-    note: '',
-  });
+  return c.json(await getRelationship(currentAccount.id, targetId));
 });
 
 // GET /api/v1/accounts/familiar_followers — mutual followers
-accounts.get('/familiar_followers', authRequired, async (c) => {
+accounts.get('/familiar_followers', authRequired, requireScope('read:follows'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
   const domain = env.INSTANCE_DOMAIN;
   const url = new URL(c.req.url);
@@ -174,19 +101,41 @@ accounts.get('/familiar_followers', authRequired, async (c) => {
 
   const result = await Promise.all(
     ids.map(async (targetId) => {
+      const accountPermission = buildAccountDiscoverySqlPredicate(
+        'account',
+        currentAccount.id,
+        new Date().toISOString(),
+      );
+      const targetVisible = await env.DB.prepare(
+        `SELECT a.id FROM accounts a
+         WHERE a.id = ?
+           AND ${accountPermission.sql}
+         LIMIT 1`,
+      ).bind(targetId, ...accountPermission.bindings).first<{ id: string }>();
+      if (!targetVisible) return { id: targetId, accounts: [] };
+
       const { results } = await env.DB.prepare(
-        `SELECT a.* FROM follows f1
-         JOIN follows f2 ON f2.account_id = f1.account_id AND f2.target_account_id = ?2
-         JOIN accounts a ON a.id = f1.account_id
-         WHERE f1.target_account_id = ?1
-           AND f1.account_id != ?1 AND f1.account_id != ?2
+        `SELECT a.* FROM follows viewer_follow
+         JOIN follows target_follow
+           ON target_follow.account_id = viewer_follow.target_account_id
+          AND target_follow.target_account_id = ?
+         JOIN accounts a ON a.id = viewer_follow.target_account_id
+         WHERE viewer_follow.account_id = ?
+           AND a.id != ? AND a.id != ?
+           AND ${accountPermission.sql}
          LIMIT 5`,
-      ).bind(currentAccount.id, targetId).all();
+      ).bind(
+        targetId,
+        currentAccount.id,
+        currentAccount.id,
+        targetId,
+        ...accountPermission.bindings,
+      ).all<AccountRow>();
 
       return {
         id: targetId,
-        accounts: (results ?? []).map((r: any) =>
-          serializeAccount(r as AccountRow, { instanceDomain: domain }),
+        accounts: (results ?? []).map((row) =>
+          serializeAccount(row, { instanceDomain: domain }),
         ),
       };
     }),

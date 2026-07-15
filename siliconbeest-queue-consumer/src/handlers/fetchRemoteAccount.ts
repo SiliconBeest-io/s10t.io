@@ -9,7 +9,8 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { isActor } from '@fedify/vocab';
+import { getDocumentLoader } from '@fedify/fedify';
+import { Collection, isActor } from '@fedify/vocab';
 import { createFed } from '../fedify';
 import type { FetchRemoteAccountMessage } from '../shared/types/queue';
 import { getUserAgent } from '../utils/repository';
@@ -18,12 +19,34 @@ import { pickSignerUsername } from '../../../packages/shared/services/signer';
 import { emojiTagToCustomEmoji } from '../../../packages/shared/utils/customEmoji';
 import { lookupRemoteSoftware } from '../utils/nodeinfo';
 import { getSuspendedDomains } from '../../../packages/shared/domain-blocks';
+import {
+  canStoreFetchedRemoteActor,
+  shouldHideRemoteAccountCollections,
+} from '../../../packages/shared/permissions';
 
 /** Cache TTL for remote actor documents (5 minutes). */
 const ACTOR_CACHE_TTL = 300;
 
 /** Minimum seconds between re-fetches unless forceRefresh is set. */
 const MIN_REFETCH_INTERVAL = 300; // 5 minutes
+
+interface ExistingRemoteAccountState {
+  id: string;
+  fetched_at: string | null;
+  suspended_at: string | null;
+}
+
+async function getExistingRemoteAccountState(
+  actorUri: string,
+): Promise<ExistingRemoteAccountState | null> {
+  return env.DB.prepare(
+    `SELECT id, fetched_at, suspended_at
+     FROM accounts
+     WHERE uri = ? AND domain IS NOT NULL`,
+  )
+    .bind(actorUri)
+    .first<ExistingRemoteAccountState>();
+}
 
 export async function handleFetchRemoteAccount(
   msg: FetchRemoteAccountMessage,
@@ -32,15 +55,34 @@ export async function handleFetchRemoteAccount(
 
   let actorDomain: string;
   try {
-    actorDomain = new URL(actorUri).hostname.toLowerCase();
+    const actorUrl = new URL(actorUri);
+    actorDomain = actorUrl.hostname.toLowerCase();
   } catch {
     console.error(`Invalid actor URI: ${actorUri}`);
+    return;
+  }
+
+  if (!canStoreFetchedRemoteActor({
+    requestedActorUri: actorUri,
+    actorUri,
+    localInstanceDomain: env.INSTANCE_DOMAIN,
+    actorSuspended: false,
+  })) {
+    console.warn(`Refusing non-remote actor lookup for ${actorUri}`);
     return;
   }
 
   const suspendedDomains = await getSuspendedDomains(env.DB, [actorDomain]);
   if (suspendedDomains.has(actorDomain)) {
     console.log(`[remote-account] Skipping lookup for suspended domain ${actorDomain}`);
+    return;
+  }
+
+  // A force refresh must not overwrite a locally suspended identity. Read the
+  // account state independently of the freshness/cache shortcuts.
+  const existing = await getExistingRemoteAccountState(actorUri);
+  if (existing?.suspended_at) {
+    console.log(`[remote-account] Skipping locally suspended actor ${actorUri}`);
     return;
   }
 
@@ -52,15 +94,6 @@ export async function handleFetchRemoteAccount(
       console.log(`Actor ${actorUri} found in cache, skipping fetch`);
       return;
     }
-  }
-
-  // Check if we recently fetched this actor (unless forced)
-  if (!forceRefresh) {
-    const existing = await env.DB.prepare(
-      `SELECT id, fetched_at FROM accounts WHERE uri = ? AND domain IS NOT NULL`,
-    )
-      .bind(actorUri)
-      .first<{ id: string; fetched_at: string | null }>();
 
     if (existing?.fetched_at) {
       const fetchedAt = new Date(existing.fetched_at).getTime();
@@ -81,6 +114,10 @@ export async function handleFetchRemoteAccount(
   // signature keyId (/users/__instance__#main-key), and authorized-fetch
   // verifiers reject the mismatch.
   let actorDoc: Record<string, unknown>;
+  let resolvedActorUri: string;
+  let followersUrl: string | null = null;
+  let followingUrl: string | null = null;
+  let hideCollections = true;
   try {
     const signerUsername = await pickSignerUsername(env.DB, signerAccountId ?? null);
     if (!signerUsername) {
@@ -96,6 +133,122 @@ export async function handleFetchRemoteAccount(
       return;
     }
     actorDoc = (await actorObj.toJsonLd()) as Record<string, unknown>;
+    const candidateActorUri = typeof actorDoc.id === 'string' ? actorDoc.id : null;
+    const candidateMatchesRequest = canStoreFetchedRemoteActor({
+      requestedActorUri: actorUri,
+      actorUri: candidateActorUri,
+      localInstanceDomain: env.INSTANCE_DOMAIN,
+      actorSuspended: false,
+    });
+
+    let verifiedActorObj = actorObj;
+    let expectedActorUri = actorUri;
+    if (!candidateMatchesRequest) {
+      // A lookup URI may be an alias for a canonical actor URI. Never persist
+      // fields supplied by the alias host: first validate the candidate as a
+      // remote URI, then fetch it directly and require exact self-identity.
+      if (!candidateActorUri || !canStoreFetchedRemoteActor({
+        requestedActorUri: candidateActorUri,
+        actorUri: candidateActorUri,
+        localInstanceDomain: env.INSTANCE_DOMAIN,
+        actorSuspended: false,
+      })) {
+        console.warn(`Actor ${actorUri} has an invalid canonical id, dropping`);
+        return;
+      }
+
+      const canonicalDomain = new URL(candidateActorUri).hostname.toLowerCase();
+      if (canonicalDomain !== actorDomain) {
+        const suspendedCanonicalDomains = await getSuspendedDomains(
+          env.DB,
+          [canonicalDomain],
+        );
+        if (suspendedCanonicalDomains.has(canonicalDomain)) {
+          console.log(
+            `[remote-account] Skipping actor ${actorUri} with suspended canonical domain ${canonicalDomain}`,
+          );
+          return;
+        }
+      }
+
+      const canonicalActorObj = await ctx.lookupObject(candidateActorUri, {
+        documentLoader,
+      });
+      if (!canonicalActorObj || !isActor(canonicalActorObj)) {
+        console.warn(
+          `Canonical actor lookup for ${candidateActorUri} did not return an actor, dropping`,
+        );
+        return;
+      }
+      const canonicalActorDoc = (
+        await canonicalActorObj.toJsonLd()
+      ) as Record<string, unknown>;
+      actorDomain = canonicalDomain;
+      actorDoc = canonicalActorDoc;
+      verifiedActorObj = canonicalActorObj;
+      expectedActorUri = candidateActorUri;
+    }
+
+    const verifiedActorUri = typeof actorDoc.id === 'string' ? actorDoc.id : null;
+    if (!verifiedActorUri || !canStoreFetchedRemoteActor({
+      requestedActorUri: expectedActorUri,
+      actorUri: verifiedActorUri,
+      localInstanceDomain: env.INSTANCE_DOMAIN,
+      actorSuspended: false,
+    })) {
+      console.warn(
+        `Actor lookup identity mismatch for ${expectedActorUri}, dropping`,
+      );
+      return;
+    }
+
+    // URL normalization can make two URI strings equivalent while the DB key
+    // differs. Always check the exact URI that will be persisted.
+    if (verifiedActorUri !== actorUri) {
+      const resolvedExisting = await getExistingRemoteAccountState(
+        verifiedActorUri,
+      );
+      if (resolvedExisting?.suspended_at) {
+        console.log(
+          `[remote-account] Skipping locally suspended canonical actor ${verifiedActorUri}`,
+        );
+        return;
+      }
+    }
+    resolvedActorUri = verifiedActorUri;
+
+    const followersId = verifiedActorObj.followersId;
+    const followingId = verifiedActorObj.followingId;
+    followersUrl = followersId?.href ?? null;
+    followingUrl = followingId?.href ?? null;
+    const actorOrigin = new URL(verifiedActorUri).origin;
+    const anonymousDocumentLoader = getDocumentLoader({
+      userAgent: getUserAgent('ActivityPub'),
+    });
+    const [followersResult, followingResult] = await Promise.allSettled([
+      followersId?.origin === actorOrigin
+        ? ctx.lookupObject(followersId, { documentLoader: anonymousDocumentLoader })
+        : Promise.resolve(null),
+      followingId?.origin === actorOrigin
+        ? ctx.lookupObject(followingId, { documentLoader: anonymousDocumentLoader })
+        : Promise.resolve(null),
+    ]);
+    const followersCollection = followersResult.status === 'fulfilled'
+      && followersResult.value instanceof Collection
+      ? followersResult.value
+      : null;
+    const followingCollection = followingResult.status === 'fulfilled'
+      && followingResult.value instanceof Collection
+      ? followingResult.value
+      : null;
+    hideCollections = shouldHideRemoteAccountCollections({
+      followersAdvertised: followersUrl !== null,
+      followingAdvertised: followingUrl !== null,
+      followersFirstPageAvailable: followersCollection !== null
+        && followersCollection.firstId !== null,
+      followingFirstPageAvailable: followingCollection !== null
+        && followingCollection.firstId !== null,
+    });
   } catch (err) {
     console.error(`Failed to fetch actor ${actorUri}:`, err);
     throw err; // Retry on transient/auth errors
@@ -111,37 +264,8 @@ export async function handleFetchRemoteAccount(
     return;
   }
 
-  // Extract fields from the actor document
-  const id = (actorDoc.id as string) || actorUri;
-  let canonicalDomain: string;
-  try {
-    canonicalDomain = new URL(id).hostname.toLowerCase();
-    if (!canonicalDomain) {
-      throw new Error('Canonical actor id has no hostname');
-    }
-  } catch {
-    console.warn(`Actor ${actorUri} has an invalid canonical id, dropping`);
-    return;
-  }
-
-  const instanceDomain = new URL(`https://${env.INSTANCE_DOMAIN}`).hostname.toLowerCase();
-  if (canonicalDomain === instanceDomain) {
-    console.log(
-      `[remote-account] Skipping remote lookup ${actorUri} with local canonical domain ${canonicalDomain}`,
-    );
-    return;
-  }
-
-  if (canonicalDomain !== actorDomain) {
-    const suspendedCanonicalDomains = await getSuspendedDomains(env.DB, [canonicalDomain]);
-    if (suspendedCanonicalDomains.has(canonicalDomain)) {
-      console.log(
-        `[remote-account] Skipping actor ${actorUri} with suspended canonical domain ${canonicalDomain}`,
-      );
-      return;
-    }
-    actorDomain = canonicalDomain;
-  }
+  // Extract fields from the verified actor document
+  const id = resolvedActorUri;
 
   const name = (actorDoc.name as string) || preferredUsername || '';
   const username = preferredUsername || '';
@@ -150,8 +274,6 @@ export async function handleFetchRemoteAccount(
   const sharedInbox =
     (actorDoc.endpoints as Record<string, unknown>)?.sharedInbox as string | undefined;
   const outbox = actorDoc.outbox as string | undefined;
-  const followersUrl = actorDoc.followers as string | undefined;
-  const followingUrl = actorDoc.following as string | undefined;
 
   // Extract avatar and header
   const iconObj = actorDoc.icon as Record<string, unknown> | undefined;
@@ -201,17 +323,18 @@ export async function handleFetchRemoteAccount(
     `INSERT INTO accounts (
        id, username, domain, display_name, note, uri, url,
        avatar_url, header_url, inbox_url, outbox_url,
-       shared_inbox_url, followers_url, following_url,
+       shared_inbox_url, followers_url, following_url, hide_collections,
        public_key_pem, public_key_id, actor_type,
        is_bot, is_group, fields, emoji_tags, fetched_at, created_at, updated_at
      ) VALUES (
        ?, ?, ?, ?, ?, ?, ?,
        ?, ?, ?, ?,
-       ?, ?, ?,
+       ?, ?, ?, ?,
        ?, ?, ?,
        ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now')
      )
      ON CONFLICT(uri) DO UPDATE SET
+       username = excluded.username,
        domain = excluded.domain,
        display_name = excluded.display_name,
        note = excluded.note,
@@ -223,6 +346,7 @@ export async function handleFetchRemoteAccount(
        shared_inbox_url = excluded.shared_inbox_url,
        followers_url = excluded.followers_url,
        following_url = excluded.following_url,
+       hide_collections = excluded.hide_collections,
        public_key_pem = excluded.public_key_pem,
        public_key_id = excluded.public_key_id,
        actor_type = excluded.actor_type,
@@ -246,8 +370,9 @@ export async function handleFetchRemoteAccount(
       inbox,
       outbox ?? null,
       sharedInbox ?? null,
-      followersUrl ?? null,
-      followingUrl ?? null,
+      followersUrl,
+      followingUrl,
+      hideCollections ? 1 : 0,
       publicKeyPem ?? null,
       publicKeyId ?? null,
       actorType,

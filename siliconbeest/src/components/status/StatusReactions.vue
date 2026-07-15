@@ -4,6 +4,7 @@ import type { Status, EmojiReaction } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
 import { getReactions, addReaction, removeReaction } from '@/api/mastodon/statuses'
 import EmojiPicker from '../common/EmojiPicker.vue'
+import { canUseAuthenticatedActions } from '@/utils/permissions'
 
 const props = defineProps<{
   status: Status
@@ -14,6 +15,12 @@ const emit = defineEmits<{
 }>()
 
 const authStore = useAuthStore()
+const accountCanAct = computed(() => canUseAuthenticatedActions({
+  authenticated: authStore.isAuthenticated,
+  accountLoaded: authStore.currentUser !== null,
+  accountSuspended: authStore.currentUser?.suspended,
+  accountMemorial: authStore.currentUser?.memorial,
+}))
 const reactions = ref<EmojiReaction[]>([])
 const loading = ref(false)
 const showPicker = ref(false)
@@ -44,7 +51,7 @@ watch(() => props.status.id, () => {
 
 // 리액션 토글 (추가/제거)
 async function toggleReaction(reaction: EmojiReaction) {
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   try {
@@ -69,7 +76,7 @@ async function toggleReaction(reaction: EmojiReaction) {
 // 이모지 피커에서 선택
 async function handleEmojiSelect(emoji: string) {
   showPicker.value = false
-  if (!authStore.token || loading.value) return
+  if (!accountCanAct.value || !authStore.token || loading.value) return
   loading.value = true
 
   // 커스텀 이모지는 :shortcode: 형식으로 전달됨 → 백엔드에도 그대로 전달
@@ -127,7 +134,7 @@ function computePickerPosition() {
 
 // 외부(액션 메뉴의 "이모지로 반응")에서 피커 열기
 async function openPicker(anchor?: HTMLElement) {
-  if (!authStore.isAuthenticated || loading.value) return
+  if (!accountCanAct.value || loading.value) return
   anchorEl = anchor ?? rootRef.value
   showPicker.value = true
   await nextTick()
@@ -202,7 +209,7 @@ function getShortcode(name: string): string {
         v-for="reaction in reactions"
         :key="reaction.name"
         @click="!isRemoteCustomEmoji(reaction) && toggleReaction(reaction)"
-        :disabled="loading || !authStore.isAuthenticated || isRemoteCustomEmoji(reaction)"
+        :disabled="loading || !accountCanAct || isRemoteCustomEmoji(reaction)"
         class="inline-flex touch-manipulation select-none items-center gap-1 rounded-full border px-2.5 py-1 text-[13px] font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 sm:text-xs"
         :class="[
           isRemoteCustomEmoji(reaction)
@@ -210,7 +217,7 @@ function getShortcode(name: string): string {
             : reaction.me
               ? 'border-brand-300 bg-brand-50 text-brand-700 hover:bg-brand-100 dark:border-brand-600 dark:bg-brand-950/40 dark:text-brand-300 dark:hover:bg-brand-900/50'
               : 'border-outline bg-surface-2/60 text-slate-600 hover:border-brand-200 hover:bg-surface-2 dark:border-outline-dark dark:bg-surface-2-dark/60 dark:text-slate-300 dark:hover:border-brand-800 dark:hover:bg-surface-2-dark',
-          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : authStore.isAuthenticated ? 'cursor-pointer' : 'cursor-default',
+          isRemoteCustomEmoji(reaction) ? '' : loading ? 'opacity-60 cursor-wait' : accountCanAct ? 'cursor-pointer' : 'cursor-default',
         ]"
         :title="isRemoteCustomEmoji(reaction) ? `${reaction.name} (다른 서버의 이모지)` : reaction.name"
       >

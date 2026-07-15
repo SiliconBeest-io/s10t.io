@@ -63,7 +63,7 @@ describe('Quote Posts (FEP-e232)', () => {
     expect(body.quote.account.username).toBe('quoteuser');
   });
 
-  it('invalid quote_id is ignored gracefully', async () => {
+  it('rejects an invalid quote_id without creating a status', async () => {
     const res = await SELF.fetch(`${BASE}/api/v1/statuses`, {
       method: 'POST',
       headers: authHeaders(user.token),
@@ -73,12 +73,12 @@ describe('Quote Posts (FEP-e232)', () => {
       }),
     });
 
-    expect(res.status).toBe(200);
-    const body = await res.json<Record<string, any>>();
-
-    // Status should be created successfully but with no quote
-    expect(body.id).toBeDefined();
-    expect(body.quote).toBeNull();
+    expect(res.status).toBe(404);
+    const stored = await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM statuses
+       WHERE account_id = ?1 AND text = ?2`,
+    ).bind(user.accountId, 'Trying to quote nonexistent').first<{ count: number }>();
+    expect(stored?.count).toBe(0);
   });
 
   it('uses public quote policy by default', async () => {

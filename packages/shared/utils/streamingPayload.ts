@@ -8,9 +8,23 @@
  * Used by the timeline fanout handler for both follower and public streaming.
  */
 
-import type { AccountRow, StatusRow, MediaAttachmentRow } from '../types/db';
-import { serializeAccount, serializeStatus, serializeMediaAttachment } from '../serializers/mastodonSerializer';
+import type { AccountRow, StatusRow } from '../types/db';
+import {
+  serializeAccount,
+  serializeStatus,
+  serializeMediaAttachment,
+} from '../serializers/mastodonSerializer';
 import { fetchEmojisForStatus, fetchAccountEmojis } from './emoji';
+import {
+  canBroadcastStatusToPublicStreams,
+  canEmbedQuote,
+  canSurfaceStatus,
+  canViewStatus,
+} from '../permissions';
+
+export type StatusStreamingAudience =
+  | { kind: 'public' }
+  | { kind: 'account'; accountId: string };
 
 /** Shape of the JOIN query result for status + account */
 interface StatusWithAccountJoin {
@@ -26,6 +40,9 @@ interface StatusWithAccountJoin {
   in_reply_to_id: string | null;
   in_reply_to_account_id: string | null;
   reblog_of_id: string | null;
+  quote_id: string | null;
+  quote_approval_status: string | null;
+  quote_policy: string | null;
   reblogs_count: number;
   favourites_count: number;
   replies_count: number;
@@ -47,22 +64,170 @@ interface StatusWithAccountJoin {
   following_count: number;
   statuses_count: number;
   account_created_at: string;
+  account_suspended_at: string | null;
+  account_silenced_at: string | null;
+  account_memorial: number | boolean;
+  viewer_follows_author: number | boolean;
+  viewer_is_mentioned: number | boolean;
+  viewer_mutes_author: number | boolean;
+  viewer_blocks_author: number | boolean;
+  viewer_blocks_author_domain: number | boolean;
+  author_blocks_viewer: number | boolean;
 }
 
 const STATUS_ACCOUNT_QUERY = `
   SELECT s.id, s.uri, s.content, s.visibility, s.sensitive,
          s.content_warning, s.language, s.url, s.created_at,
          s.in_reply_to_id, s.in_reply_to_account_id, s.reblog_of_id,
+         s.quote_id, s.quote_approval_status, s.quote_policy,
          s.reblogs_count, s.favourites_count, s.replies_count,
-         s.edited_at,
+         s.edited_at, s.deleted_at,
          a.id AS account_id, a.username, a.domain, a.display_name,
          a.note AS account_note, a.url AS account_url, a.uri AS account_uri,
          a.avatar_url, a.header_url, a.locked, a.bot,
          a.followers_count, a.following_count, a.statuses_count,
-         a.created_at AS account_created_at
+         a.created_at AS account_created_at,
+         a.suspended_at AS account_suspended_at,
+         a.silenced_at AS account_silenced_at,
+         a.memorial AS account_memorial,
+         EXISTS (
+           SELECT 1 FROM follows streaming_follow
+           WHERE streaming_follow.account_id = ?2
+             AND streaming_follow.target_account_id = a.id
+         ) AS viewer_follows_author,
+         EXISTS (
+           SELECT 1 FROM mentions streaming_mention
+           WHERE streaming_mention.status_id = s.id
+             AND streaming_mention.account_id = ?2
+         ) AS viewer_is_mentioned,
+         EXISTS (
+           SELECT 1 FROM mutes streaming_mute
+           WHERE streaming_mute.account_id = ?2
+             AND streaming_mute.target_account_id = a.id
+             AND (
+               streaming_mute.expires_at IS NULL
+               OR streaming_mute.expires_at > ?3
+             )
+         ) AS viewer_mutes_author,
+         EXISTS (
+           SELECT 1 FROM blocks streaming_viewer_block
+           WHERE streaming_viewer_block.account_id = ?2
+             AND streaming_viewer_block.target_account_id = a.id
+         ) AS viewer_blocks_author,
+         EXISTS (
+           SELECT 1 FROM user_domain_blocks streaming_domain_block
+           WHERE streaming_domain_block.account_id = ?2
+             AND a.domain IS NOT NULL
+             AND lower(streaming_domain_block.domain) = lower(a.domain)
+         ) AS viewer_blocks_author_domain,
+         EXISTS (
+           SELECT 1 FROM blocks streaming_author_block
+           WHERE streaming_author_block.account_id = a.id
+             AND streaming_author_block.target_account_id = ?2
+         ) AS author_blocks_viewer
   FROM statuses s
   JOIN accounts a ON a.id = s.account_id
-  WHERE s.id = ?`;
+  WHERE s.id = ?1`;
+
+interface MediaAttachmentRecord {
+  id: string;
+  type: string | null;
+  file_key: string;
+  thumbnail_key: string | null;
+  file_content_type: string | null;
+  description: string | null;
+  blurhash: string | null;
+  width: number | null;
+  height: number | null;
+}
+
+function isTrue(value: number | boolean): boolean {
+  return value === true || value === 1;
+}
+
+function viewerAccountIdForAudience(
+  audience: StatusStreamingAudience,
+): string | null {
+  return audience.kind === 'account' ? audience.accountId : null;
+}
+
+function canIncludeStatusForAudience(
+  row: StatusWithAccountJoin,
+  audience: StatusStreamingAudience,
+): boolean {
+  if (audience.kind === 'public') {
+    return canBroadcastStatusToPublicStreams({
+      visibility: row.visibility,
+      statusDeleted: row.deleted_at !== null,
+      authorSuspended: row.account_suspended_at !== null,
+      authorSilenced: row.account_silenced_at !== null,
+    });
+  }
+
+  const statusViewable = canViewStatus({
+    visibility: row.visibility,
+    viewerAccountId: audience.accountId,
+    authorAccountId: row.account_id,
+    viewerFollowsAuthor: isTrue(row.viewer_follows_author),
+    viewerIsMentioned: isTrue(row.viewer_is_mentioned),
+    authorBlocksViewer: isTrue(row.author_blocks_viewer),
+    statusDeleted: row.deleted_at !== null,
+  });
+
+  return canSurfaceStatus({
+    statusViewable,
+    authorSuspended: row.account_suspended_at !== null,
+    authorSilenced: row.account_silenced_at !== null,
+    viewerIsAuthor: audience.accountId === row.account_id,
+    viewerFollowsAuthor: isTrue(row.viewer_follows_author),
+    viewerMutesAuthor: isTrue(row.viewer_mutes_author),
+    viewerBlocksAuthor: isTrue(row.viewer_blocks_author),
+    viewerBlocksAuthorDomain: isTrue(row.viewer_blocks_author_domain),
+    authorBlocksViewer: isTrue(row.author_blocks_viewer),
+  });
+}
+
+function canIncludeQuoteForAudience(
+  row: StatusWithAccountJoin,
+  audience: StatusStreamingAudience,
+): boolean {
+  if (audience.kind === 'account') {
+    return canIncludeStatusForAudience(row, audience);
+  }
+
+  const statusViewable = canViewStatus({
+    visibility: row.visibility,
+    viewerAccountId: null,
+    authorAccountId: row.account_id,
+    viewerFollowsAuthor: false,
+    viewerIsMentioned: false,
+    authorBlocksViewer: false,
+    statusDeleted: row.deleted_at !== null,
+  });
+  return canSurfaceStatus({
+    statusViewable,
+    authorSuspended: row.account_suspended_at !== null,
+    authorSilenced: row.account_silenced_at !== null,
+    viewerIsAuthor: false,
+    viewerFollowsAuthor: false,
+    viewerMutesAuthor: false,
+    viewerBlocksAuthor: false,
+    viewerBlocksAuthorDomain: false,
+    authorBlocksViewer: false,
+  });
+}
+
+async function fetchStatusForAudience(
+  db: D1Database,
+  statusId: string,
+  audience: StatusStreamingAudience,
+  checkedAt: string,
+): Promise<StatusWithAccountJoin | null> {
+  return db
+    .prepare(STATUS_ACCOUNT_QUERY)
+    .bind(statusId, viewerAccountIdForAudience(audience), checkedAt)
+    .first<StatusWithAccountJoin>();
+}
 
 /**
  * Convert a JOIN result row into an AccountRow-compatible shape
@@ -91,9 +256,9 @@ function toAccountRow(row: StatusWithAccountJoin): AccountRow {
     last_status_at: null,
     created_at: row.account_created_at,
     updated_at: row.account_created_at,
-    suspended_at: null,
-    silenced_at: null,
-    memorial: 0,
+    suspended_at: row.account_suspended_at,
+    silenced_at: row.account_silenced_at,
+    memorial: isTrue(row.account_memorial) ? 1 : 0,
     moved_to_account_id: null,
   } as AccountRow;
 }
@@ -127,7 +292,9 @@ function toStatusRow(row: StatusWithAccountJoin): StatusRow {
     edited_at: row.edited_at,
     deleted_at: row.deleted_at ?? null,
     poll_id: null,
-    quote_id: null,
+    quote_id: row.quote_id,
+    quote_approval_status: row.quote_approval_status,
+    quote_policy: row.quote_policy,
     emoji_tags: null,
     created_at: row.created_at,
     updated_at: row.created_at,
@@ -144,13 +311,19 @@ export async function buildStatusStreamingPayload(
   db: D1Database,
   statusId: string,
   instanceDomain: string,
+  audience: StatusStreamingAudience,
 ): Promise<string | null> {
-  const statusRow = await db
-    .prepare(STATUS_ACCOUNT_QUERY)
-    .bind(statusId)
-    .first<StatusWithAccountJoin>();
+  const checkedAt = new Date().toISOString();
+  const statusRow = await fetchStatusForAudience(
+    db,
+    statusId,
+    audience,
+    checkedAt,
+  );
 
-  if (!statusRow) return null;
+  if (!statusRow || !canIncludeStatusForAudience(statusRow, audience)) {
+    return null;
+  }
 
   // Fetch emojis and media in parallel
   const [statusEmojis, accountEmojis, mediaResult] = await Promise.all([
@@ -161,28 +334,28 @@ export async function buildStatusStreamingPayload(
         'SELECT id, type, file_key, thumbnail_key, file_content_type, description, blurhash, width, height FROM media_attachments WHERE status_id = ?',
       )
       .bind(statusId)
-      .all(),
+      .all<MediaAttachmentRecord>(),
   ]);
 
   // Serialize media attachments
-  const mediaAttachments = (mediaResult.results ?? []).map((m: any) => {
-    const fk = m.file_key as string;
+  const mediaAttachments = (mediaResult.results ?? []).map((m) => {
+    const fk = m.file_key;
     const isRemote = fk.startsWith('http');
     return serializeMediaAttachment(
       {
-        id: m.id as string,
+        id: m.id,
         status_id: statusId,
         account_id: statusRow.account_id,
         file_key: fk,
-        file_content_type: (m.file_content_type as string) || '',
+        file_content_type: m.file_content_type || '',
         file_size: 0,
-        thumbnail_key: (m.thumbnail_key as string) || null,
+        thumbnail_key: m.thumbnail_key,
         remote_url: isRemote ? fk : null,
-        description: (m.description as string) || '',
-        blurhash: (m.blurhash as string) || null,
-        width: m.width as number | null,
-        height: m.height as number | null,
-        type: (m.type as string) || 'image',
+        description: m.description || '',
+        blurhash: m.blurhash,
+        width: m.width,
+        height: m.height,
+        type: m.type || 'image',
         created_at: '',
         updated_at: '',
       },
@@ -204,17 +377,22 @@ export async function buildStatusStreamingPayload(
     emojis: statusEmojis,
   });
 
-  // Resolve reblog if applicable
+  // Nested statuses are independently authorized for the actual audience.
+  // A wrapper can remain visible while its reblog/quote target is hidden.
   if (statusRow.reblog_of_id) {
-    const origRow = await db
-      .prepare(
-        `${STATUS_ACCOUNT_QUERY} AND s.deleted_at IS NULL`,
-      )
-      .bind(statusRow.reblog_of_id)
-      .first<StatusWithAccountJoin>();
+    const origRow = await fetchStatusForAudience(
+      db,
+      statusRow.reblog_of_id,
+      audience,
+      checkedAt,
+    );
 
-    if (origRow) {
-      const origAccountEmojis = await fetchAccountEmojis(db, origRow.account_id, instanceDomain);
+    if (origRow && canIncludeStatusForAudience(origRow, audience)) {
+      const origAccountEmojis = await fetchAccountEmojis(
+        db,
+        origRow.account_id,
+        instanceDomain,
+      );
       const origAccountRow = toAccountRow(origRow);
       const origAccount = serializeAccount(origAccountRow, {
         instanceDomain,
@@ -229,6 +407,43 @@ export async function buildStatusStreamingPayload(
         mediaAttachments,
         emojis: statusEmojis,
         reblog,
+      });
+    }
+  }
+
+  if (canEmbedQuote({
+    quoteStatusId: statusRow.quote_id,
+    quoteApprovalStatus: statusRow.quote_approval_status,
+  })) {
+    const quoteStatusId = statusRow.quote_id;
+    if (!quoteStatusId) return JSON.stringify(status);
+    const quoteRow = await fetchStatusForAudience(
+      db,
+      quoteStatusId,
+      audience,
+      checkedAt,
+    );
+
+    if (quoteRow && canIncludeQuoteForAudience(quoteRow, audience)) {
+      const quoteAccountEmojis = await fetchAccountEmojis(
+        db,
+        quoteRow.account_id,
+        instanceDomain,
+      );
+      const quoteAccount = serializeAccount(toAccountRow(quoteRow), {
+        instanceDomain,
+        emojis: quoteAccountEmojis,
+      });
+      const quote = serializeStatus(toStatusRow(quoteRow), {
+        account: quoteAccount,
+      });
+
+      status = serializeStatus(sRow, {
+        account,
+        mediaAttachments,
+        emojis: statusEmojis,
+        reblog: status.reblog,
+        quote,
       });
     }
   }

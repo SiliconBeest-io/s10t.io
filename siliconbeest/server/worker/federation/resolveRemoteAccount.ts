@@ -18,6 +18,7 @@ import { getFedifyContext } from './helpers/send';
 import { pickSignerUsername } from '../../../../packages/shared/services/signer';
 import { emojiTagToCustomEmoji } from '../../../../packages/shared/utils/customEmoji';
 import { getSuspendedDomains } from '../../../../packages/shared/domain-blocks';
+import { canStoreFetchedRemoteActor } from '../../../../packages/shared/permissions';
 
 /**
  * Resolve or upsert a remote ActivityPub account.
@@ -35,16 +36,41 @@ export async function resolveRemoteAccount(
 	// parser (lowercases scheme+host, preserves path case) so the dedup lookup
 	// matches the stored canonical form. The raw input is checked too, because
 	// rows written before this normalization may carry an unnormalized uri.
-	let lookupUri = actorUri;
-	try { lookupUri = new URL(actorUri).href; } catch { /* keep raw */ }
+	let lookupUri: string;
+	try {
+		const parsed = new URL(actorUri);
+		if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+		lookupUri = parsed.href;
+	} catch {
+		return null;
+	}
 
 	const existing = await env.DB.prepare(
-		`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
+		`SELECT id, uri, domain, suspended_at
+		 FROM accounts
+		 WHERE uri IN (?1, ?2)
+		 LIMIT 1`,
 	)
 		.bind(lookupUri, actorUri)
-		.first<{ id: string }>();
+		.first<{
+			id: string;
+			uri: string;
+			domain: string | null;
+			suspended_at: string | null;
+		}>();
 
-	if (existing) return existing.id;
+	if (existing) {
+		if (existing.domain === null || !canStoreFetchedRemoteActor({
+			requestedActorUri: lookupUri,
+			actorUri: existing.uri,
+			localInstanceDomain: env.INSTANCE_DOMAIN,
+			actorSuspended: existing.suspended_at !== null,
+		})) return null;
+		const existingDomainBlocks = await getSuspendedDomains(env.DB, [existing.domain]);
+		return existingDomainBlocks.has(existing.domain.toLowerCase())
+			? null
+			: existing.id;
+	}
 
 	// Fetch the actor document to get the real preferredUsername
 	let username = '';
@@ -52,6 +78,8 @@ export async function resolveRemoteAccount(
 	let displayName = '';
 	let inboxUrl: string | null = null;
 	let sharedInboxUrl: string | null = null;
+	let followersUrl: string | null = null;
+	let followingUrl: string | null = null;
 	let avatarUrl = '';
 	let headerUrl = '';
 	let summary = '';
@@ -86,15 +114,22 @@ export async function resolveRemoteAccount(
 		}
 		const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
 		const actorObj = await ctx.lookupObject(actorUri, { documentLoader: docLoader });
-		if (actorObj && isActor(actorObj)) {
+		if (actorObj && isActor(actorObj) && actorObj.id && canStoreFetchedRemoteActor({
+			requestedActorUri: lookupUri,
+			actorUri: actorObj.id.href,
+			localInstanceDomain: env.INSTANCE_DOMAIN,
+			actorSuspended: false,
+		})) {
 			resolved = true;
-			canonicalUri = actorObj.id?.href ?? lookupUri;
+			canonicalUri = actorObj.id.href;
 			username = (actorObj.preferredUsername ?? '') as string;
 			displayName = (actorObj.name?.toString() ?? '') as string;
 			summary = sanitizeHtml(actorObj.summary?.toString() ?? '');
 			actorUrl = String(actorObj.url ?? actorUri);
 			inboxUrl = actorObj.inboxId?.href ?? null;
 			sharedInboxUrl = actorObj.endpoints?.sharedInbox?.href ?? null;
+			followersUrl = actorObj.followersId?.href ?? null;
+			followingUrl = actorObj.followingId?.href ?? null;
 
 			const icon = await actorObj.getIcon({ documentLoader: docLoader });
 			if (icon?.url) avatarUrl = String(icon.url);
@@ -137,16 +172,24 @@ export async function resolveRemoteAccount(
 		return null;
 	}
 
-	// The canonical id may differ from the reference URI we were handed (e.g.
-	// host casing, or a forwarded/alternate URI). Dedup again by the canonical
-	// id and re-derive the domain from it before inserting.
+	// Host casing may normalize while retaining exact ActivityPub identity.
 	if (canonicalUri !== lookupUri) {
 		const byCanonical = await env.DB.prepare(
-			`SELECT id FROM accounts WHERE uri = ?1 LIMIT 1`,
+			`SELECT id, domain, suspended_at FROM accounts WHERE uri = ?1 LIMIT 1`,
 		)
 			.bind(canonicalUri)
-			.first<{ id: string }>();
-		if (byCanonical) return byCanonical.id;
+			.first<{
+				id: string;
+				domain: string | null;
+				suspended_at: string | null;
+			}>();
+		if (byCanonical) {
+			if (byCanonical.domain === null || byCanonical.suspended_at !== null) return null;
+			const canonicalBlocks = await getSuspendedDomains(env.DB, [byCanonical.domain]);
+			return canonicalBlocks.has(byCanonical.domain.toLowerCase())
+				? null
+				: byCanonical.id;
+		}
 
 		try {
 			const canonicalHost = new URL(canonicalUri).host;
@@ -166,18 +209,52 @@ export async function resolveRemoteAccount(
 
 	try {
 		await env.DB.prepare(
-			`INSERT INTO accounts (id, username, domain, display_name, note, uri, url, avatar_url, avatar_static_url, header_url, header_static_url, inbox_url, shared_inbox_url, emoji_tags, created_at, updated_at)
-			 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?9, ?10, ?11, ?12, ?13, ?13)`,
+			`INSERT INTO accounts (
+				id, username, domain, display_name, note, uri, url,
+				avatar_url, avatar_static_url, header_url, header_static_url,
+				inbox_url, shared_inbox_url, followers_url, following_url,
+				hide_collections, emoji_tags, created_at, updated_at
+			) VALUES (
+				?1, ?2, ?3, ?4, ?5, ?6, ?7,
+				?8, ?8, ?9, ?9,
+				?10, ?11, ?12, ?13,
+				1, ?14, ?15, ?15
+			)`,
 		)
-			.bind(id, username, domain, displayName, summary, canonicalUri, actorUrl || canonicalUri, avatarUrl, headerUrl, inboxUrl, sharedInboxUrl, emojiTagsJson, now)
+			.bind(
+				id,
+				username,
+				domain,
+				displayName,
+				summary,
+				canonicalUri,
+				actorUrl || canonicalUri,
+				avatarUrl,
+				headerUrl,
+				inboxUrl,
+				sharedInboxUrl,
+				followersUrl,
+				followingUrl,
+				emojiTagsJson,
+				now,
+			)
 			.run();
 	} catch {
 		const retry = await env.DB.prepare(
-			`SELECT id FROM accounts WHERE uri IN (?1, ?2) LIMIT 1`,
+			`SELECT id, domain, suspended_at
+			 FROM accounts
+			 WHERE uri IN (?1, ?2)
+			 LIMIT 1`,
 		)
 			.bind(canonicalUri, actorUri)
-			.first<{ id: string }>();
-		return retry?.id ?? null;
+			.first<{
+				id: string;
+				domain: string | null;
+				suspended_at: string | null;
+			}>();
+		if (!retry || retry.domain === null || retry.suspended_at !== null) return null;
+		const retryBlocks = await getSuspendedDomains(env.DB, [retry.domain]);
+		return retryBlocks.has(retry.domain.toLowerCase()) ? null : retry.id;
 	}
 
 	// Also enqueue a full fetch for any fields we might have missed

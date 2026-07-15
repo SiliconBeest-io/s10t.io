@@ -25,6 +25,12 @@ import { createStatus } from '../../../../services/status';
 import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
+import {
+  canEmbedQuote,
+  parseStatusVisibility,
+  type StatusVisibility,
+} from '../../../../../../../packages/shared/permissions';
+import { canSurfaceStatusToViewer } from '../../../../services/permissions';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -62,12 +68,21 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     throw new AppError(422, 'Validation failed', 'Status text or media is required');
   }
 
+  let requestedVisibility: StatusVisibility | undefined;
+  if (body.visibility !== undefined) {
+    const parsedVisibility = parseStatusVisibility(body.visibility);
+    if (!parsedVisibility) {
+      throw new AppError(422, 'Validation failed', 'Invalid status visibility');
+    }
+    requestedVisibility = parsedVisibility;
+  }
+
   // ============================================================
   // Call service to handle all DB operations
   // ============================================================
   const result = await createStatus(domain, currentUser.account_id, currentAccount.username, {
     text: statusText,
-    visibility: body.visibility,
+    visibility: requestedVisibility,
     sensitive: body.sensitive,
     spoilerText: body.spoiler_text,
     inReplyToId: body.in_reply_to_id,
@@ -341,13 +356,23 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
   // ============================================================
   if (visibility === 'direct') {
     try {
+      const allowedLocalRecipientIds = new Set<string>();
+      for (const mention of resolvedMentions) {
+        if (
+          !mention.mentionDomain
+          && mention.account_id !== currentUser.account_id
+          && await canSurfaceStatusToViewer(statusId, mention.account_id)
+        ) {
+          allowedLocalRecipientIds.add(mention.account_id);
+        }
+      }
       const dmTimelineStmts = [
         env.DB.prepare(
           'INSERT OR IGNORE INTO home_timeline_entries (status_id, account_id, created_at) VALUES (?1, ?2, ?3)',
         ).bind(statusId, currentUser.account_id, now),
       ];
       for (const rm of resolvedMentions) {
-        if (!rm.mentionDomain) {
+        if (allowedLocalRecipientIds.has(rm.account_id)) {
           dmTimelineStmts.push(
             env.DB.prepare(
               'INSERT OR IGNORE INTO home_timeline_entries (status_id, account_id, created_at) VALUES (?1, ?2, ?3)',
@@ -409,7 +434,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
         try { await sendStreamEvent(currentUser.id, { event: 'update', payload: dmPayload, stream: ['user', 'direct'] }); } catch {}
         // Stream to mentioned local users
         for (const rm of resolvedMentions) {
-          if (!rm.mentionDomain) {
+          if (allowedLocalRecipientIds.has(rm.account_id)) {
             const mUser = await env.DB.prepare('SELECT id FROM users WHERE account_id = ?1 LIMIT 1').bind(rm.account_id).first();
             if (mUser) { try { await sendStreamEvent(mUser.id as string, { event: 'update', payload: dmPayload, stream: ['user', 'direct'] }); } catch {} }
           }
@@ -559,7 +584,10 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     }
 
     // FEP-e232: Quote post
-    if (quoteUri) {
+    if (quoteUri && canEmbedQuote({
+      quoteStatusId: quoteId,
+      quoteApprovalStatus,
+    })) {
       noteValues.quote = new URL(quoteUri);
       noteValues.quoteUrl = new URL(quoteUri);
       if (quoteAuthorizationUri) {
@@ -718,7 +746,10 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
 
   // FEP-e232: Resolve quoted status for API response
   let quoteStatus: Record<string, unknown> | null = null;
-  if (quoteId) {
+  if (canEmbedQuote({
+    quoteStatusId: quoteId,
+    quoteApprovalStatus,
+  })) {
     const quotedRow = await env.DB.prepare(
       `SELECT s.*, a.username AS account_username, a.domain AS account_domain,
         a.display_name AS account_display_name, a.note AS account_note,

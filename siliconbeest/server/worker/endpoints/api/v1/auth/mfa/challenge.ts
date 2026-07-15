@@ -15,6 +15,7 @@ import {
 } from '../../../../../services/auth';
 import type { UserRow } from '../../../../../types/db';
 import { setAuthTokenCookie } from '../../../../../utils/authCookie';
+import { getInternalSessionOAuthScopes } from '../../../../../../../../packages/shared/permissions';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -37,8 +38,8 @@ app.post('/', async (c) => {
 	}
 
 	const user = await env.DB.prepare(
-		'SELECT id, email, locale, otp_enabled, otp_secret, otp_backup_codes FROM users WHERE id = ?1 LIMIT 1',
-	).bind(userId).first<Pick<UserRow, 'id' | 'otp_enabled' | 'otp_secret' | 'otp_backup_codes'> & { email: string; locale: string }>();
+		'SELECT id, email, locale, role, otp_enabled, otp_secret, otp_backup_codes FROM users WHERE id = ?1 LIMIT 1',
+	).bind(userId).first<Pick<UserRow, 'id' | 'role' | 'otp_enabled' | 'otp_secret' | 'otp_backup_codes'> & { email: string; locale: string }>();
 
 	if (!user || !user.otp_enabled || !user.otp_secret) {
 		await env.CACHE.delete(kvKey);
@@ -61,8 +62,9 @@ app.post('/', async (c) => {
 	const appRecord = await getOrCreateInternalApp();
 	const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '';
 	const userAgent = c.req.header('User-Agent') || '';
+	const scopes = getInternalSessionOAuthScopes(user.role);
 	const { tokenValue, createdAt } = await createAccessToken(appRecord.id, user.id, {
-		ip, userAgent, email: user.email, locale: user.locale,
+		ip, userAgent, email: user.email, locale: user.locale, scopes,
 	});
 
 	await updateSignInTracking(user.id, ip);
@@ -72,7 +74,7 @@ app.post('/', async (c) => {
 	return c.json({
 		access_token: tokenValue,
 		token_type: 'Bearer',
-		scope: 'read write follow push',
+		scope: scopes,
 		created_at: Math.floor(new Date(createdAt).getTime() / 1000),
 	});
 });
