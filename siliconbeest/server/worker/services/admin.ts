@@ -828,6 +828,30 @@ export async function getDlqParked(id: string): Promise<DlqParkedRow> {
 	return row;
 }
 
+export async function listParkedDlqForBulk(options: {
+	ids?: string[];
+	limit: number;
+}): Promise<DlqParkedRow[]> {
+	if (options.ids) {
+		if (options.ids.length === 0) return [];
+		const placeholders = options.ids.map((_, index) => `?${index + 1}`).join(', ');
+		const { results } = await env.DB.prepare(
+			`SELECT * FROM federation_dlq_parked
+			 WHERE status = 'parked' AND id IN (${placeholders})
+			 ORDER BY parked_at ASC`,
+		).bind(...options.ids).all<DlqParkedRow>();
+		return results ?? [];
+	}
+
+	const { results } = await env.DB.prepare(
+		`SELECT * FROM federation_dlq_parked
+		 WHERE status = 'parked'
+		 ORDER BY parked_at ASC
+		 LIMIT ?1`,
+	).bind(options.limit).all<DlqParkedRow>();
+	return results ?? [];
+}
+
 export async function markDlqParked(
 	id: string,
 	status: 'replayed' | 'discarded',
@@ -837,4 +861,18 @@ export async function markDlqParked(
 	)
 		.bind(id, status, new Date().toISOString())
 		.run();
+}
+
+export async function markDlqParkedBulk(
+	ids: string[],
+	status: 'replayed' | 'discarded',
+): Promise<void> {
+	if (ids.length === 0) return;
+	const updatedAt = new Date().toISOString();
+	const placeholders = ids.map((_, index) => `?${index + 3}`).join(', ');
+	await env.DB.prepare(
+		`UPDATE federation_dlq_parked
+		 SET status = ?1, updated_at = ?2
+		 WHERE status = 'parked' AND id IN (${placeholders})`,
+	).bind(status, updatedAt, ...ids).run();
 }
