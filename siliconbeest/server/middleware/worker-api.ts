@@ -25,7 +25,6 @@ const WORKER_PREFIXES = [
   '/default-avatar.svg',
   '/default-header.svg',
   '/pwa-icon',
-  '/internal/',
 ];
 
 function appendHeaderValue(existing: string | null, value: string): string {

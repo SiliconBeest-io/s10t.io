@@ -14,6 +14,10 @@ import {
 } from './activitypub-alternate';
 import { StreamingDO as StreamingDOBase } from './worker/durableObjects/streaming';
 
+// Internal exports for internal worker-to-worker communication. Not part of the public API.
+// DO NOT expose any endpoints in Internal to the public internet.
+export { Internal } from './worker/internal';
+
 // Export a top-level Durable Object class so workerd can register the actor.
 export class StreamingDO extends StreamingDOBase {}
 
@@ -36,7 +40,6 @@ const WORKER_PREFIXES = [
   '/default-avatar.svg',
   '/default-header.svg',
   '/pwa-icon',
-  '/internal/',
 ];
 
 // Paths that are static PWA files — always serve as-is, never SPA fallback

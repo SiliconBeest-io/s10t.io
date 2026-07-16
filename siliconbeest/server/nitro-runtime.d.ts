@@ -44,3 +44,9 @@ interface ImportMeta {
   _tasks?: boolean;
   _websocket?: boolean;
 }
+
+declare namespace Cloudflare {
+  interface Env {
+    INTERNAL_CONNECTION_MAIN?: import('./worker/internal-contract').InternalRpc;
+  }
+}

@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../../types';
 import { authRequired } from '../../../../middleware/auth';
 import { requireScope } from '../../../../middleware/scopeCheck';
+import { sendStreamEventToDurableObject } from '../../../../services/streaming';
 import list from './list';
 import fetch from './fetch';
 import clear from './clear';
@@ -54,17 +55,11 @@ app.post('/read', authRequired, requireScope('write:notifications'), async (c) =
   // Send streaming event to clear badge
   try {
     const user = c.get('currentUser')!;
-    const doId = env.STREAMING_DO.idFromName(user.id);
-    const stub = env.STREAMING_DO.get(doId);
-    await stub.fetch(new Request('http://internal/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'notifications_read',
-        payload: JSON.stringify({ count: row?.cnt ?? 0 }),
-        stream: ['user', 'user:notification'],
-      }),
-    }));
+    await sendStreamEventToDurableObject(user.id, {
+      event: 'notifications_read',
+      payload: JSON.stringify({ count: row?.cnt ?? 0 }),
+      stream: ['user', 'user:notification'],
+    });
   } catch { /* non-critical */ }
 
   return c.json({ count: row?.cnt ?? 0 });

@@ -23,7 +23,6 @@ const NO_CACHE_PREFIXES = [
   '/inbox',
   '/media/',
   '/proxy',
-  '/internal/',
   '/auth/',
   '/healthz',
 ];

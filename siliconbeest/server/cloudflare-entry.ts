@@ -5,6 +5,8 @@ import { requestHasBody, runCronTasks } from 'nitropack/runtime/internal';
 import { isPublicAssetURL } from '#nitro-internal-virtual/public-assets';
 import app from './worker/index';
 
+export { Internal } from './worker/internal';
+
 const nitroApp = useNitroApp();
 const ws = import.meta._websocket ? wsAdapter(nitroApp.h3App.websocket) : undefined;
 
