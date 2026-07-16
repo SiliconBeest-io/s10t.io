@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { Announcement } from '@/types/mastodon'
 import { getAnnouncements, dismissAnnouncement } from '@/api/mastodon/instance'
 import { useAuthStore } from '@/stores/auth'
+import { htmlToPlainText } from '@/utils/html'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -18,6 +19,7 @@ const active = computed(() => {
 })
 
 const current = computed(() => active.value[currentIndex.value] ?? null)
+const currentText = computed(() => htmlToPlainText(current.value?.content ?? ''))
 const total = computed(() => active.value.length)
 
 function prev() {
@@ -67,7 +69,7 @@ onMounted(async () => {
       </button>
 
       <!-- Content -->
-      <div class="flex-1 min-w-0 text-sm" v-html="current.content" />
+      <div class="min-w-0 flex-1 whitespace-pre-wrap text-sm">{{ currentText }}</div>
 
       <!-- Counter -->
       <span v-if="total > 1" class="text-xs opacity-75 flex-shrink-0">
