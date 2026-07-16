@@ -520,7 +520,7 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 	// Capability-scoped RPC binding to the main Worker's private entrypoint
 	"services": [
 		{
-			"binding": "INTERNAL",
+			"binding": "INTERNAL_CONNECTION_MAIN",
 			"service": "${MAIN_WORKER_NAME}",
 			"entrypoint": "Internal"
 		}

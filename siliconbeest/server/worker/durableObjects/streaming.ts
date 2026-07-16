@@ -9,12 +9,7 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-
-interface StreamEvent {
-  event: 'update' | 'notification' | 'delete' | 'status.update' | 'filters_changed' | 'reaction';
-  payload: string;
-  stream?: string[];
-}
+import type { StreamEventPayload } from '../internal-contract';
 
 interface SessionAttachment {
   streams: string[];
@@ -58,15 +53,12 @@ export class StreamingDO extends DurableObject {
     );
   }
 
+  async sendEvent(event: StreamEventPayload): Promise<void> {
+    this.#broadcast(event);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-
-    // Internal event delivery from queue consumer
-    if (url.pathname === '/event' && request.method === 'POST') {
-      const event = (await request.json()) as StreamEvent;
-      this.broadcast(event);
-      return new Response('ok', { status: 200 });
-    }
 
     // WebSocket upgrade for streaming
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
@@ -97,7 +89,7 @@ export class StreamingDO extends DurableObject {
       });
     }
 
-    return new Response('Expected WebSocket or /event POST', { status: 400 });
+    return new Response('Expected WebSocket upgrade', { status: 400 });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
@@ -140,7 +132,7 @@ export class StreamingDO extends DurableObject {
     try { ws.close(); } catch { /* ignore */ }
   }
 
-  private broadcast(event: StreamEvent): void {
+  #broadcast(event: StreamEventPayload): void {
     const message = JSON.stringify({
       event: event.event,
       payload: event.payload,

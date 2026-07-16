@@ -54,10 +54,6 @@ export default {
     const ctxExt = {};
     const url = new URL(request.url);
 
-    if (url.pathname === '/internal' || url.pathname.startsWith('/internal/')) {
-      return new Response(null, { status: 404 });
-    }
-
     if (url.pathname === '/api/v1/streaming') {
       return app.fetch(request, env, context);
     }

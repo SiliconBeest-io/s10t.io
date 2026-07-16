@@ -46,7 +46,7 @@ const mocks = vi.hoisted(() => ({
   env: {
     DB: { prepare: vi.fn() },
     QUEUE_INTERNAL: { send: vi.fn() },
-    INTERNAL: { sendStreamEvent: vi.fn() },
+    INTERNAL_CONNECTION_MAIN: { sendStreamEvent: vi.fn() },
     INSTANCE_DOMAIN: 'local.example',
   },
   generateUlid: vi.fn(() => 'notification-1'),
@@ -152,8 +152,8 @@ beforeEach(() => {
   mocks.env.DB.prepare.mockReset();
   mocks.env.QUEUE_INTERNAL.send.mockReset();
   mocks.env.QUEUE_INTERNAL.send.mockResolvedValue(undefined);
-  mocks.env.INTERNAL.sendStreamEvent.mockReset();
-  mocks.env.INTERNAL.sendStreamEvent.mockResolvedValue(undefined);
+  mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent.mockReset();
+  mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent.mockResolvedValue(undefined);
   mocks.generateUlid.mockClear();
   mocks.serializeAccount.mockClear();
   mocks.serializeStatus.mockClear();
@@ -308,7 +308,7 @@ describe('notification delivery permissions', () => {
       expect(mocks.queries).toHaveLength(1);
       expect(mocks.insertRuns).toBe(0);
       expect(mocks.env.QUEUE_INTERNAL.send).not.toHaveBeenCalled();
-      expect(mocks.env.INTERNAL.sendStreamEvent).not.toHaveBeenCalled();
+      expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).not.toHaveBeenCalled();
     },
   );
 
@@ -328,7 +328,7 @@ describe('notification delivery permissions', () => {
       expect(mocks.queries).toHaveLength(1);
       expect(mocks.insertRuns).toBe(0);
       expect(mocks.env.QUEUE_INTERNAL.send).not.toHaveBeenCalled();
-      expect(mocks.env.INTERNAL.sendStreamEvent).not.toHaveBeenCalled();
+      expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).not.toHaveBeenCalled();
     },
   );
 
@@ -348,15 +348,15 @@ describe('notification delivery permissions', () => {
       notificationId: 'notification-1',
       userId: 'recipient-user',
     });
-    expect(mocks.env.INTERNAL.sendStreamEvent).toHaveBeenCalledTimes(1);
-    expect(mocks.env.INTERNAL.sendStreamEvent).toHaveBeenCalledWith(
+    expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).toHaveBeenCalledWith(
       'recipient-user',
       expect.objectContaining({
         event: 'notification',
         stream: ['user', 'user:notification'],
       }),
     );
-    const [, event] = mocks.env.INTERNAL.sendStreamEvent.mock.calls[0] as [
+    const [, event] = mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent.mock.calls[0] as [
       string,
       { payload: string },
     ];
@@ -384,7 +384,7 @@ describe('notification delivery permissions', () => {
 
     expect(mocks.insertRuns).toBe(1);
     expect(mocks.env.QUEUE_INTERNAL.send).toHaveBeenCalledTimes(1);
-    expect(mocks.env.INTERNAL.sendStreamEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).toHaveBeenCalledTimes(1);
   });
 
   it('allows notifications when an account mute keeps notifications enabled', async () => {
@@ -408,7 +408,7 @@ describe('notification delivery permissions', () => {
     );
     expect(mocks.insertRuns).toBe(1);
     expect(mocks.env.QUEUE_INTERNAL.send).toHaveBeenCalledTimes(1);
-    expect(mocks.env.INTERNAL.sendStreamEvent).toHaveBeenCalledTimes(1);
+    expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -463,7 +463,7 @@ describe('notification delivery permissions', () => {
 
       expect(mocks.insertRuns).toBe(1);
       expect(mocks.env.QUEUE_INTERNAL.send).toHaveBeenCalledTimes(1);
-      expect(mocks.env.INTERNAL.sendStreamEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.env.INTERNAL_CONNECTION_MAIN.sendStreamEvent).toHaveBeenCalledTimes(1);
       expect(mocks.serializeStatus).toHaveBeenCalledTimes(1);
     },
   );

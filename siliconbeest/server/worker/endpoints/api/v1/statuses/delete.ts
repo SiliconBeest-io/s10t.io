@@ -9,6 +9,7 @@ import { getStatusFederationAudience } from '../../../../federation/helpers/stat
 import { Delete as APDelete, Tombstone } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { deleteStatus } from '../../../../services/status';
+import { sendStreamEventToDurableObject } from '../../../../services/streaming';
 import { canBroadcastStatusToPublicStreams } from '../../../../../../../packages/shared/permissions';
 
 type HonoEnv = { Variables: AppVariables };
@@ -66,32 +67,20 @@ app.delete('/:id', authRequired, requireScope('write:statuses'), async (c) => {
       authorSuspended: author ? author.suspended_at !== null : null,
       authorSilenced: author ? author.silenced_at !== null : null,
     })) {
-      const doId = env.STREAMING_DO.idFromName('__public__');
-      const stub = env.STREAMING_DO.get(doId);
-      await stub.fetch(new Request('http://internal/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event: 'delete',
-          payload: statusId,
-          stream: ['public', 'public:local'],
-        }),
-      }));
+      await sendStreamEventToDurableObject('__public__', {
+        event: 'delete',
+        payload: statusId,
+        stream: ['public', 'public:local'],
+      });
     }
 
     // Send to the author's user stream
     const user = c.get('currentUser')!;
-    const userDoId = env.STREAMING_DO.idFromName(user.id);
-    const userStub = env.STREAMING_DO.get(userDoId);
-    await userStub.fetch(new Request('http://internal/event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event: 'delete',
-        payload: statusId,
-        stream: ['user'],
-      }),
-    }));
+    await sendStreamEventToDurableObject(user.id, {
+      event: 'delete',
+      payload: statusId,
+      stream: ['user'],
+    });
   } catch { /* non-critical */ }
 
   // Return the deleted status per Mastodon spec

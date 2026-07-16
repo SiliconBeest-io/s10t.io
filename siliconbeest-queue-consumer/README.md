@@ -91,7 +91,7 @@ The consumer is configured in `wrangler.jsonc`:
 | `CACHE`            | KV      | Cache remote actor/status lookups                            |
 | `QUEUE_FEDERATION` | Queues  | Re-enqueue federation jobs (fanout -> individual deliveries) |
 | `QUEUE_INTERNAL`   | Queues  | Re-enqueue internal jobs                                     |
-| `INTERNAL`         | Service | Named RPC binding to the main worker's private `Internal` entrypoint |
+| `INTERNAL_CONNECTION_MAIN`         | Service | Named RPC binding to the main worker's private `Internal` entrypoint |
 
 ### Queue Consumer Settings
 

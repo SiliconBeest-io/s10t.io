@@ -14,6 +14,8 @@ import {
 } from './activitypub-alternate';
 import { StreamingDO as StreamingDOBase } from './worker/durableObjects/streaming';
 
+// Internal exports for internal worker-to-worker communication. Not part of the public API.
+// DO NOT expose any endpoints in Internal to the public internet.
 export { Internal } from './worker/internal';
 
 // Export a top-level Durable Object class so workerd can register the actor.
@@ -133,10 +135,6 @@ export default {
   async fetch(request: Request, _env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const pathname = url.pathname;
-
-    if (pathname === '/internal' || pathname.startsWith('/internal/')) {
-      return new Response(null, { status: 404 });
-    }
 
     // 1. Worker paths → Hono app
     if (isWorkerPath(pathname, request)) {

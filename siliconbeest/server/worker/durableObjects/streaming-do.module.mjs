@@ -15,14 +15,12 @@ export class StreamingDO extends DurableObject {
     );
   }
 
+  async sendEvent(event) {
+    this.#broadcast(event);
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
-
-    if (url.pathname === "/event" && request.method === "POST") {
-      const event = await request.json();
-      this.broadcast(event);
-      return new Response("ok", { status: 200 });
-    }
 
     if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
       const stream = url.searchParams.get("stream") || "user";
@@ -41,7 +39,7 @@ export class StreamingDO extends DurableObject {
       });
     }
 
-    return new Response("Expected WebSocket or /event POST", { status: 400 });
+    return new Response("Expected WebSocket upgrade", { status: 400 });
   }
 
   async webSocketMessage(ws, message) {
@@ -79,7 +77,7 @@ export class StreamingDO extends DurableObject {
     }
   }
 
-  broadcast(event) {
+  #broadcast(event) {
     const message = JSON.stringify({
       event: event.event,
       payload: event.payload,

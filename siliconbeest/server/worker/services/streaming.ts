@@ -7,29 +7,23 @@
  */
 
 import { env } from 'cloudflare:workers';
-import type { InternalRpc, StreamEventPayload } from '../internal-contract';
+import type { StreamEventPayload } from '../internal-contract';
 
 export type { StreamEventPayload } from '../internal-contract';
 
-type StreamingBindings = {
-  DB: D1Database;
-  STREAMING_DO?: DurableObjectNamespace;
-  INTERNAL?: InternalRpc;
-};
-
 export async function sendStreamEventToDurableObject(
-  namespace: DurableObjectNamespace,
   userId: string,
   event: StreamEventPayload,
 ): Promise<void> {
-  const doId = namespace.idFromName(userId);
-  const stub = namespace.get(doId);
+  const streamingDo = env.STREAMING_DO;
+  if (!streamingDo) {
+    throw new Error('Streaming requires the STREAMING_DO binding');
+  }
 
-  await stub.fetch('https://streaming/event', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(event),
-  });
+  const doId = streamingDo.idFromName(userId);
+  const stub = streamingDo.get(doId);
+
+  await stub.sendEvent(event);
 }
 
 /**
@@ -42,21 +36,21 @@ export async function sendStreamEvent(
   userId: string,
   event: StreamEventPayload,
 ): Promise<void> {
-  const bindings = env as StreamingBindings;
-
   // The main Worker owns StreamingDO and can access it directly. Shared
   // federation processors also run inside the queue consumer, which reaches
-  // the owning Worker through its named INTERNAL service binding instead.
-  if (!bindings.STREAMING_DO) {
-    if (!bindings.INTERNAL) {
-      throw new Error('Streaming requires either STREAMING_DO or INTERNAL binding');
+  // the owning Worker through its named INTERNAL_CONNECTION_MAIN service binding instead.
+  if (!env.STREAMING_DO) {
+    if (!env.INTERNAL_CONNECTION_MAIN) {
+      throw new Error(
+        'Streaming requires either STREAMING_DO or INTERNAL_CONNECTION_MAIN binding',
+      );
     }
 
-    await bindings.INTERNAL.sendStreamEvent(userId, event);
+    await env.INTERNAL_CONNECTION_MAIN.sendStreamEvent(userId, event);
     return;
   }
 
-  await sendStreamEventToDurableObject(bindings.STREAMING_DO, userId, event);
+  await sendStreamEventToDurableObject(userId, event);
 }
 
 /**
