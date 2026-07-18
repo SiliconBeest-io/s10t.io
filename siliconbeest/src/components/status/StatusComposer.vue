@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
+import {
+  Dialog,
+  DialogPanel,
+  DialogTitle,
+  Listbox,
+  ListboxButton,
+  ListboxOptions,
+  ListboxOption,
+  TransitionChild,
+  TransitionRoot,
+} from '@headlessui/vue'
 import { useComposeStore } from '@/stores/compose'
+import { useDraftsStore, hasDraftContent, type ComposeDraft, type ComposeDraftInput } from '@/stores/drafts'
 import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
@@ -12,8 +23,19 @@ import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
+const drafts = useDraftsStore()
 const auth = useAuthStore()
 const { fetchCustomEmojis, searchEmojis } = useEmojis()
+
+// Remote drafts are session data: fetch them when a composer is entered,
+// rather than as a side effect of booting the full application.
+watch(
+  [() => auth.currentUser?.id ?? null, () => auth.token],
+  ([accountId, token]) => {
+    if (accountId && token) void drafts.refresh()
+  },
+  { immediate: true },
+)
 
 const props = defineProps<{
   replyTo?: { id: string; account: { acct: string }; mentions?: Array<{ acct: string }>; visibility?: string }
@@ -33,8 +55,11 @@ const emit = defineEmits<{
     quote_id?: string
     quote_policy?: import('@/types/mastodon').QuotePolicy
     media_ids?: string[]
+    draft_id?: string
   }]
 }>()
+
+defineExpose({ finishDraftSession })
 
 const isEditing = computed(() => compose.editingId !== null)
 const content = ref(isEditing.value ? compose.text : '')
@@ -47,11 +72,13 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
+const mountedPublishedTick = compose.publishedTick
 
 // ── Emoji picker state ──────────────────────────────────────────────
 const showEmojiPicker = ref(false)
 const emojiPickerRef = ref<HTMLElement | null>(null)
 const emojiButtonRef = ref<HTMLElement | null>(null)
+const showDraftMenu = ref(false)
 
 /** Position the emoji picker above the button, teleported to body */
 const emojiPickerPosition = computed(() => {
@@ -141,12 +168,13 @@ function populateReplyMentions(replyTo: typeof props.replyTo) {
 
 // When reply target changes
 watch(() => props.replyTo?.id, (newId, oldId) => {
-  if (!newId || newId === oldId) return
+  if (!newId || newId === oldId || isHydratingDraft.value) return
   populateReplyMentions(props.replyTo)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  finishDraftSession()
 })
 
 function handleClickOutside(e: MouseEvent) {
@@ -448,6 +476,175 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
+const AUTOSAVE_DELAY_MS = 1000
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+let draftSessionFinished = false
+const isHydratingDraft = ref(false)
+const draftSavedAt = ref<string | null>(null)
+const draftSaveLabel = computed(() => {
+  if (drafts.saving) return t('compose.draft_saving')
+  if (drafts.error) return t('compose.draft_save_failed')
+  return draftSavedAt.value ? t('compose.draft_saved') : t('compose.save_draft')
+})
+
+function draftSnapshot(): ComposeDraftInput {
+  return {
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showContentWarning: showCw.value,
+    visibility: selectedVisibility.value.value as import('@/types/mastodon').StatusVisibility,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: [...compose.mediaAttachments],
+    showPoll: compose.showPoll,
+    pollOptions: [...compose.pollOptions],
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    inReplyToStatus: compose.inReplyToStatus,
+    quoteId: compose.quoteId,
+    quoteStatus: compose.quoteStatus,
+  }
+}
+
+const canSaveDraft = computed(() => !isEditing.value && hasDraftContent(draftSnapshot()))
+
+async function saveDraftNow() {
+  if (isEditing.value || isHydratingDraft.value) return null
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  const saved = await drafts.save(draftSnapshot())
+  draftSavedAt.value = saved?.updatedAt ?? null
+  return saved
+}
+
+function finishDraftSession() {
+  if (draftSessionFinished) return
+  draftSessionFinished = true
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  if (!isEditing.value && compose.publishedTick === mountedPublishedTick) {
+    void saveDraftNow()
+  }
+  drafts.startFresh()
+  compose.reset()
+  content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
+  spoilerText.value = ''
+  showCw.value = false
+  draftSavedAt.value = null
+  showDraftMenu.value = false
+}
+
+function scheduleDraftSave() {
+  if (draftSessionFinished || isEditing.value || isHydratingDraft.value) return
+  draftSavedAt.value = null
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null
+    void saveDraftNow()
+  }, AUTOSAVE_DELAY_MS)
+}
+
+async function loadDraft(id: string) {
+  await saveDraftNow()
+  const draft = drafts.drafts.find((item) => item.id === id)
+  if (!draft) return
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+
+  isHydratingDraft.value = true
+  compose.reset()
+  drafts.select(id)
+  content.value = draft.content
+  objectType.value = draft.objectType
+  articleTitle.value = draft.articleTitle
+  articleSummary.value = draft.articleSummary
+  spoilerText.value = draft.spoilerText
+  showCw.value = draft.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === draft.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === draft.language)
+    ?? languageOptions[1]!
+  compose.sensitive = draft.sensitive
+  compose.quotePolicy = draft.quotePolicy
+  compose.mediaAttachments = draft.mediaAttachments.map(media => ({ ...media }))
+  compose.showPoll = draft.showPoll
+  compose.pollOptions = [...draft.pollOptions]
+  compose.pollExpiresIn = draft.pollExpiresIn
+  compose.pollMultiple = draft.pollMultiple
+  compose.inReplyToId = draft.inReplyToId
+  compose.inReplyToStatus = null
+  compose.quoteId = draft.quoteId
+  compose.quoteStatus = null
+  draftSavedAt.value = draft.updatedAt
+  showDraftMenu.value = false
+
+  nextTick(() => {
+    isHydratingDraft.value = false
+    textareaRef.value?.focus()
+  })
+}
+
+async function removeDraft(id: string) {
+  await drafts.remove(id)
+  if (drafts.activeDraftId === null) draftSavedAt.value = null
+}
+
+function draftTitle(draft: ComposeDraft): string {
+  return draft.articleTitle.trim()
+    || draft.content.trim().split(/\r?\n/, 1)[0]?.slice(0, 80)
+    || t('compose.untitled_draft')
+}
+
+function formatDraftDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+watch(
+  () => ({
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showCw: showCw.value,
+    visibility: selectedVisibility.value.value,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: compose.mediaAttachments,
+    showPoll: compose.showPoll,
+    pollOptions: compose.pollOptions,
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    quoteId: compose.quoteId,
+    draftAccountId: drafts.accountId,
+  }),
+  scheduleDraftSave,
+  { deep: true },
+)
+
 function loadEditingDraft() {
   if (!compose.editingId) return
   content.value = compose.text
@@ -467,7 +664,9 @@ watch(() => compose.editingId, (editingId) => {
 }, { immediate: true })
 
 const canSubmit = computed(() => {
-  const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
+  const hasContent = content.value.trim().length > 0
+    || compose.mediaAttachments.length > 0
+    || Boolean(compose.quoteId)
   const validTitle = objectType.value !== 'Article'
     || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
   return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
@@ -577,10 +776,11 @@ function submit() {
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
-    in_reply_to_id: props.replyTo?.id,
+    in_reply_to_id: props.replyTo?.id ?? compose.inReplyToId ?? undefined,
     quote_id: compose.quoteId ?? undefined,
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
+    draft_id: drafts.activeDraftId ?? undefined,
   })
   // Draft is NOT cleared here — publishing may still fail. The compose
   // store bumps publishedTick only on success (its reset() clears media
@@ -729,6 +929,19 @@ watch(() => compose.publishedTick, () => {
           </ListboxOptions>
         </div>
       </Listbox>
+
+      <!-- Twitter-style drafts affordance, pinned to the right of the compose controls. -->
+      <button
+        v-if="!isEditing"
+        type="button"
+        data-testid="draft-menu-button"
+        class="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-bold text-brand-600 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-brand-400 dark:hover:bg-brand-950/40"
+        :aria-expanded="showDraftMenu"
+        @click="showDraftMenu = true"
+      >
+        <span>{{ t('compose.drafts') }}</span>
+        <span v-if="drafts.count" class="min-w-5 rounded-full bg-brand-100 px-1.5 py-0.5 text-center text-[11px] leading-4 text-brand-700 dark:bg-brand-950 dark:text-brand-300">{{ drafts.count }}</span>
+      </button>
     </div>
 
     <!-- Explicit post type selector: visible in every composer layout. -->
@@ -1007,7 +1220,7 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- Toolbar -->
-    <div class="mt-3 flex items-center justify-between border-t border-outline pt-3 dark:border-outline-dark">
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-outline pt-3 dark:border-outline-dark">
       <div class="flex items-center gap-1.5 flex-wrap">
         <!-- Media upload -->
         <button
@@ -1084,7 +1297,18 @@ watch(() => compose.publishedTick, () => {
         </span>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <button
+          v-if="!isEditing"
+          type="button"
+          data-testid="save-draft-button"
+          :disabled="!canSaveDraft"
+          class="sb-btn sb-btn-secondary"
+          @click="saveDraftNow"
+        >
+          {{ draftSaveLabel }}
+        </button>
+
         <!-- Char counter -->
         <span
           class="text-sm tabular-nums"
@@ -1105,4 +1329,106 @@ watch(() => compose.publishedTick, () => {
       </div>
     </div>
   </form>
+
+  <Teleport to="body">
+    <TransitionRoot :show="showDraftMenu" as="template">
+      <Dialog class="relative z-[90]" @close="showDraftMenu = false">
+        <TransitionChild
+          as="template"
+          enter="ease-out duration-200"
+          enter-from="opacity-0"
+          enter-to="opacity-100"
+          leave="ease-in duration-150"
+          leave-from="opacity-100"
+          leave-to="opacity-0"
+        >
+          <div class="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px]" />
+        </TransitionChild>
+
+        <div class="fixed inset-0 overflow-y-auto p-0 sm:p-4">
+          <div class="flex min-h-full items-start justify-center sm:items-center">
+            <TransitionChild
+              as="template"
+              enter="ease-out duration-200"
+              enter-from="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+              enter-to="translate-y-0 opacity-100 sm:scale-100"
+              leave="ease-in duration-150"
+              leave-from="translate-y-0 opacity-100 sm:scale-100"
+              leave-to="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+            >
+              <DialogPanel
+                data-testid="drafts-modal"
+                class="min-h-screen w-full overflow-hidden bg-surface text-slate-900 shadow-2xl sm:min-h-0 sm:max-w-xl sm:rounded-2xl dark:bg-surface-dark dark:text-slate-100"
+              >
+                <header class="flex h-14 items-center gap-3 border-b border-outline px-3 dark:border-outline-dark">
+                  <button
+                    type="button"
+                    class="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:bg-white/10"
+                    :aria-label="t('common.close')"
+                    @click="showDraftMenu = false"
+                  >
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path stroke-linecap="round" d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <div class="min-w-0 flex-1">
+                    <DialogTitle class="truncate text-xl font-extrabold">{{ t('compose.drafts') }}</DialogTitle>
+                    <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ t('compose.drafts_subtitle') }}</p>
+                  </div>
+                  <span v-if="drafts.count" class="text-sm font-medium tabular-nums text-slate-500 dark:text-slate-400">{{ drafts.count }}</span>
+                </header>
+
+                <div v-if="drafts.error" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                  {{ t('compose.draft_save_failed') }}
+                </div>
+
+                <div v-if="drafts.loading" class="flex items-center justify-center gap-2 px-4 py-12 text-sm text-slate-500 dark:text-slate-400">
+                  <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  {{ t('compose.drafts_loading') }}
+                </div>
+
+                <p v-else-if="drafts.count === 0" class="px-6 py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+                  {{ t('compose.no_drafts') }}
+                </p>
+
+                <ul v-else class="max-h-[calc(100vh-3.5rem)] divide-y divide-outline overflow-y-auto sm:max-h-[70vh] dark:divide-outline-dark">
+                  <li v-for="draft in drafts.drafts" :key="draft.id" class="group flex items-stretch transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]">
+                    <button type="button" class="min-w-0 flex-1 px-5 py-4 text-left" @click="loadDraft(draft.id)">
+                      <span class="mb-1 flex items-start gap-2">
+                        <span
+                          class="min-w-0 flex-1 text-[15px] text-slate-900 dark:text-white"
+                          :class="draft.objectType === 'Article' ? 'truncate font-bold' : 'line-clamp-2 whitespace-pre-wrap leading-5'"
+                        >
+                          {{ draft.objectType === 'Article' ? draftTitle(draft) : (draft.content.trim() || draftTitle(draft)) }}
+                        </span>
+                        <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-slate-400">
+                          {{ draft.objectType === 'Article' ? t('compose.draft_article') : t('compose.draft_note') }}
+                        </span>
+                      </span>
+                      <span v-if="draft.objectType === 'Article' && draft.content.trim()" class="line-clamp-2 block whitespace-pre-wrap text-sm leading-5 text-slate-600 dark:text-slate-300">{{ draft.content.trim() }}</span>
+                      <span class="mt-2 flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                        <span>{{ formatDraftDate(draft.updatedAt) }}</span>
+                        <span v-if="draft.pendingSync">· {{ t('compose.draft_pending_sync') }}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="m-3 self-center rounded-full p-2.5 text-slate-400 opacity-70 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 group-hover:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      :aria-label="t('compose.discard_draft')"
+                      :title="t('compose.discard_draft')"
+                      @click="removeDraft(draft.id)"
+                    >
+                      <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  </li>
+                </ul>
+              </DialogPanel>
+            </TransitionChild>
+          </div>
+        </div>
+      </Dialog>
+    </TransitionRoot>
+  </Teleport>
 </template>

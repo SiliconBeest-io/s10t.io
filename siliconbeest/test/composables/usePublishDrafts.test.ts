@@ -1,0 +1,136 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
+import type { CredentialAccount, Status } from '@/types/mastodon';
+import { createStatus } from '@/api/mastodon/statuses';
+import { deleteDraft } from '@/api/mastodon/drafts';
+import { usePublish } from '@/composables/usePublish';
+import { useAuthStore } from '@/stores/auth';
+import { useDraftsStore, type ComposeDraftInput } from '@/stores/drafts';
+
+vi.mock('@/api/mastodon/statuses', () => ({
+  createStatus: vi.fn(),
+  editStatus: vi.fn(),
+  getStatusSource: vi.fn(),
+}));
+
+vi.mock('@/api/mastodon/drafts', () => ({
+  getDrafts: vi.fn(async () => ({ data: [], headers: new Headers() })),
+  putDraft: vi.fn(async (id: string, revision: number, draft: ComposeDraftInput) => ({
+    data: {
+      ...draft,
+      id,
+      revision,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    headers: new Headers(),
+  })),
+  deleteDraft: vi.fn(async () => ({ data: {}, headers: new Headers() })),
+}));
+
+vi.mock('@/utils/newPostSound', () => ({
+  playComposeSound: vi.fn(),
+}));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+function draftInput(): ComposeDraftInput {
+  return {
+    content: 'Publish this draft',
+    objectType: 'Note',
+    articleTitle: '',
+    articleSummary: '',
+    spoilerText: '',
+    showContentWarning: false,
+    visibility: 'public',
+    language: 'en',
+    sensitive: false,
+    quotePolicy: 'public',
+    mediaAttachments: [],
+    showPoll: false,
+    pollOptions: [],
+    pollExpiresIn: 86400,
+    pollMultiple: false,
+    inReplyToId: null,
+    inReplyToStatus: null,
+    quoteId: null,
+    quoteStatus: null,
+  };
+}
+
+describe('Publishing drafts', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    localStorage.clear();
+    vi.clearAllMocks();
+    vi.mocked(createStatus).mockReset();
+    const auth = useAuthStore();
+    auth.setToken('test-token');
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+  });
+
+  it('discards the selected draft only after a successful publish', async () => {
+    const drafts = useDraftsStore();
+    const draft = await drafts.save(draftInput());
+    vi.mocked(createStatus).mockResolvedValue({
+      data: {
+        id: 'published-1',
+        visibility: 'public',
+        object_type: 'Note',
+      } as Status,
+      headers: new Headers(),
+    });
+
+    await usePublish().publish({
+      content: 'Publish this draft',
+      draft_id: draft!.id,
+    });
+
+    expect(drafts.drafts).toEqual([]);
+  });
+
+  it('keeps the draft when publishing fails', async () => {
+    const drafts = useDraftsStore();
+    const draft = await drafts.save(draftInput());
+    vi.mocked(createStatus).mockRejectedValue(new Error('network failed'));
+
+    await expect(usePublish().publish({
+      content: 'Publish this draft',
+      draft_id: draft!.id,
+    })).rejects.toThrow('network failed');
+
+    expect(drafts.drafts).toHaveLength(1);
+  });
+
+  it('does not hold the publish result open while remote draft deletion is pending', async () => {
+    const drafts = useDraftsStore();
+    const draft = await drafts.save(draftInput());
+    const pendingDelete = deferred<{ data: Record<string, never>; headers: Headers }>();
+    vi.mocked(deleteDraft).mockReturnValueOnce(pendingDelete.promise);
+    vi.mocked(createStatus).mockResolvedValue({
+      data: {
+        id: 'published-2',
+        visibility: 'public',
+        object_type: 'Note',
+      } as Status,
+      headers: new Headers(),
+    });
+
+    const status = await usePublish().publish({
+      content: 'Publish this draft',
+      draft_id: draft!.id,
+    });
+
+    expect(status?.id).toBe('published-2');
+    expect(drafts.drafts).toEqual([]);
+    expect(deleteDraft).toHaveBeenCalledWith(draft!.id, 'test-token');
+
+    pendingDelete.resolve({ data: {}, headers: new Headers() });
+  });
+});

@@ -3,6 +3,7 @@ import { useComposeStore } from '@/stores/compose';
 import { useStatusesStore } from '@/stores/statuses';
 import { useTimelinesStore } from '@/stores/timelines';
 import { useUiStore } from '@/stores/ui';
+import { useDraftsStore } from '@/stores/drafts';
 import { playComposeSound } from '@/utils/newPostSound';
 import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
 
@@ -19,6 +20,7 @@ export interface PublishPayload {
   quote_id?: string;
   quote_policy?: QuotePolicy;
   media_ids?: string[];
+  draft_id?: string;
 }
 
 /**
@@ -35,6 +37,7 @@ export function usePublish() {
   const statusesStore = useStatusesStore();
   const timelinesStore = useTimelinesStore();
   const ui = useUiStore();
+  const drafts = useDraftsStore();
 
   const VISIBILITY_RANK: Record<string, number> = {
     direct: 0,
@@ -82,6 +85,9 @@ export function usePublish() {
 
     const status = await compose.publish();
     if (status) {
+      if (!isEditing && payload.draft_id) {
+        void drafts.remove(payload.draft_id);
+      }
       statusesStore.cacheStatus(status);
       if (!isEditing) {
         timelinesStore.prependStatus('home', status.id);
