@@ -174,7 +174,7 @@ watch(() => props.replyTo?.id, (newId, oldId) => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  void finishDraftSession()
+  finishDraftSession()
 })
 
 function handleClickOutside(e: MouseEvent) {
@@ -524,7 +524,7 @@ async function saveDraftNow() {
   return saved
 }
 
-async function finishDraftSession() {
+function finishDraftSession() {
   if (draftSessionFinished) return
   draftSessionFinished = true
   if (autosaveTimer) {
@@ -532,7 +532,7 @@ async function finishDraftSession() {
     autosaveTimer = null
   }
   if (!isEditing.value && compose.publishedTick === mountedPublishedTick) {
-    await saveDraftNow()
+    void saveDraftNow()
   }
   drafts.startFresh()
   compose.reset()
@@ -586,9 +586,9 @@ async function loadDraft(id: string) {
   compose.pollExpiresIn = draft.pollExpiresIn
   compose.pollMultiple = draft.pollMultiple
   compose.inReplyToId = draft.inReplyToId
-  compose.inReplyToStatus = draft.inReplyToStatus
+  compose.inReplyToStatus = null
   compose.quoteId = draft.quoteId
-  compose.quoteStatus = draft.quoteStatus
+  compose.quoteStatus = null
   draftSavedAt.value = draft.updatedAt
   showDraftMenu.value = false
 
@@ -664,7 +664,9 @@ watch(() => compose.editingId, (editingId) => {
 }, { immediate: true })
 
 const canSubmit = computed(() => {
-  const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
+  const hasContent = content.value.trim().length > 0
+    || compose.mediaAttachments.length > 0
+    || Boolean(compose.quoteId)
   const validTitle = objectType.value !== 'Article'
     || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
   return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
@@ -774,7 +776,7 @@ function submit() {
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
-    in_reply_to_id: props.replyTo?.id,
+    in_reply_to_id: props.replyTo?.id ?? compose.inReplyToId ?? undefined,
     quote_id: compose.quoteId ?? undefined,
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),

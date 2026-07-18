@@ -5,7 +5,7 @@ import type { CredentialAccount } from '@/types/mastodon';
 import { getDrafts } from '@/api/mastodon/drafts';
 import StatusComposer from '@/components/status/StatusComposer.vue';
 import { useAuthStore } from '@/stores/auth';
-import { useDraftsStore } from '@/stores/drafts';
+import { useDraftsStore, type ComposeDraftInput } from '@/stores/drafts';
 import { createTestI18n } from '../helpers';
 
 vi.mock('@/composables/useEmojis', () => ({
@@ -24,6 +24,30 @@ vi.mock('@/api/mastodon/drafts', () => ({
   putDraft: vi.fn(),
   deleteDraft: vi.fn(),
 }));
+
+function draftInput(content: string): ComposeDraftInput {
+  return {
+    content,
+    objectType: 'Note',
+    articleTitle: '',
+    articleSummary: '',
+    spoilerText: '',
+    showContentWarning: false,
+    visibility: 'public',
+    language: 'en',
+    sensitive: false,
+    quotePolicy: 'public',
+    mediaAttachments: [],
+    showPoll: false,
+    pollOptions: [],
+    pollExpiresIn: 86_400,
+    pollMultiple: false,
+    inReplyToId: null,
+    inReplyToStatus: null,
+    quoteId: null,
+    quoteStatus: null,
+  };
+}
 
 describe('StatusComposer drafts', () => {
   beforeEach(() => {
@@ -96,6 +120,32 @@ describe('StatusComposer drafts', () => {
 
     expect(getDrafts).toHaveBeenCalledOnce();
     expect(getDrafts).toHaveBeenCalledWith('test-token');
+    wrapper.unmount();
+  });
+
+  it('publishes a sparse reply draft with its stored reply id', async () => {
+    const drafts = useDraftsStore();
+    const saved = await drafts.save({
+      ...draftInput('Continue this reply'),
+      inReplyToId: 'parent-status',
+    });
+    drafts.startFresh();
+
+    const wrapper = mount(StatusComposer, { global: { plugins: [createTestI18n()] } });
+    await wrapper.get('[data-testid="draft-menu-button"]').trigger('click');
+    await flushPromises();
+    const modal = document.querySelector('[data-testid="drafts-modal"]');
+    const savedDraft = Array.from(modal?.querySelectorAll('button') ?? []).find((button) =>
+      button.textContent?.includes('Continue this reply'),
+    ) as HTMLButtonElement | undefined;
+    savedDraft?.click();
+    await flushPromises();
+    await wrapper.get('form').trigger('submit');
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
+      draft_id: saved?.id,
+      in_reply_to_id: 'parent-status',
+    });
     wrapper.unmount();
   });
 });

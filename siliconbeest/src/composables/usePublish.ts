@@ -86,7 +86,7 @@ export function usePublish() {
     const status = await compose.publish();
     if (status) {
       if (!isEditing && payload.draft_id) {
-        await drafts.remove(payload.draft_id);
+        void drafts.remove(payload.draft_id);
       }
       statusesStore.cacheStatus(status);
       if (!isEditing) {

@@ -17,6 +17,11 @@ export type StoredDraft = Record<string, unknown> & {
   updatedAt: string;
 };
 
+export type UpsertDraftResult = {
+  draft: StoredDraft | null;
+  conflict: boolean;
+};
+
 function serializeRow(row: DraftRow): StoredDraft | null {
   try {
     const draft: unknown = JSON.parse(row.payload);
@@ -53,10 +58,10 @@ export async function upsertDraft(
   id: string,
   revision: number,
   payload: string,
-): Promise<StoredDraft | null> {
+): Promise<UpsertDraftResult> {
   const now = new Date().toISOString();
 
-  await env.DB.batch([
+  const statements = [
     env.DB.prepare(`
       INSERT INTO post_drafts (user_id, id, revision, payload, created_at, updated_at)
       VALUES (?1, ?2, ?3, ?4, ?5, ?5)
@@ -66,17 +71,24 @@ export async function upsertDraft(
         updated_at = excluded.updated_at
       WHERE excluded.revision > post_drafts.revision
     `).bind(userId, id, revision, payload, now),
-    env.DB.prepare(`
-      DELETE FROM post_drafts
-      WHERE user_id = ?1
-        AND id NOT IN (
-          SELECT id FROM post_drafts
-          WHERE user_id = ?1
-          ORDER BY updated_at DESC
-          LIMIT ?2
-        )
-    `).bind(userId, MAX_DRAFTS_PER_USER),
-  ]);
+  ];
+
+  if (revision === 1) {
+    statements.push(
+      env.DB.prepare(`
+        DELETE FROM post_drafts
+        WHERE user_id = ?1
+          AND id NOT IN (
+            SELECT id FROM post_drafts
+            WHERE user_id = ?1
+            ORDER BY updated_at DESC
+            LIMIT ?2
+          )
+      `).bind(userId, MAX_DRAFTS_PER_USER),
+    );
+  }
+
+  const [writeResult] = await env.DB.batch(statements);
 
   const row = await env.DB.prepare(`
     SELECT id, revision, payload, created_at, updated_at
@@ -84,7 +96,12 @@ export async function upsertDraft(
     WHERE user_id = ?1 AND id = ?2
     LIMIT 1
   `).bind(userId, id).first<DraftRow>();
-  return row ? serializeRow(row) : null;
+  return {
+    draft: row ? serializeRow(row) : null,
+    conflict: writeResult?.meta.changes === 0
+      && row?.revision === revision
+      && row.payload !== payload,
+  };
 }
 
 export async function removeDraft(userId: string, id: string): Promise<void> {

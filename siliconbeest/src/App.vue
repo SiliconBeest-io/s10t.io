@@ -42,8 +42,8 @@ async function handleGlobalCompose(payload: PublishPayload) {
   await publish(payload);
 }
 
-async function handleModalClose() {
-  await composerRef.value?.finishDraftSession();
+function handleModalClose() {
+  composerRef.value?.finishDraftSession();
   ui.closeComposeModal();
 }
 

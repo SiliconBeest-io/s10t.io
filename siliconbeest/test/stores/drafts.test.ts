@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { nextTick } from 'vue';
 import type { CredentialAccount } from '@/types/mastodon';
+import type { ServerComposeDraft } from '@/types/drafts';
 import { useAuthStore } from '@/stores/auth';
-import { getDrafts } from '@/api/mastodon/drafts';
+import { deleteDraft, getDrafts, putDraft } from '@/api/mastodon/drafts';
 import {
   hasDraftContent,
   useDraftsStore,
@@ -11,9 +13,26 @@ import {
 
 vi.mock('@/api/mastodon/drafts', () => ({
   getDrafts: vi.fn(async () => ({ data: [], headers: new Headers() })),
-  putDraft: vi.fn(),
-  deleteDraft: vi.fn(),
+  putDraft: vi.fn(async (id: string, revision: number, draft: ComposeDraftInput) => ({
+    data: {
+      ...draft,
+      id,
+      revision,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    headers: new Headers(),
+  })),
+  deleteDraft: vi.fn(async () => ({ data: {}, headers: new Headers() })),
 }));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 function input(content = 'A saved thought'): ComposeDraftInput {
   return {
@@ -36,6 +55,20 @@ function input(content = 'A saved thought'): ComposeDraftInput {
     inReplyToStatus: null,
     quoteId: null,
     quoteStatus: null,
+  };
+}
+
+function serverDraft(
+  id: string,
+  revision: number,
+  content = 'A saved thought',
+): ServerComposeDraft {
+  return {
+    ...input(content),
+    id,
+    revision,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -115,5 +148,86 @@ describe('Drafts store', () => {
 
     expect(getDrafts).toHaveBeenCalledOnce();
     expect(getDrafts).toHaveBeenCalledWith('test-token');
+  });
+
+  it('fully validates local drafts and drops stored status preview objects', () => {
+    const invalid = { ...serverDraft('invalid', 1) } as Record<string, unknown>;
+    delete invalid.articleTitle;
+    const safe = {
+      ...serverDraft('safe', 1),
+      quoteId: 'quoted-status',
+      quoteStatus: { content: '<img src=x onerror=alert(1)>' },
+    };
+    localStorage.setItem('siliconbeest_post_drafts:account-1', JSON.stringify({
+      drafts: [invalid, safe],
+      pendingDeleteIds: [],
+    }));
+
+    authenticate('account-1');
+    const drafts = useDraftsStore();
+
+    expect(drafts.drafts).toHaveLength(1);
+    expect(drafts.drafts[0]).toMatchObject({ id: 'safe', quoteId: 'quoted-status' });
+    expect(drafts.drafts[0]?.quoteStatus).toBeNull();
+  });
+
+  it('ignores an autosave response after switching accounts', async () => {
+    const pending = deferred<{ data: ServerComposeDraft; headers: Headers }>();
+    vi.mocked(putDraft).mockReturnValueOnce(pending.promise);
+    const auth = useAuthStore();
+    auth.setToken('account-1-token');
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+    const drafts = useDraftsStore();
+
+    const savePromise = drafts.save(input());
+    const draftId = drafts.activeDraftId!;
+    auth.currentUser = { id: 'account-2' } as CredentialAccount;
+    await nextTick();
+
+    pending.resolve({ data: serverDraft(draftId, 1), headers: new Headers() });
+    await savePromise;
+
+    expect(drafts.accountId).toBe('account-2');
+    expect(drafts.drafts).toEqual([]);
+  });
+
+  it('does not reinsert a discarded draft when its autosave finishes later', async () => {
+    const pending = deferred<{ data: ServerComposeDraft; headers: Headers }>();
+    vi.mocked(putDraft).mockReturnValueOnce(pending.promise);
+    const auth = useAuthStore();
+    auth.setToken('test-token');
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+    const drafts = useDraftsStore();
+
+    const savePromise = drafts.save(input());
+    const draftId = drafts.activeDraftId!;
+    await drafts.remove(draftId);
+    pending.resolve({ data: serverDraft(draftId, 1), headers: new Headers() });
+    await savePromise;
+
+    expect(deleteDraft).toHaveBeenCalledWith(draftId, 'test-token');
+    expect(drafts.drafts).toEqual([]);
+  });
+
+  it('shows merged drafts while pending local changes sync in the background', async () => {
+    const auth = useAuthStore();
+    auth.clearToken();
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+    const drafts = useDraftsStore();
+    await drafts.save(input());
+
+    const pending = deferred<{ data: ServerComposeDraft; headers: Headers }>();
+    vi.mocked(putDraft).mockReturnValueOnce(pending.promise);
+    auth.setToken('test-token');
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+    await nextTick();
+    const refreshPromise = drafts.refresh();
+
+    await vi.waitFor(() => expect(putDraft).toHaveBeenCalled());
+    expect(drafts.loading).toBe(false);
+
+    const draft = drafts.drafts[0]!;
+    pending.resolve({ data: serverDraft(draft.id, draft.revision), headers: new Headers() });
+    await refreshPromise;
   });
 });

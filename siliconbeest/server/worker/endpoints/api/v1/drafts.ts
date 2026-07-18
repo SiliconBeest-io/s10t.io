@@ -30,6 +30,21 @@ type DraftInput = {
   quoteStatus: Record<string, unknown> | null;
 };
 
+type DraftInputPayload = Omit<
+  DraftInput,
+  'inReplyToId' | 'inReplyToStatus' | 'quoteId' | 'quoteStatus'
+> & {
+  inReplyToId?: string | null;
+  inReplyToStatus?: Record<string, unknown> | null;
+  quoteId?: string | null;
+  quoteStatus?: Record<string, unknown> | null;
+};
+
+type DraftRequestPayload = {
+  revision: number;
+  draft: DraftInputPayload;
+};
+
 type DraftRequest = {
   revision: number;
   draft: DraftInput;
@@ -47,11 +62,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isNullableId(value: unknown): value is string | null {
-  return value === null || (typeof value === 'string' && value.length <= MAX_DRAFT_ID_CHARACTERS);
+function isNullableId(value: unknown): value is string | null | undefined {
+  return value === null
+    || value === undefined
+    || (typeof value === 'string' && value.length > 0 && value.length <= MAX_DRAFT_ID_CHARACTERS);
 }
 
-function isDraftInput(value: unknown): value is DraftInput {
+function isDraftInput(value: unknown): value is DraftInputPayload {
   if (!isRecord(value)) return false;
   return (
     typeof value.content === 'string' && value.content.length <= 100_000 &&
@@ -70,17 +87,31 @@ function isDraftInput(value: unknown): value is DraftInput {
     Number.isInteger(value.pollExpiresIn) && Number(value.pollExpiresIn) >= 300 && Number(value.pollExpiresIn) <= 604_800 &&
     typeof value.pollMultiple === 'boolean' &&
     isNullableId(value.inReplyToId) &&
-    (value.inReplyToStatus === null || isRecord(value.inReplyToStatus)) &&
+    (value.inReplyToStatus === null || value.inReplyToStatus === undefined || isRecord(value.inReplyToStatus)) &&
     isNullableId(value.quoteId) &&
-    (value.quoteStatus === null || isRecord(value.quoteStatus))
+    (value.quoteStatus === null || value.quoteStatus === undefined || isRecord(value.quoteStatus))
   );
 }
 
-function isDraftRequest(value: unknown): value is DraftRequest {
+function isDraftRequest(value: unknown): value is DraftRequestPayload {
   return isRecord(value)
     && Number.isSafeInteger(value.revision)
     && Number(value.revision) > 0
     && isDraftInput(value.draft);
+}
+
+function parseDraftRequest(value: unknown): DraftRequest | null {
+  if (!isDraftRequest(value)) return null;
+  return {
+    revision: value.revision,
+    draft: {
+      ...value.draft,
+      inReplyToId: value.draft.inReplyToId ?? null,
+      inReplyToStatus: null,
+      quoteId: value.draft.quoteId ?? null,
+      quoteStatus: null,
+    },
+  };
 }
 
 async function readBoundedBody(request: Request): Promise<BoundedBody> {
@@ -116,7 +147,7 @@ function parseJson(text: string): ParsedJson {
 
 const app = new Hono<{ Variables: AppVariables }>();
 
-app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
+app.get('/', authRequired, requireScope('write:statuses'), async (c) => {
   const user = c.get('currentUser');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   return c.json(await listDrafts(user.id));
@@ -133,17 +164,23 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
   const parsed = parseJson(bodyResult.text);
   if (!parsed.ok) return c.json({ error: 'Invalid JSON body' }, 422);
-  if (!isDraftRequest(parsed.value)) return c.json({ error: 'Invalid draft data' }, 422);
+  const request = parseDraftRequest(parsed.value);
+  if (!request) return c.json({ error: 'Invalid draft data' }, 422);
 
-  const payload = JSON.stringify(parsed.value.draft);
+  const payload = JSON.stringify(request.draft);
   if (payload.length > MAX_PAYLOAD_CHARACTERS) {
     return c.json({ error: 'Draft is too large' }, 413);
   }
 
   const user = c.get('currentUser');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  const saved = await upsertDraft(user.id, id, parsed.value.revision, payload);
-  return saved ? c.json(saved) : c.json({ error: 'Draft was not persisted' }, 500);
+  const result = await upsertDraft(user.id, id, request.revision, payload);
+  if (result.conflict) {
+    return c.json({ error: 'Draft revision conflict', draft: result.draft }, 409);
+  }
+  return result.draft
+    ? c.json(result.draft)
+    : c.json({ error: 'Draft was not persisted' }, 500);
 });
 
 app.delete('/:id', authRequired, requireScope('write:statuses'), async (c) => {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { CredentialAccount, Status } from '@/types/mastodon';
 import { createStatus } from '@/api/mastodon/statuses';
+import { deleteDraft } from '@/api/mastodon/drafts';
 import { usePublish } from '@/composables/usePublish';
 import { useAuthStore } from '@/stores/auth';
 import { useDraftsStore, type ComposeDraftInput } from '@/stores/drafts';
@@ -31,6 +32,14 @@ vi.mock('@/utils/newPostSound', () => ({
   playComposeSound: vi.fn(),
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 function draftInput(): ComposeDraftInput {
   return {
     content: 'Publish this draft',
@@ -59,6 +68,7 @@ describe('Publishing drafts', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.clear();
+    vi.clearAllMocks();
     vi.mocked(createStatus).mockReset();
     const auth = useAuthStore();
     auth.setToken('test-token');
@@ -96,5 +106,31 @@ describe('Publishing drafts', () => {
     })).rejects.toThrow('network failed');
 
     expect(drafts.drafts).toHaveLength(1);
+  });
+
+  it('does not hold the publish result open while remote draft deletion is pending', async () => {
+    const drafts = useDraftsStore();
+    const draft = await drafts.save(draftInput());
+    const pendingDelete = deferred<{ data: Record<string, never>; headers: Headers }>();
+    vi.mocked(deleteDraft).mockReturnValueOnce(pendingDelete.promise);
+    vi.mocked(createStatus).mockResolvedValue({
+      data: {
+        id: 'published-2',
+        visibility: 'public',
+        object_type: 'Note',
+      } as Status,
+      headers: new Headers(),
+    });
+
+    const status = await usePublish().publish({
+      content: 'Publish this draft',
+      draft_id: draft!.id,
+    });
+
+    expect(status?.id).toBe('published-2');
+    expect(drafts.drafts).toEqual([]);
+    expect(deleteDraft).toHaveBeenCalledWith(draft!.id, 'test-token');
+
+    pendingDelete.resolve({ data: {}, headers: new Headers() });
   });
 });

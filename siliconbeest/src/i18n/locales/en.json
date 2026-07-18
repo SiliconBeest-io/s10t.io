@@ -153,7 +153,7 @@
     "drafts_loading": "Loading drafts...",
     "save_draft": "Save draft",
     "draft_saving": "Saving...",
-    "draft_save_failed": "Draft could not sync",
+    "draft_save_failed": "Draft could not be synced",
     "draft_saved": "Saved",
     "draft_pending_sync": "Waiting to sync",
     "draft_note": "Post",
