@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
+import {
+  Dialog,
+  DialogPanel,
+  DialogTitle,
+  Listbox,
+  ListboxButton,
+  ListboxOptions,
+  ListboxOption,
+  TransitionChild,
+  TransitionRoot,
+} from '@headlessui/vue'
 import { useComposeStore } from '@/stores/compose'
 import { useDraftsStore, hasDraftContent, type ComposeDraft, type ComposeDraftInput } from '@/stores/drafts'
 import { useEmojis } from '@/composables/useEmojis'
@@ -16,6 +26,16 @@ const compose = useComposeStore()
 const drafts = useDraftsStore()
 const auth = useAuthStore()
 const { fetchCustomEmojis, searchEmojis } = useEmojis()
+
+// Remote drafts are session data: fetch them when a composer is entered,
+// rather than as a side effect of booting the full application.
+watch(
+  [() => auth.currentUser?.id ?? null, () => auth.token],
+  ([accountId, token]) => {
+    if (accountId && token) void drafts.refresh()
+  },
+  { immediate: true },
+)
 
 const props = defineProps<{
   replyTo?: { id: string; account: { acct: string }; mentions?: Array<{ acct: string }>; visibility?: string }
@@ -59,7 +79,6 @@ const showEmojiPicker = ref(false)
 const emojiPickerRef = ref<HTMLElement | null>(null)
 const emojiButtonRef = ref<HTMLElement | null>(null)
 const showDraftMenu = ref(false)
-const draftMenuRef = ref<HTMLElement | null>(null)
 
 /** Position the emoji picker above the button, teleported to body */
 const emojiPickerPosition = computed(() => {
@@ -155,7 +174,7 @@ watch(() => props.replyTo?.id, (newId, oldId) => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
-  finishDraftSession()
+  void finishDraftSession()
 })
 
 function handleClickOutside(e: MouseEvent) {
@@ -164,9 +183,6 @@ function handleClickOutside(e: MouseEvent) {
   }
   if (autocompleteVisible.value && autocompleteRef.value && !autocompleteRef.value.contains(e.target as Node)) {
     closeAutocomplete()
-  }
-  if (showDraftMenu.value && draftMenuRef.value && !draftMenuRef.value.contains(e.target as Node)) {
-    showDraftMenu.value = false
   }
 }
 
@@ -465,7 +481,11 @@ let autosaveTimer: ReturnType<typeof setTimeout> | null = null
 let draftSessionFinished = false
 const isHydratingDraft = ref(false)
 const draftSavedAt = ref<string | null>(null)
-const draftSaveLabel = computed(() => draftSavedAt.value ? t('compose.draft_saved') : t('compose.save_draft'))
+const draftSaveLabel = computed(() => {
+  if (drafts.saving) return t('compose.draft_saving')
+  if (drafts.error) return t('compose.draft_save_failed')
+  return draftSavedAt.value ? t('compose.draft_saved') : t('compose.save_draft')
+})
 
 function draftSnapshot(): ComposeDraftInput {
   return {
@@ -493,25 +513,26 @@ function draftSnapshot(): ComposeDraftInput {
 
 const canSaveDraft = computed(() => !isEditing.value && hasDraftContent(draftSnapshot()))
 
-function saveDraftNow() {
+async function saveDraftNow() {
   if (isEditing.value || isHydratingDraft.value) return null
   if (autosaveTimer) {
     clearTimeout(autosaveTimer)
     autosaveTimer = null
   }
-  const saved = drafts.save(draftSnapshot())
+  const saved = await drafts.save(draftSnapshot())
   draftSavedAt.value = saved?.updatedAt ?? null
   return saved
 }
 
-function finishDraftSession() {
+async function finishDraftSession() {
   if (draftSessionFinished) return
+  draftSessionFinished = true
   if (autosaveTimer) {
     clearTimeout(autosaveTimer)
     autosaveTimer = null
   }
   if (!isEditing.value && compose.publishedTick === mountedPublishedTick) {
-    saveDraftNow()
+    await saveDraftNow()
   }
   drafts.startFresh()
   compose.reset()
@@ -523,7 +544,6 @@ function finishDraftSession() {
   showCw.value = false
   draftSavedAt.value = null
   showDraftMenu.value = false
-  draftSessionFinished = true
 }
 
 function scheduleDraftSave() {
@@ -532,12 +552,12 @@ function scheduleDraftSave() {
   if (autosaveTimer) clearTimeout(autosaveTimer)
   autosaveTimer = setTimeout(() => {
     autosaveTimer = null
-    saveDraftNow()
+    void saveDraftNow()
   }, AUTOSAVE_DELAY_MS)
 }
 
-function loadDraft(id: string) {
-  saveDraftNow()
+async function loadDraft(id: string) {
+  await saveDraftNow()
   const draft = drafts.drafts.find((item) => item.id === id)
   if (!draft) return
   if (autosaveTimer) {
@@ -578,8 +598,8 @@ function loadDraft(id: string) {
   })
 }
 
-function removeDraft(id: string) {
-  drafts.remove(id)
+async function removeDraft(id: string) {
+  await drafts.remove(id)
   if (drafts.activeDraftId === null) draftSavedAt.value = null
 }
 
@@ -791,46 +811,6 @@ watch(() => compose.publishedTick, () => {
     />
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
-      <!-- Saved drafts -->
-      <div v-if="!isEditing" ref="draftMenuRef" class="relative">
-        <button
-          type="button"
-          data-testid="draft-menu-button"
-          class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
-          :aria-expanded="showDraftMenu"
-          @click.stop="showDraftMenu = !showDraftMenu"
-        >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5A3.375 3.375 0 0010.125 2.25H8.25m0 12.75h7.5m-7.5 3H12m-1.5-15.75H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.625a9 9 0 00-9-9z" />
-          </svg>
-          <span>{{ t('compose.drafts') }}</span>
-          <span v-if="drafts.count" class="rounded-full bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700 dark:bg-brand-950 dark:text-brand-300">{{ drafts.count }}</span>
-        </button>
-
-        <div v-if="showDraftMenu" class="sb-menu absolute left-0 top-full z-30 mt-1.5 w-80 max-w-[calc(100vw-3rem)] p-2" @click.stop>
-          <p v-if="drafts.count === 0" class="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">
-            {{ t('compose.no_drafts') }}
-          </p>
-          <div v-for="draft in drafts.drafts" :key="draft.id" class="flex items-center gap-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-950/30">
-            <button type="button" class="min-w-0 flex-1 px-3 py-2 text-left" @click="loadDraft(draft.id)">
-              <span class="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{{ draftTitle(draft) }}</span>
-              <span class="block text-xs text-slate-400 dark:text-slate-500">{{ formatDraftDate(draft.updatedAt) }}</span>
-            </button>
-            <button
-              type="button"
-              class="mr-1 rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-              :aria-label="t('compose.discard_draft')"
-              :title="t('compose.discard_draft')"
-              @click="removeDraft(draft.id)"
-            >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-
       <!-- Visibility selector -->
       <Listbox v-model="selectedVisibility" :disabled="isEditing">
         <div class="relative">
@@ -947,6 +927,19 @@ watch(() => compose.publishedTick, () => {
           </ListboxOptions>
         </div>
       </Listbox>
+
+      <!-- Twitter-style drafts affordance, pinned to the right of the compose controls. -->
+      <button
+        v-if="!isEditing"
+        type="button"
+        data-testid="draft-menu-button"
+        class="ml-auto inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-bold text-brand-600 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-brand-400 dark:hover:bg-brand-950/40"
+        :aria-expanded="showDraftMenu"
+        @click="showDraftMenu = true"
+      >
+        <span>{{ t('compose.drafts') }}</span>
+        <span v-if="drafts.count" class="min-w-5 rounded-full bg-brand-100 px-1.5 py-0.5 text-center text-[11px] leading-4 text-brand-700 dark:bg-brand-950 dark:text-brand-300">{{ drafts.count }}</span>
+      </button>
     </div>
 
     <!-- Explicit post type selector: visible in every composer layout. -->
@@ -1334,4 +1327,106 @@ watch(() => compose.publishedTick, () => {
       </div>
     </div>
   </form>
+
+  <Teleport to="body">
+    <TransitionRoot :show="showDraftMenu" as="template">
+      <Dialog class="relative z-[90]" @close="showDraftMenu = false">
+        <TransitionChild
+          as="template"
+          enter="ease-out duration-200"
+          enter-from="opacity-0"
+          enter-to="opacity-100"
+          leave="ease-in duration-150"
+          leave-from="opacity-100"
+          leave-to="opacity-0"
+        >
+          <div class="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px]" />
+        </TransitionChild>
+
+        <div class="fixed inset-0 overflow-y-auto p-0 sm:p-4">
+          <div class="flex min-h-full items-start justify-center sm:items-center">
+            <TransitionChild
+              as="template"
+              enter="ease-out duration-200"
+              enter-from="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+              enter-to="translate-y-0 opacity-100 sm:scale-100"
+              leave="ease-in duration-150"
+              leave-from="translate-y-0 opacity-100 sm:scale-100"
+              leave-to="translate-y-4 opacity-0 sm:translate-y-0 sm:scale-95"
+            >
+              <DialogPanel
+                data-testid="drafts-modal"
+                class="min-h-screen w-full overflow-hidden bg-surface text-slate-900 shadow-2xl sm:min-h-0 sm:max-w-xl sm:rounded-2xl dark:bg-surface-dark dark:text-slate-100"
+              >
+                <header class="flex h-14 items-center gap-3 border-b border-outline px-3 dark:border-outline-dark">
+                  <button
+                    type="button"
+                    class="grid h-9 w-9 place-items-center rounded-full transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:bg-white/10"
+                    :aria-label="t('common.close')"
+                    @click="showDraftMenu = false"
+                  >
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path stroke-linecap="round" d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <div class="min-w-0 flex-1">
+                    <DialogTitle class="truncate text-xl font-extrabold">{{ t('compose.drafts') }}</DialogTitle>
+                    <p class="truncate text-xs text-slate-500 dark:text-slate-400">{{ t('compose.drafts_subtitle') }}</p>
+                  </div>
+                  <span v-if="drafts.count" class="text-sm font-medium tabular-nums text-slate-500 dark:text-slate-400">{{ drafts.count }}</span>
+                </header>
+
+                <div v-if="drafts.error" class="border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                  {{ t('compose.draft_save_failed') }}
+                </div>
+
+                <div v-if="drafts.loading" class="flex items-center justify-center gap-2 px-4 py-12 text-sm text-slate-500 dark:text-slate-400">
+                  <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  {{ t('compose.drafts_loading') }}
+                </div>
+
+                <p v-else-if="drafts.count === 0" class="px-6 py-16 text-center text-sm text-slate-500 dark:text-slate-400">
+                  {{ t('compose.no_drafts') }}
+                </p>
+
+                <ul v-else class="max-h-[calc(100vh-3.5rem)] divide-y divide-outline overflow-y-auto sm:max-h-[70vh] dark:divide-outline-dark">
+                  <li v-for="draft in drafts.drafts" :key="draft.id" class="group flex items-stretch transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.04]">
+                    <button type="button" class="min-w-0 flex-1 px-5 py-4 text-left" @click="loadDraft(draft.id)">
+                      <span class="mb-1 flex items-start gap-2">
+                        <span
+                          class="min-w-0 flex-1 text-[15px] text-slate-900 dark:text-white"
+                          :class="draft.objectType === 'Article' ? 'truncate font-bold' : 'line-clamp-2 whitespace-pre-wrap leading-5'"
+                        >
+                          {{ draft.objectType === 'Article' ? draftTitle(draft) : (draft.content.trim() || draftTitle(draft)) }}
+                        </span>
+                        <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:bg-white/10 dark:text-slate-400">
+                          {{ draft.objectType === 'Article' ? t('compose.draft_article') : t('compose.draft_note') }}
+                        </span>
+                      </span>
+                      <span v-if="draft.objectType === 'Article' && draft.content.trim()" class="line-clamp-2 block whitespace-pre-wrap text-sm leading-5 text-slate-600 dark:text-slate-300">{{ draft.content.trim() }}</span>
+                      <span class="mt-2 flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+                        <span>{{ formatDraftDate(draft.updatedAt) }}</span>
+                        <span v-if="draft.pendingSync">· {{ t('compose.draft_pending_sync') }}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="m-3 self-center rounded-full p-2.5 text-slate-400 opacity-70 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 group-hover:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      :aria-label="t('compose.discard_draft')"
+                      :title="t('compose.discard_draft')"
+                      @click="removeDraft(draft.id)"
+                    >
+                      <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  </li>
+                </ul>
+              </DialogPanel>
+            </TransitionChild>
+          </div>
+        </div>
+      </Dialog>
+    </TransitionRoot>
+  </Teleport>
 </template>

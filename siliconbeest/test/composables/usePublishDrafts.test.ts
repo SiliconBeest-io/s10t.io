@@ -12,6 +12,21 @@ vi.mock('@/api/mastodon/statuses', () => ({
   getStatusSource: vi.fn(),
 }));
 
+vi.mock('@/api/mastodon/drafts', () => ({
+  getDrafts: vi.fn(async () => ({ data: [], headers: new Headers() })),
+  putDraft: vi.fn(async (id: string, revision: number, draft: ComposeDraftInput) => ({
+    data: {
+      ...draft,
+      id,
+      revision,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    headers: new Headers(),
+  })),
+  deleteDraft: vi.fn(async () => ({ data: {}, headers: new Headers() })),
+}));
+
 vi.mock('@/utils/newPostSound', () => ({
   playComposeSound: vi.fn(),
 }));
@@ -52,7 +67,7 @@ describe('Publishing drafts', () => {
 
   it('discards the selected draft only after a successful publish', async () => {
     const drafts = useDraftsStore();
-    const draft = drafts.save(draftInput());
+    const draft = await drafts.save(draftInput());
     vi.mocked(createStatus).mockResolvedValue({
       data: {
         id: 'published-1',
@@ -72,7 +87,7 @@ describe('Publishing drafts', () => {
 
   it('keeps the draft when publishing fails', async () => {
     const drafts = useDraftsStore();
-    const draft = drafts.save(draftInput());
+    const draft = await drafts.save(draftInput());
     vi.mocked(createStatus).mockRejectedValue(new Error('network failed'));
 
     await expect(usePublish().publish({

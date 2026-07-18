@@ -1,12 +1,19 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import type { CredentialAccount } from '@/types/mastodon';
 import { useAuthStore } from '@/stores/auth';
+import { getDrafts } from '@/api/mastodon/drafts';
 import {
   hasDraftContent,
   useDraftsStore,
   type ComposeDraftInput,
 } from '@/stores/drafts';
+
+vi.mock('@/api/mastodon/drafts', () => ({
+  getDrafts: vi.fn(async () => ({ data: [], headers: new Headers() })),
+  putDraft: vi.fn(),
+  deleteDraft: vi.fn(),
+}));
 
 function input(content = 'A saved thought'): ComposeDraftInput {
   return {
@@ -41,18 +48,19 @@ describe('Drafts store', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.clear();
+    vi.clearAllMocks();
   });
 
-  it('persists complete drafts per account and updates the active draft', () => {
+  it('persists complete drafts per account and updates the active draft', async () => {
     authenticate('account-1');
     const drafts = useDraftsStore();
 
-    const first = drafts.save(input());
+    const first = await drafts.save(input());
     expect(first).not.toBeNull();
     expect(drafts.count).toBe(1);
     expect(drafts.activeDraftId).toBe(first?.id);
 
-    drafts.save({ ...input('Updated body'), articleTitle: 'Updated title' });
+    await drafts.save({ ...input('Updated body'), articleTitle: 'Updated title' });
     expect(drafts.count).toBe(1);
     expect(drafts.drafts[0]).toMatchObject({
       content: 'Updated body',
@@ -68,19 +76,19 @@ describe('Drafts store', () => {
     expect(restored.drafts[0]).toMatchObject({ content: 'Updated body', articleTitle: 'Updated title' });
   });
 
-  it('does not expose one account drafts to another account', () => {
+  it('does not expose one account drafts to another account', async () => {
     authenticate('account-1');
-    useDraftsStore().save(input());
+    await useDraftsStore().save(input());
 
     setActivePinia(createPinia());
     authenticate('account-2');
     expect(useDraftsStore().drafts).toEqual([]);
   });
 
-  it('removes the active draft when its composition becomes empty', () => {
+  it('removes the active draft when its composition becomes empty', async () => {
     authenticate('account-1');
     const drafts = useDraftsStore();
-    drafts.save(input());
+    await drafts.save(input());
 
     const empty = input('');
     empty.objectType = 'Note';
@@ -90,8 +98,22 @@ describe('Drafts store', () => {
     empty.pollOptions = [];
 
     expect(hasDraftContent(empty)).toBe(false);
-    expect(drafts.save(empty)).toBeNull();
+    expect(await drafts.save(empty)).toBeNull();
     expect(drafts.drafts).toEqual([]);
     expect(drafts.activeDraftId).toBeNull();
+  });
+
+  it('loads remote drafts only when a compose session explicitly refreshes them', async () => {
+    const auth = useAuthStore();
+    auth.setToken('test-token');
+    auth.currentUser = { id: 'account-1' } as CredentialAccount;
+    const drafts = useDraftsStore();
+
+    expect(getDrafts).not.toHaveBeenCalled();
+
+    await drafts.refresh();
+
+    expect(getDrafts).toHaveBeenCalledOnce();
+    expect(getDrafts).toHaveBeenCalledWith('test-token');
   });
 });
