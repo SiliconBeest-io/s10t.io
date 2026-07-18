@@ -72,7 +72,7 @@ watch(
           </p>
         </div>
         <button
-          v-if="announcements.unreadCount > 0"
+          v-if="auth.isAuthenticated && announcements.unreadCount > 0"
           type="button"
           class="dk-btn-accent shrink-0"
           :disabled="markingAll"
@@ -113,7 +113,7 @@ watch(
             </div>
             <span v-if="announcement.read" class="dk-dim-text shrink-0 text-xs">{{ t('announcement.read') }}</span>
             <button
-              v-else
+              v-else-if="auth.isAuthenticated"
               type="button"
               class="dk-pill-btn shrink-0"
               :disabled="readingIds.has(announcement.id)"

@@ -36,6 +36,7 @@ watch(
         +{{ announcements.unreadCount - 1 }}
       </router-link>
       <button
+        v-if="auth.isAuthenticated"
         type="button"
         class="shrink-0 rounded-full p-1 opacity-80 transition hover:bg-white/20 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
         :title="t('common.close')"

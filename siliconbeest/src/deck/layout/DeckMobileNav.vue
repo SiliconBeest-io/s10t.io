@@ -31,6 +31,7 @@ const unreadBadge = computed(() => {
 })
 
 const announcementBadge = computed(() => {
+  if (!auth.isAuthenticated) return ''
   const count = announcementsStore.unreadCount
   return count > 99 ? '99+' : count > 0 ? String(count) : ''
 })
