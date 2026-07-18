@@ -4,9 +4,11 @@
 // Share lives in the ⋯ menu. Emits stay compatible with StatusActions, plus
 // `react` (open the emoji picker) and `overlay` (a popover opened/closed —
 // the card raises its z-index above sibling cards while one is open).
-import { ref, computed, watch } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getStatusActionPermissions } from '@/utils/permissions'
+import { shouldOpenMenuDown } from '@/utils/menuPlacement'
+import { useActionMenuCoordinator } from '@/composables/useActionMenuCoordinator'
 
 const { t } = useI18n()
 
@@ -69,10 +71,17 @@ const quoteTooltip = computed(() => {
   return t('status.cannot_quote_visibility')
 })
 
+const boostBtnRef = ref<HTMLElement | null>(null)
 const starBtnRef = ref<HTMLElement | null>(null)
+const moreBtnRef = ref<HTMLElement | null>(null)
+const boostMenuRef = ref<HTMLElement | null>(null)
+const starMenuRef = ref<HTMLElement | null>(null)
+const moreMenuRef = ref<HTMLElement | null>(null)
 const showBoostMenu = ref(false)
 const showStarMenu = ref(false)
 const showMoreMenu = ref(false)
+const menuOpensDown = ref(false)
+const menuCoordinator = useActionMenuCoordinator(() => closeMenus())
 
 const anyMenuOpen = computed(() => showBoostMenu.value || showStarMenu.value || showMoreMenu.value)
 const hasMoreActions = computed(() => (
@@ -91,24 +100,40 @@ function closeMenus() {
   showBoostMenu.value = false
   showStarMenu.value = false
   showMoreMenu.value = false
+  menuCoordinator.release()
 }
 
-function openBoostMenu() {
+async function openBoostMenu() {
   const next = !showBoostMenu.value
   closeMenus()
   showBoostMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(boostBtnRef.value, boostMenuRef.value)
+  }
 }
 
-function openStarMenu() {
+async function openStarMenu() {
   const next = !showStarMenu.value
   closeMenus()
   showStarMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(starBtnRef.value, starMenuRef.value)
+  }
 }
 
-function openMoreMenu() {
+async function openMoreMenu() {
   const next = !showMoreMenu.value
   closeMenus()
   showMoreMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(moreBtnRef.value, moreMenuRef.value)
+  }
 }
 
 function pick(action: () => void) {
@@ -158,6 +183,7 @@ function formatCount(n: number): string {
     <!-- Boost chooser: repost or quote -->
     <div class="relative flex items-center">
       <button
+        ref="boostBtnRef"
         data-test="reblog-action"
         type="button"
         :disabled="!canReblog && !canQuote"
@@ -187,7 +213,12 @@ function formatCount(n: number): string {
         <span aria-hidden="true">{{ formatCount(reblogsCount) }}</span>
         <span class="sr-only">{{ t('status.reblogs_count', { count: reblogsCount }) }}</span>
       </span>
-      <div v-if="showBoostMenu" class="dk-menu absolute bottom-full left-0 z-50 mb-1.5 w-48">
+      <div
+        v-if="showBoostMenu"
+        ref="boostMenuRef"
+        class="dk-menu absolute left-0 z-50 w-48"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
+      >
         <button
           type="button"
           class="dk-menu-item"
@@ -246,7 +277,12 @@ function formatCount(n: number): string {
         <span aria-hidden="true">{{ formatCount(favouritesCount) }}</span>
         <span class="sr-only">{{ t('status.favourites_count', { count: favouritesCount }) }}</span>
       </span>
-      <div v-if="showStarMenu" class="dk-menu absolute bottom-full left-0 z-50 mb-1.5 w-48">
+      <div
+        v-if="showStarMenu"
+        ref="starMenuRef"
+        class="dk-menu absolute left-0 z-50 w-48"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
+      >
         <button
           type="button"
           class="dk-menu-item"
@@ -273,6 +309,7 @@ function formatCount(n: number): string {
     <!-- More: share + management -->
     <div v-if="hasMoreActions" class="relative">
       <button
+        ref="moreBtnRef"
         data-test="more-action"
         type="button"
         class="dk-mono dk-dim-text inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded-[10px] border-0 bg-transparent px-3 py-2.5 text-sm transition-colors hover:bg-[var(--dk-surface2)] hover:text-[var(--dk-text)]"
@@ -282,7 +319,12 @@ function formatCount(n: number): string {
       >
         ⋯
       </button>
-      <div v-if="showMoreMenu" class="dk-menu absolute bottom-full right-0 z-50 mb-1.5 w-52">
+      <div
+        v-if="showMoreMenu"
+        ref="moreMenuRef"
+        class="dk-menu absolute right-0 z-50 w-52"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
+      >
         <button
           v-if="permissions.bookmark"
           type="button"

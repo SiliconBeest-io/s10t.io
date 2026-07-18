@@ -23,6 +23,7 @@ import ImageViewer from '../common/ImageViewer.vue'
 import { emojifyPlainText } from '@/utils/customEmoji'
 import { canUseAuthenticatedActions, getStatusActionPermissions } from '@/utils/permissions'
 import { blockAccount, muteAccount } from '@/api/mastodon/accounts'
+import { articleTimelinePreview } from '@/utils/articlePreview'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -34,9 +35,12 @@ const composeStore = useComposeStore()
 const uiStore = useUiStore()
 const { now } = useNow()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   status: Status
-}>()
+  expanded?: boolean
+}>(), {
+  expanded: false,
+})
 
 // Resolve status from the store cache so optimistic updates are reactive
 const cachedStatus = computed(() => statusesStore.getCached(props.status.id) ?? props.status)
@@ -52,11 +56,18 @@ const displayStatus = computed(() => {
   return cachedStatus.value
 })
 
-const isEditing = ref(false)
-const editText = ref('')
-const editSpoilerText = ref('')
-const editSensitive = ref(false)
-const editLoading = ref(false)
+const isArticle = computed(() => displayStatus.value.object_type === 'Article')
+const showArticleBody = computed(() => !isArticle.value || props.expanded)
+const articlePreview = computed(() => articleTimelinePreview(
+  displayStatus.value.article_summary,
+  displayStatus.value.content,
+))
+const quotedArticlePreview = computed(() => {
+  const quote = displayStatus.value.quote
+  return quote?.object_type === 'Article'
+    ? articleTimelinePreview(quote.article_summary, quote.content)
+    : ''
+})
 
 const loadingFavourite = ref(false)
 const loadingReblog = ref(false)
@@ -262,51 +273,10 @@ async function copyShareUrl() {
   }
 }
 
-function stripHtml(html: string): string {
-  // Convert <br> and </p><p> to newlines, then strip remaining tags
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim()
-}
-
-function handleEdit() {
+async function handleEdit() {
   if (!statusActionPermissions.value.edit) return
-  const s = displayStatus.value
-  // Use text field if available, otherwise strip HTML from content
-  editText.value = s.text || stripHtml(s.content || '')
-  editSpoilerText.value = s.spoiler_text || ''
-  editSensitive.value = s.sensitive || false
-  isEditing.value = true
-}
-
-function cancelEdit() {
-  isEditing.value = false
-  editText.value = ''
-  editSpoilerText.value = ''
-  editSensitive.value = false
-}
-
-async function submitEdit() {
-  if (!statusActionPermissions.value.edit || editLoading.value) return
-  editLoading.value = true
-  try {
-    await statusesStore.editStatus(displayStatus.value.id, {
-      status: editText.value,
-      spoiler_text: editSpoilerText.value || undefined,
-      sensitive: editSensitive.value,
-    })
-    isEditing.value = false
-  } catch {
-    // Error handling - keep edit mode open
-  } finally {
-    editLoading.value = false
+  if (await composeStore.beginEditing(displayStatus.value)) {
+    uiStore.openComposeModal()
   }
 }
 
@@ -344,7 +314,7 @@ async function handleDelete() {
 
 <template>
   <article
-    v-if="displayStatus.content || isReblog || displayStatus.media_attachments?.length"
+    v-if="displayStatus.content || displayStatus.title || isReblog || displayStatus.media_attachments?.length"
     class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
     :aria-label="t('status.by', { name: displayStatus.account.display_name })"
     @click="handleCardClick"
@@ -413,57 +383,19 @@ async function handleDelete() {
           </span>
         </div>
 
-        <!-- Edit mode -->
-        <div v-if="isEditing" class="mt-2">
-          <div class="text-xs font-medium text-indigo-600 dark:text-indigo-400 mb-1">
-            {{ t('status.editing') }}
-          </div>
-          <textarea
-            v-model="editText"
-            class="w-full border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            rows="3"
-          />
-          <input
-            v-if="displayStatus.spoiler_text"
-            v-model="editSpoilerText"
-            type="text"
-            :placeholder="t('compose.cw_placeholder')"
-            class="w-full mt-1 border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-          <!-- Existing media attachments preview -->
-          <div v-if="displayStatus.media_attachments?.length" class="flex gap-2 mt-2 flex-wrap">
-            <div
-              v-for="media in displayStatus.media_attachments"
-              :key="media.id"
-              class="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600"
-            >
-              <img
-                :src="media.preview_url || media.url"
-                :alt="media.description || ''"
-                class="w-full h-full object-cover"
-              />
-            </div>
-          </div>
-          <div class="flex items-center gap-2 mt-2">
-            <button
-              @click="submitEdit"
-              :disabled="editLoading || !editText.trim()"
-              class="px-3 py-1 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {{ t('common.save') }}
-            </button>
-            <button
-              @click="cancelEdit"
-              class="px-3 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
-            >
-              {{ t('common.cancel') }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Normal content display -->
-        <template v-else>
+        <!-- Content display -->
+            <h2
+            v-if="displayStatus.object_type === 'Article' && displayStatus.title"
+            class="mt-2 text-xl font-bold leading-snug text-gray-950 dark:text-white"
+            >{{ displayStatus.title }}</h2>
+            <p
+              v-if="isArticle && (expanded ? displayStatus.article_summary : articlePreview)"
+              data-testid="article-preview"
+              class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-500 dark:text-slate-400"
+              :class="{ 'line-clamp-4': !displayStatus.article_summary }"
+            >{{ expanded ? displayStatus.article_summary : articlePreview }}</p>
           <StatusContent
+            v-if="showArticleBody"
             :content="displayStatus.content"
             :spoiler-text="displayStatus.spoiler_text"
             :sensitive="displayStatus.sensitive"
@@ -473,7 +405,7 @@ async function handleDelete() {
 
           <!-- Poll -->
           <StatusPoll
-            v-if="displayStatus.poll"
+            v-if="showArticleBody && displayStatus.poll"
             :poll="displayStatus.poll"
             @updated="handlePollUpdate"
             @click.stop
@@ -481,7 +413,7 @@ async function handleDelete() {
 
           <!-- Media -->
           <MediaGallery
-            v-if="displayStatus.media_attachments?.length"
+            v-if="showArticleBody && displayStatus.media_attachments?.length"
             :attachments="displayStatus.media_attachments"
             class="mt-2"
             @expand="openImageViewer"
@@ -490,13 +422,13 @@ async function handleDelete() {
 
           <!-- Preview Card -->
           <PreviewCard
-            v-if="displayStatus.card && !displayStatus.media_attachments?.length"
+            v-if="showArticleBody && displayStatus.card && !displayStatus.media_attachments?.length"
             :card="displayStatus.card"
             @click.stop
           />
 
           <div
-            v-if="displayStatus.quote"
+            v-if="showArticleBody && displayStatus.quote"
             class="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg p-3 hover:bg-gray-50 dark:hover:bg-gray-800"
             @click.stop="emit('navigate', displayStatus.quote)"
           >
@@ -504,15 +436,36 @@ async function handleDelete() {
               <span class="font-semibold truncate">{{ displayStatus.quote.account.display_name || displayStatus.quote.account.username }}</span>
               <span class="text-gray-500 dark:text-gray-400 truncate">@{{ displayStatus.quote.account.acct }}</span>
             </div>
+            <h3
+              v-if="displayStatus.quote.object_type === 'Article' && displayStatus.quote.title"
+              class="mt-2 font-bold text-gray-950 dark:text-white"
+            >{{ displayStatus.quote.title }}</h3>
+            <p
+              v-if="displayStatus.quote.object_type === 'Article'"
+              class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-gray-500 line-clamp-3 dark:text-gray-400"
+            >{{ quotedArticlePreview }}</p>
             <StatusContent
+              v-else
               :content="displayStatus.quote.content"
               :spoiler-text="displayStatus.quote.spoiler_text"
               :sensitive="displayStatus.quote.sensitive"
               :emojis="displayStatus.quote.emojis"
             />
+            <div
+              v-if="displayStatus.quote.object_type === 'Article'"
+              class="mt-2 border-t border-gray-200 pt-2 text-center text-xs font-semibold text-indigo-600 dark:border-gray-700 dark:text-indigo-400"
+            >{{ t('status.read_full_article') }}</div>
           </div>
-        </template>
 
+          <router-link
+            v-if="isArticle && !expanded"
+            :to="`/@${displayStatus.account.acct}/${displayStatus.id}`"
+            data-testid="read-full-article"
+            class="mt-3 flex w-full items-center justify-center rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-indigo-600 transition-colors hover:border-indigo-300 hover:bg-indigo-50 dark:border-gray-700 dark:bg-gray-800 dark:text-indigo-400 dark:hover:border-indigo-700 dark:hover:bg-indigo-950/30"
+            @click.stop="handleCardClick"
+          >
+            {{ t('status.read_full_article') }}
+          </router-link>
         <!-- 이모지 리액션 -->
         <StatusReactions
           :status="displayStatus"

@@ -1,14 +1,29 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type { StatusVisibility, MediaAttachment, Status, QuotePolicy } from '@/types/mastodon';
-import { createStatus, editStatus } from '@/api/mastodon/statuses';
+import { createStatus, editStatus, getStatusSource } from '@/api/mastodon/statuses';
 import { updateCredentials } from '@/api/mastodon/accounts';
 import { uploadMedia } from '@/api/mastodon/media';
 import { useAuthStore } from './auth';
 import { useStatusesStore } from './statuses';
 import { useTimelinesStore } from './timelines';
 
-const MAX_CHARACTERS = 500;
+const MAX_NOTE_CHARACTERS = 500;
+const MAX_ARTICLE_CHARACTERS = 100_000;
+const MAX_ARTICLE_TITLE_CHARACTERS = 200;
+
+function plainTextFromHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
 
 export const useComposeStore = defineStore('compose', () => {
   const defaultVisibility = ref<StatusVisibility>('public');
@@ -23,6 +38,9 @@ export const useComposeStore = defineStore('compose', () => {
     defaultQuotePolicy.value = policy ?? 'public';
   }, { immediate: true });
   const text = ref('');
+  const objectType = ref<'Note' | 'Article'>('Note');
+  const title = ref('');
+  const articleSummary = ref('');
   const contentWarning = ref('');
   const showContentWarning = ref(false);
   const visibility = ref<StatusVisibility>(defaultVisibility.value);
@@ -49,17 +67,22 @@ export const useComposeStore = defineStore('compose', () => {
   const showPoll = ref(false);
 
   const charCount = computed(() => text.value.length);
-  const remaining = computed(() => MAX_CHARACTERS - charCount.value);
+  const characterLimit = computed(() => objectType.value === 'Article' ? MAX_ARTICLE_CHARACTERS : MAX_NOTE_CHARACTERS);
+  const remaining = computed(() => characterLimit.value - charCount.value);
   const canPublish = computed(
     () =>
       !publishing.value &&
       !uploading.value &&
       (text.value.trim().length > 0 || mediaAttachments.value.length > 0) &&
+      (objectType.value !== 'Article' || (title.value.trim().length > 0 && title.value.length <= MAX_ARTICLE_TITLE_CHARACTERS)) &&
       remaining.value >= 0,
   );
 
   function reset() {
     text.value = '';
+    objectType.value = 'Note';
+    title.value = '';
+    articleSummary.value = '';
     contentWarning.value = '';
     showContentWarning.value = false;
     visibility.value = defaultVisibility.value;
@@ -127,14 +150,43 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   function setEditing(status: Status) {
+    // Editing starts a clean compose session so stale reply, quote, poll, or
+    // draft state cannot be submitted with the edited status.
+    reset();
     editingId.value = status.id;
-    text.value = status.text ?? '';
+    objectType.value = status.object_type === 'Article' ? 'Article' : 'Note';
+    title.value = status.title ?? '';
+    articleSummary.value = status.article_summary ?? '';
+    text.value = status.text ?? plainTextFromHtml(status.content ?? '');
     contentWarning.value = status.spoiler_text;
     showContentWarning.value = !!status.spoiler_text;
     visibility.value = status.visibility;
     sensitive.value = status.sensitive;
     mediaAttachments.value = [...status.media_attachments];
     language.value = status.language ?? 'en';
+    quotePolicy.value = status.quote_policy ?? defaultQuotePolicy.value;
+  }
+
+  async function beginEditing(status: Status) {
+    const auth = useAuthStore();
+    if (!auth.token) return false;
+
+    try {
+      const { data: source } = await getStatusSource(status.id, auth.token);
+      setEditing({
+        ...status,
+        object_type: source.object_type,
+        title: source.title,
+        article_summary: source.article_summary,
+        text: source.text,
+        spoiler_text: source.spoiler_text,
+      });
+    } catch {
+      // The source endpoint is authoritative, but the cached status still
+      // provides a usable fallback if the request fails temporarily.
+      setEditing(status);
+    }
+    return true;
   }
 
   async function addMedia(file: File) {
@@ -145,6 +197,7 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const { data } = await uploadMedia(file, { token: auth.token });
       mediaAttachments.value.push(data);
+      return data;
     } finally {
       uploading.value = false;
     }
@@ -162,6 +215,9 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const params = {
         status: text.value,
+        object_type: objectType.value,
+        title: objectType.value === 'Article' ? title.value.trim() : undefined,
+        summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
         media_ids: mediaAttachments.value.map((m) => m.id),
         in_reply_to_id: inReplyToId.value ?? undefined,
         sensitive: sensitive.value,
@@ -216,6 +272,9 @@ export const useComposeStore = defineStore('compose', () => {
 
   return {
     text,
+    objectType,
+    title,
+    articleSummary,
     contentWarning,
     showContentWarning,
     visibility,
@@ -241,12 +300,14 @@ export const useComposeStore = defineStore('compose', () => {
     showPoll,
     charCount,
     remaining,
+    characterLimit,
     canPublish,
     reset,
     setReplyTo,
     setQuote,
     clearQuote,
     setEditing,
+    beginEditing,
     addMedia,
     removeMedia,
     publish,

@@ -73,7 +73,9 @@ async function loadThread() {
     const displayName = statusData.account?.display_name || statusData.account?.username || ''
     const acct = statusData.account?.acct || ''
     const contentSnippet = (statusData.content || '').replace(/<[^>]*>/g, '').substring(0, 50)
-    const statusTitle = contentSnippet
+    const statusTitle = statusData.object_type === 'Article' && statusData.title
+      ? statusData.title
+      : contentSnippet
       ? `${displayName}: "${contentSnippet}"`
       : `${displayName} (@${acct})`
     document.title = siteName ? `${statusTitle} | ${siteName}` : statusTitle
@@ -128,7 +130,7 @@ watch(() => route.params.statusId, (newId) => {
         <!-- Main status (elevated focal card) — no overflow-hidden so action
              menus and the emoji picker are never clipped -->
         <div class="sb-card my-3 animate-rise-in shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
-          <StatusCard class="rounded-2xl" :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
+          <StatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation, quiet) -->

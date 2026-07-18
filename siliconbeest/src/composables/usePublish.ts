@@ -8,6 +8,9 @@ import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
 
 export interface PublishPayload {
   content: string;
+  object_type?: 'Note' | 'Article';
+  title?: string;
+  summary?: string;
   visibility?: string;
   sensitive?: boolean;
   spoiler_text?: string;
@@ -49,8 +52,12 @@ export function usePublish() {
 
   async function publish(payload: PublishPayload) {
     if (!auth.token) return;
+    const isEditing = compose.editingId !== null;
 
     compose.text = payload.content;
+    compose.objectType = payload.object_type ?? 'Note';
+    compose.title = payload.title ?? '';
+    compose.articleSummary = payload.summary ?? '';
 
     // Determine visibility: if replying, clamp to parent visibility
     if (payload.in_reply_to_id) {
@@ -62,11 +69,9 @@ export function usePublish() {
       compose.visibility = payload.visibility as StatusVisibility;
     }
 
-    if (payload.sensitive) compose.sensitive = payload.sensitive;
-    if (payload.spoiler_text) {
-      compose.contentWarning = payload.spoiler_text;
-      compose.showContentWarning = true;
-    }
+    if (payload.sensitive !== undefined) compose.sensitive = payload.sensitive;
+    compose.contentWarning = payload.spoiler_text ?? '';
+    compose.showContentWarning = Boolean(payload.spoiler_text);
     if (payload.language) compose.language = payload.language;
     if (payload.in_reply_to_id) compose.inReplyToId = payload.in_reply_to_id;
     if (payload.quote_id) compose.quoteId = payload.quote_id;
@@ -78,16 +83,18 @@ export function usePublish() {
     const status = await compose.publish();
     if (status) {
       statusesStore.cacheStatus(status);
-      timelinesStore.prependStatus('home', status.id);
-      if (timelinesStore.timelines.has('social')) {
-        timelinesStore.prependStatus('social', status.id);
-      }
-      if (status.visibility === 'public') {
-        timelinesStore.prependStatus('public', status.id);
-        timelinesStore.prependStatus('local', status.id);
+      if (!isEditing) {
+        timelinesStore.prependStatus('home', status.id);
+        if (timelinesStore.timelines.has('social')) {
+          timelinesStore.prependStatus('social', status.id);
+        }
+        if (status.visibility === 'public') {
+          timelinesStore.prependStatus('public', status.id);
+          timelinesStore.prependStatus('local', status.id);
+        }
+        playComposeSound();
       }
       ui.closeComposeModal();
-      playComposeSound();
     }
     return status;
   }

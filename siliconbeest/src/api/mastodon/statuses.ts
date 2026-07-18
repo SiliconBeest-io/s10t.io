@@ -3,6 +3,9 @@ import type { Account, Status, Context } from '@/types/mastodon';
 
 export interface CreateStatusParams {
   status?: string;
+  object_type?: 'Note' | 'Article';
+  title?: string;
+  summary?: string;
   media_ids?: string[];
   poll?: {
     options: string[];
@@ -20,12 +23,25 @@ export interface CreateStatusParams {
   quote_policy?: import('@/types/mastodon').QuotePolicy;
 }
 
+export interface StatusSource {
+  id: string;
+  object_type: 'Note' | 'Article';
+  title: string;
+  article_summary: string;
+  text: string;
+  spoiler_text: string;
+}
+
 export function getStatus(id: string, token?: string) {
   return apiFetch<Status>(`/v1/statuses/${id}`, { token });
 }
 
 export function getStatusContext(id: string, token?: string) {
   return apiFetch<Context>(`/v1/statuses/${id}/context`, { token });
+}
+
+export function getStatusSource(id: string, token: string) {
+  return apiFetch<StatusSource>(`/v1/statuses/${id}/source`, { token });
 }
 
 export function createStatus(params: CreateStatusParams, token: string) {

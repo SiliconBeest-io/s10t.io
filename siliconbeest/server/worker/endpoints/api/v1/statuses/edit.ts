@@ -11,16 +11,19 @@ import { serializeAccount } from '../../../../utils/mastodonSerializer';
 import type { AccountRow } from '../../../../types/db';
 import {
   Update,
+  Article,
   Note,
   Mention,
   Hashtag,
   Image,
   Document as APDocument,
   Source,
+  LanguageString,
   Emoji as APEmoji,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import { generateUlid } from '../../../../utils/ulid';
+import { buildArticlePreviewContent } from '../../../../utils/contentParser';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -34,6 +37,9 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
   let body: {
     status?: string;
+    object_type?: string;
+    title?: string;
+    summary?: string;
     sensitive?: boolean;
     spoiler_text?: string;
     language?: string;
@@ -44,11 +50,16 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
   } catch {
     throw new AppError(422, 'Validation failed', 'Unable to parse request body');
   }
+  if (body.object_type !== undefined && body.object_type !== 'Note' && body.object_type !== 'Article') {
+    throw new AppError(422, 'Validation failed', 'Invalid object type');
+  }
 
   const result = await editStatus(domain, statusId, currentAccountId, {
     text: body.status,
+    objectType: body.object_type as 'Note' | 'Article' | undefined,
+    title: body.title,
     sensitive: body.sensitive,
-    spoilerText: body.spoiler_text,
+    spoilerText: body.object_type === 'Article' ? (body.summary ?? body.spoiler_text) : body.spoiler_text,
     language: body.language,
     mediaIds: body.media_ids,
   });
@@ -159,7 +170,7 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
         return new APDocument({ url: attUrl, mediaType: attMediaType, name: attName });
       });
 
-      // -- Build Fedify Note --
+      // -- Build the Fedify status object --
       const noteValues: ConstructorParameters<typeof Note>[0] = {
         id: new URL(updatedRow.uri as string),
         attribution: new URL(actorUri),
@@ -198,20 +209,44 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
       const statusText = (updatedRow.text as string) || '';
       if (statusText) {
-        noteValues.source = new Source({ content: statusText, mediaType: 'text/plain' });
+        noteValues.source = new Source({
+          content: statusText,
+          mediaType: updatedRow.object_type === 'Article' ? 'text/markdown' : 'text/plain',
+        });
       }
 
       if (editConvApUri) {
         noteValues.contexts = [new URL(editConvApUri)];
       }
 
-      const fedifyNote = new Note(noteValues);
+      let fedifyObject: Article | Note;
+      if (updatedRow.object_type === 'Article') {
+        const { content: _content, summary: _summary, ...articleValues } = noteValues;
+        fedifyObject = new Article({
+          ...articleValues,
+          contents: [content, new LanguageString(content, updatedRow.language || 'en')],
+          names: [updatedRow.title, new LanguageString(updatedRow.title, updatedRow.language || 'en')],
+          ...(updatedRow.content_warning
+            ? { summaries: [updatedRow.content_warning, new LanguageString(updatedRow.content_warning, updatedRow.language || 'en')] }
+            : {}),
+          mediaType: 'text/html',
+          preview: new Note({
+            attribution: new URL(actorUri),
+            content: buildArticlePreviewContent(updatedRow.title, updatedRow.content_warning || ''),
+            published: Temporal.Instant.from(updatedRow.created_at as string),
+            ...(allTags.length > 0 ? { tags: allTags } : {}),
+            ...(mediaAttachmentObjects.length > 0 ? { attachments: mediaAttachmentObjects } : {}),
+          }),
+        } as ConstructorParameters<typeof Article>[0]);
+      } else {
+        fedifyObject = new Note(noteValues);
+      }
 
       // -- Build Update activity --
       const update = new Update({
         id: new URL(`https://${domain}/activities/${generateUlid()}`),
         actor: new URL(actorUri),
-        object: fedifyNote,
+        object: fedifyObject,
         published: Temporal.Instant.from(now),
         tos: toUrls,
         ccs: ccUrls,
@@ -227,11 +262,14 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
   return c.json({
     id: statusId,
+    object_type: updatedRow.poll_id ? 'Question' : updatedRow.object_type,
+    title: updatedRow.title || '',
+    article_summary: updatedRow.object_type === 'Article' ? (updatedRow.content_warning as string) || '' : '',
     created_at: updatedRow.created_at as string,
     in_reply_to_id: (updatedRow.in_reply_to_id as string) || null,
     in_reply_to_account_id: (updatedRow.in_reply_to_account_id as string) || null,
     sensitive: !!(updatedRow.sensitive),
-    spoiler_text: (updatedRow.content_warning as string) || '',
+    spoiler_text: updatedRow.object_type === 'Article' ? '' : (updatedRow.content_warning as string) || '',
     visibility: (updatedRow.visibility as string) || 'public',
     language: (updatedRow.language as string) || 'en',
     uri: updatedRow.uri as string,

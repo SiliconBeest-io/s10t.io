@@ -15,6 +15,8 @@ interface StatusWithAccountRow {
   visibility: string;
   content: string;
   content_warning: string;
+  object_type: 'Note' | 'Article';
+  title: string;
   sensitive: number;
   created_at: string;
   edited_at: string | null;
@@ -101,6 +103,9 @@ app.get('/:id/history', authOptional, requireScope('read:statuses'), async (c) =
   }));
 
   const history: Array<{
+    object_type: 'Note' | 'Article';
+    title: string;
+    article_summary: string;
     content: string;
     spoiler_text: string;
     sensitive: boolean;
@@ -119,8 +124,11 @@ app.get('/:id/history', authOptional, requireScope('read:statuses'), async (c) =
       } catch { /* use current media */ }
     }
     history.push({
+      object_type: e.object_type,
+      title: e.title || '',
+      article_summary: e.object_type === 'Article' ? e.spoiler_text || '' : '',
       content: e.content,
-      spoiler_text: e.spoiler_text || '',
+      spoiler_text: e.object_type === 'Article' ? '' : e.spoiler_text || '',
       sensitive: !!e.sensitive,
       created_at: e.created_at,
       account,
@@ -131,8 +139,11 @@ app.get('/:id/history', authOptional, requireScope('read:statuses'), async (c) =
 
   // Always add the current version as the last entry
   history.push({
+    object_type: status.object_type,
+    title: status.title || '',
+    article_summary: status.object_type === 'Article' ? status.content_warning || '' : '',
     content: status.content || '',
-    spoiler_text: status.content_warning || '',
+    spoiler_text: status.object_type === 'Article' ? '' : status.content_warning || '',
     sensitive: !!status.sensitive,
     created_at: status.edited_at || status.created_at,
     account,

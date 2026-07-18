@@ -27,10 +27,37 @@ const ALLOWED_TAGS = new Set([
 	'h6',
 ]);
 
+// FEP-b2b8 recommends this additional sanitized HTML subset for long-form
+// Article bodies. Keep it Article-specific so regular microblog posts retain
+// their narrower rendering surface.
+const ARTICLE_ALLOWED_TAGS = new Set([
+	...ALLOWED_TAGS,
+	'b',
+	'i',
+	'u',
+	'img',
+	'video',
+	'audio',
+	'source',
+	'ruby',
+	'rt',
+	'rp',
+]);
+
 /** Attributes allowed per tag. `*` means the attribute is allowed on any tag. */
 const ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
 	a: new Set(['href', 'rel', 'target']),
 	'*': new Set(['class']),
+};
+
+const ARTICLE_ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
+	...ALLOWED_ATTRIBUTES,
+	img: new Set(['src', 'alt', 'title', 'width', 'height']),
+	video: new Set(['src', 'controls', 'loop', 'poster', 'width', 'height']),
+	audio: new Set(['src', 'controls', 'loop']),
+	source: new Set(['src', 'type']),
+	ol: new Set(['start', 'reversed']),
+	li: new Set(['value']),
 };
 
 /**
@@ -38,6 +65,19 @@ const ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
  * Only allows a safe subset of HTML elements and attributes.
  */
 export function sanitizeHtml(html: string): string {
+	return sanitizeWithRules(html, ALLOWED_TAGS, ALLOWED_ATTRIBUTES);
+}
+
+/** Sanitize the richer embedded-media HTML subset recommended by FEP-b2b8. */
+export function sanitizeArticleHtml(html: string): string {
+	return sanitizeWithRules(html, ARTICLE_ALLOWED_TAGS, ARTICLE_ALLOWED_ATTRIBUTES);
+}
+
+function sanitizeWithRules(
+	html: string,
+	allowedTags: ReadonlySet<string>,
+	allowedAttributes: Readonly<Record<string, Set<string>>>,
+): string {
 	if (!html) return '';
 
 	let result = html;
@@ -54,20 +94,20 @@ export function sanitizeHtml(html: string): string {
 		const tag = tagName.toLowerCase();
 
 		// Remove disallowed tags entirely (keep inner content by stripping the tag itself)
-		if (!ALLOWED_TAGS.has(tag)) {
+		if (!allowedTags.has(tag)) {
 			return '';
 		}
 
 		// Self-closing tag (like <br /> or <br>)
 		const isClosing = match.startsWith('</');
-		const isSelfClosing = tag === 'br';
+		const isSelfClosing = tag === 'br' || tag === 'img' || tag === 'source';
 
 		if (isClosing) {
 			return `</${tag}>`;
 		}
 
 		// Sanitize attributes
-		const cleanAttrs = sanitizeAttributes(tag, attrs || '');
+		const cleanAttrs = sanitizeAttributes(tag, attrs || '', allowedAttributes);
 
 		if (isSelfClosing) {
 			return cleanAttrs ? `<${tag} ${cleanAttrs} />` : `<${tag} />`;
@@ -79,14 +119,30 @@ export function sanitizeHtml(html: string): string {
 	return result;
 }
 
+/** Strip markup from a value that is stored and rendered as plain text. */
+export function sanitizePlainText(value: string): string {
+	if (!value) return '';
+	return value
+		.replace(/<script[\s\S]*?<\/script\s*>/gi, '')
+		.replace(/<style[\s\S]*?<\/style\s*>/gi, '')
+		.replace(/<!--[\s\S]*?-->/g, '')
+		.replace(/<[^>]*>/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
 /**
  * Sanitize attributes for a given tag, keeping only allowed ones.
  */
-function sanitizeAttributes(tag: string, attrsString: string): string {
+function sanitizeAttributes(
+	tag: string,
+	attrsString: string,
+	allowedAttributes: Readonly<Record<string, Set<string>>>,
+): string {
 	if (!attrsString.trim()) return '';
 
-	const tagAllowed = ALLOWED_ATTRIBUTES[tag] || new Set();
-	const globalAllowed = ALLOWED_ATTRIBUTES['*'] || new Set();
+	const tagAllowed = allowedAttributes[tag] || new Set();
+	const globalAllowed = allowedAttributes['*'] || new Set();
 
 	const attrs: string[] = [];
 
@@ -123,10 +179,28 @@ function sanitizeAttributes(tag: string, attrsString: string): string {
 			continue;
 		}
 
+		if (attrName === 'src' || attrName === 'poster') {
+			const sanitizedUrl = sanitizeMediaUrl(attrValue);
+			if (sanitizedUrl === null) continue;
+			attrs.push(`${attrName}="${escapeAttrValue(sanitizedUrl)}"`);
+			continue;
+		}
+
+		if (attrName === 'width' || attrName === 'height' || attrName === 'start' || attrName === 'value') {
+			if (!/^\d+$/.test(attrValue)) continue;
+		}
+
 		attrs.push(`${attrName}="${escapeAttrValue(attrValue)}"`);
 	}
 
 	return attrs.join(' ');
+}
+
+/** Embedded media is limited to absolute HTTP(S) resources. */
+function sanitizeMediaUrl(value: string): string | null {
+	const trimmed = value.trim();
+	const lower = trimmed.toLowerCase();
+	return lower.startsWith('https://') || lower.startsWith('http://') ? trimmed : null;
 }
 
 /**

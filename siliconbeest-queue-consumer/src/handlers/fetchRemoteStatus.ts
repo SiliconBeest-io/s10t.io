@@ -228,11 +228,16 @@ export async function handleFetchRemoteStatus(
     authorAccountId = placeholder.id;
   }
 
-  // Parse the AP Note fields
+  // Parse the common ActivityStreams object fields.
   const statusId = crypto.randomUUID();
-  const content = (objectDoc.content as string) || '';
-  const contentWarning = (objectDoc.summary as string) || null;
-  const url = (objectDoc.url as string) || uri;
+  const normalizedObjectType = objectType === 'Article' ? 'Article' : 'Note';
+  const title = normalizedObjectType === 'Article'
+    ? firstString(objectDoc.name) || firstString(objectDoc.nameMap)
+    : '';
+  const content = firstString(objectDoc.content) || firstString(objectDoc.contentMap);
+  const contentWarning = firstString(objectDoc.summary) || firstString(objectDoc.summaryMap) || null;
+  const sourceText = firstString((objectDoc.source as Record<string, unknown> | undefined)?.content);
+  const url = firstUrl(objectDoc.url) || uri;
   const published = (objectDoc.published as string) || new Date().toISOString();
   const inReplyTo = (objectDoc.inReplyTo as string) || null;
   const sensitive = (objectDoc.sensitive as boolean) || false;
@@ -255,16 +260,19 @@ export async function handleFetchRemoteStatus(
   // Insert into statuses table
   const insertResult = await env.DB.prepare(
     `INSERT OR IGNORE INTO statuses (
-       id, account_id, uri, url, content, content_warning,
+       id, account_id, uri, url, object_type, title, text, content, content_warning,
        visibility, language, in_reply_to_id, sensitive,
        local, quote_policy, emoji_tags, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`,
   )
     .bind(
       statusId,
       authorAccountId,
       uri,
       url,
+      normalizedObjectType,
+      title,
+      sourceText,
       content,
       contentWarning,
       visibility,
@@ -348,6 +356,40 @@ function extractLanguage(obj: Record<string, unknown>): string | null {
   if (contentMap) {
     const langs = Object.keys(contentMap);
     if (langs.length > 0) return langs[0];
+  }
+  return null;
+}
+
+function firstString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstString(item);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) {
+      const found = firstString(item);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
+function firstUrl(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value instanceof URL) return value.href;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstUrl(item);
+      if (found) return found;
+    }
+  }
+  if (value && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return firstUrl(object.href) ?? firstUrl(object.id) ?? firstUrl(object.url);
   }
   return null;
 }

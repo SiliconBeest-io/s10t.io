@@ -7,6 +7,8 @@ import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/legacy/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
@@ -21,6 +23,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   submit: [payload: {
     content: string
+    object_type: 'Note' | 'Article'
+    title?: string
     spoiler_text: string
     visibility: string
     language: string
@@ -32,11 +36,13 @@ const emit = defineEmits<{
 }>()
 
 const content = ref('')
+const objectType = ref<'Note' | 'Article'>('Note')
+const articleTitle = ref('')
 const spoilerText = ref('')
 const showCw = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const charLimit = computed(() => props.maxChars ?? 500)
+const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
 
 // ── Emoji picker state ──────────────────────────────────────────────
@@ -175,6 +181,33 @@ function insertAtCursor(text: string) {
     ta.selectionEnd = pos
     ta.focus()
   })
+}
+
+function insertArticleMedia(media: MediaAttachment, fileName?: string) {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const markdown = `${prefix}${articleMediaMarkdown(media, fileName)}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id)
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    insertArticleMedia(media, file.name)
+  }
 }
 
 // ── Autocomplete state ──────────────────────────────────────────────
@@ -414,8 +447,21 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
 
 const canSubmit = computed(() => {
   const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
-  return hasContent && charsRemaining.value >= 0 && !compose.uploading
+  const validTitle = objectType.value !== 'Article'
+    || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
+  return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
+
+async function toggleArticle() {
+  objectType.value = objectType.value === 'Article' ? 'Note' : 'Article'
+  if (objectType.value === 'Article') {
+    if (compose.showPoll) togglePoll()
+    for (const media of [...compose.mediaAttachments]) {
+      insertArticleMedia(media)
+      await nextTick()
+    }
+  }
+}
 
 function togglePoll() {
   if (compose.showPoll) {
@@ -437,7 +483,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -480,7 +526,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -494,7 +540,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }
@@ -503,6 +549,8 @@ function submit() {
   if (!canSubmit.value) return
   emit('submit', {
     content: content.value,
+    object_type: objectType.value,
+    title: objectType.value === 'Article' ? articleTitle.value.trim() : undefined,
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
@@ -512,6 +560,8 @@ function submit() {
     media_ids: compose.mediaAttachments.map(m => m.id),
   })
   content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
   spoilerText.value = ''
   showCw.value = false
   compose.mediaAttachments.splice(0)
@@ -656,6 +706,17 @@ function submit() {
     <!-- Reply indicator -->
     <div v-if="replyTo" class="text-sm text-gray-500 dark:text-gray-400 mb-2">
       {{ t('compose.replying_to', { name: `@${replyTo.account.acct}` }) }}
+    </div>
+
+    <div v-if="objectType === 'Article'" class="mb-2">
+      <input
+        v-model="articleTitle"
+        type="text"
+        maxlength="200"
+        :placeholder="t('compose.article_title_placeholder')"
+        class="w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 text-xl font-bold text-gray-950 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:border-gray-700 dark:text-white dark:placeholder-gray-500"
+      />
+      <div class="mt-1 text-right text-xs text-gray-400">{{ articleTitle.length }}/200</div>
     </div>
 
     <!-- CW input -->
@@ -899,7 +960,7 @@ function submit() {
         <button
           type="button"
           @click="togglePoll"
-          :disabled="compose.mediaAttachments.length > 0"
+          :disabled="compose.mediaAttachments.length > 0 || objectType === 'Article'"
           class="p-2 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           :class="compose.showPoll ? 'bg-indigo-600 text-white' : 'text-indigo-600 dark:text-indigo-300 hover:bg-gray-100 dark:hover:bg-gray-800'"
           :aria-label="t('compose.poll_toggle')"
@@ -907,6 +968,18 @@ function submit() {
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M4 19V9m5 10V5m5 14v-7m5 7V8" /></svg>
         </button>
+
+        <!-- Article toggle -->
+        <button
+          type="button"
+          @click="toggleArticle"
+          class="rounded-lg px-2.5 py-2 text-sm font-bold transition-colors"
+          :class="objectType === 'Article'
+            ? 'bg-indigo-600 text-white'
+            : 'text-indigo-600 hover:bg-gray-100 dark:text-indigo-300 dark:hover:bg-gray-800'"
+          :aria-label="t('compose.article_toggle')"
+          :title="t('compose.article_toggle')"
+        >A</button>
 
         <!-- Emoji picker -->
         <div class="relative" ref="emojiPickerRef">

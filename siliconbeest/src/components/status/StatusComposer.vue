@@ -7,6 +7,8 @@ import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
@@ -21,6 +23,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   submit: [payload: {
     content: string
+    object_type: 'Note' | 'Article'
+    title?: string
+    summary?: string
     spoiler_text: string
     visibility: string
     language: string
@@ -31,12 +36,16 @@ const emit = defineEmits<{
   }]
 }>()
 
-const content = ref('')
-const spoilerText = ref('')
-const showCw = ref(false)
+const isEditing = computed(() => compose.editingId !== null)
+const content = ref(isEditing.value ? compose.text : '')
+const objectType = ref<'Note' | 'Article'>(isEditing.value ? compose.objectType : 'Note')
+const articleTitle = ref(isEditing.value ? compose.title : '')
+const articleSummary = ref(isEditing.value ? compose.articleSummary : '')
+const spoilerText = ref(isEditing.value ? compose.contentWarning : '')
+const showCw = ref(isEditing.value ? compose.showContentWarning : false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const charLimit = computed(() => props.maxChars ?? 500)
+const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
 
 // ── Emoji picker state ──────────────────────────────────────────────
@@ -175,6 +184,33 @@ function insertAtCursor(text: string) {
     ta.selectionEnd = pos
     ta.focus()
   })
+}
+
+function insertArticleMedia(media: MediaAttachment, fileName?: string) {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const markdown = `${prefix}${articleMediaMarkdown(media, fileName)}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id)
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    insertArticleMedia(media, file.name)
+  }
 }
 
 // ── Autocomplete state ──────────────────────────────────────────────
@@ -412,10 +448,42 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
+function loadEditingDraft() {
+  if (!compose.editingId) return
+  content.value = compose.text
+  objectType.value = compose.objectType
+  articleTitle.value = compose.title
+  articleSummary.value = compose.articleSummary
+  spoilerText.value = compose.contentWarning
+  showCw.value = compose.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === compose.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === compose.language)
+    ?? languageOptions[1]!
+}
+
+watch(() => compose.editingId, (editingId) => {
+  if (editingId) loadEditingDraft()
+}, { immediate: true })
+
 const canSubmit = computed(() => {
   const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
-  return hasContent && charsRemaining.value >= 0 && !compose.uploading
+  const validTitle = objectType.value !== 'Article'
+    || (articleTitle.value.trim().length > 0 && articleTitle.value.length <= 200)
+  return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
+
+async function selectObjectType(type: 'Note' | 'Article') {
+  objectType.value = type
+  if (type === 'Article') {
+    if (compose.showPoll) togglePoll()
+    showCw.value = false
+    for (const media of [...compose.mediaAttachments]) {
+      insertArticleMedia(media)
+      await nextTick()
+    }
+  }
+}
 
 function togglePoll() {
   if (compose.showPoll) {
@@ -437,7 +505,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -480,7 +548,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -494,7 +562,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }
@@ -503,6 +571,9 @@ function submit() {
   if (!canSubmit.value) return
   emit('submit', {
     content: content.value,
+    object_type: objectType.value,
+    title: objectType.value === 'Article' ? articleTitle.value.trim() : undefined,
+    summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
@@ -518,6 +589,9 @@ function submit() {
 
 watch(() => compose.publishedTick, () => {
   content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
   spoilerText.value = ''
   showCw.value = false
 })
@@ -540,10 +614,10 @@ watch(() => compose.publishedTick, () => {
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
       <!-- Visibility selector -->
-      <Listbox v-model="selectedVisibility">
+      <Listbox v-model="selectedVisibility" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.visibility.label')"
             :title="t('compose.visibility.label')"
           >
@@ -579,10 +653,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Quote policy selector -->
-      <Listbox v-model="compose.quotePolicy">
+      <Listbox v-model="compose.quotePolicy" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.quote_policy.label')"
             :title="t('compose.quote_policy.label')"
           >
@@ -618,10 +692,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Language selector -->
-      <Listbox v-model="selectedLanguage">
+      <Listbox v-model="selectedLanguage" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.language')"
             :title="t('compose.language')"
           >
@@ -657,14 +731,72 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
     </div>
 
+    <!-- Explicit post type selector: visible in every composer layout. -->
+    <fieldset class="mb-3 disabled:cursor-not-allowed disabled:opacity-60" :disabled="isEditing">
+      <legend class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {{ t('compose.post_type') }}
+      </legend>
+      <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="t('compose.post_type')">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Note'"
+          :disabled="isEditing"
+          data-testid="compose-type-note"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Note'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Note')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.note_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.note_type_description') }}</span>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Article'"
+          :disabled="isEditing"
+          data-testid="compose-type-article"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Article'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Article')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.article_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.article_type_description') }}</span>
+        </button>
+      </div>
+    </fieldset>
+
     <!-- Reply indicator -->
     <div v-if="replyTo" class="mb-2 text-sm text-slate-500 dark:text-slate-400">
       {{ t('compose.replying_to', { name: `@${replyTo.account.acct}` }) }}
     </div>
 
+    <div v-if="objectType === 'Article'" class="mb-2">
+      <input
+        v-model="articleTitle"
+        type="text"
+        maxlength="200"
+        :placeholder="t('compose.article_title_placeholder')"
+        class="w-full rounded-xl border border-outline bg-surface px-3.5 py-3 text-xl font-bold text-slate-950 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-white dark:placeholder:text-slate-500"
+      />
+      <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleTitle.length }}/200</div>
+      <textarea
+        v-model="articleSummary"
+        rows="2"
+        maxlength="500"
+        :placeholder="t('compose.article_summary_placeholder')"
+        class="mt-2 w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
+      />
+      <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleSummary.length }}/500</div>
+    </div>
+
     <!-- CW input -->
     <input
-      v-if="showCw"
+      v-if="objectType !== 'Article' && showCw"
       v-model="spoilerText"
       type="text"
       :placeholder="t('compose.cw_placeholder')"
@@ -676,16 +808,20 @@ watch(() => compose.publishedTick, () => {
       <textarea
         ref="textareaRef"
         v-model="content"
-        :placeholder="t('compose.placeholder')"
+        :placeholder="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         rows="5"
         class="w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-3 text-base leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
         @paste="onPaste"
         @drop.prevent="onDrop"
         @dragover.prevent
-        :aria-label="t('compose.placeholder')"
+        :aria-label="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         @input="onTextareaInput"
         @keydown="onTextareaKeydown"
       />
+
+      <div v-if="objectType === 'Article'" class="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+        {{ t('compose.article_markdown_help') }}
+      </div>
 
       <!-- Autocomplete dropdown -->
       <div
@@ -887,6 +1023,7 @@ watch(() => compose.publishedTick, () => {
 
         <!-- CW toggle -->
         <button
+          v-if="objectType !== 'Article'"
           type="button"
           @click="showCw = !showCw"
           class="sb-btn sb-btn-ghost rounded-xl p-2"
@@ -903,7 +1040,7 @@ watch(() => compose.publishedTick, () => {
         <button
           type="button"
           @click="togglePoll"
-          :disabled="compose.mediaAttachments.length > 0"
+          :disabled="compose.mediaAttachments.length > 0 || objectType === 'Article'"
           class="sb-btn sb-btn-ghost rounded-xl p-2"
           :class="compose.showPoll
             ? 'bg-brand-600 text-white shadow-soft hover:bg-brand-600 hover:text-white dark:bg-brand-500 dark:hover:bg-brand-500'
@@ -963,7 +1100,7 @@ watch(() => compose.publishedTick, () => {
           class="sb-btn sb-btn-primary"
         >
           <svg v-if="compose.publishing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-          {{ t('compose.submit') }}
+          {{ isEditing ? t('status.edit') : t('compose.submit') }}
         </button>
       </div>
     </div>

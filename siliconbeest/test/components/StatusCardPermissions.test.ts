@@ -8,6 +8,8 @@ import type { CredentialAccount, Status } from '@/types/mastodon'
 import { useAuthStore } from '@/stores/auth'
 import { useStatusesStore } from '@/stores/statuses'
 import { useTimelinesStore } from '@/stores/timelines'
+import { useComposeStore } from '@/stores/compose'
+import { useUiStore } from '@/stores/ui'
 import { createTestI18n } from '../helpers'
 import StatusCard from '@/components/status/StatusCard.vue'
 import DeckStatusCard from '@/deck/components/DeckStatusCard.vue'
@@ -15,6 +17,7 @@ import LegacyStatusCard from '@/legacy/components/status/StatusCard.vue'
 
 const statusApiMocks = vi.hoisted(() => ({
   deleteStatus: vi.fn(),
+  getStatusSource: vi.fn(),
 }))
 const accountApiMocks = vi.hoisted(() => ({
   blockAccount: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock('@/api/mastodon/statuses', () => ({
   unreblogStatus: vi.fn(),
   bookmarkStatus: vi.fn(),
   unbookmarkStatus: vi.fn(),
+  getStatusSource: statusApiMocks.getStatusSource,
   editStatus: vi.fn(),
   deleteStatus: statusApiMocks.deleteStatus,
 }))
@@ -100,12 +104,13 @@ const ActionStub = defineComponent({
     isOwnStatus: Boolean,
     accountId: String,
   },
-  emits: ['delete', 'block', 'mute'],
+  emits: ['delete', 'block', 'mute', 'edit'],
   template: `
     <div>
       <button data-test="delete-status" @click="$emit('delete', statusId)">{{ statusId }}</button>
       <button data-test="block-account" @click="$emit('block', accountId)">block</button>
       <button data-test="mute-account" @click="$emit('mute', accountId)">mute</button>
+      <button data-test="edit-status" @click="$emit('edit', statusId)">edit</button>
     </div>
   `,
 })
@@ -126,6 +131,72 @@ describe.each(variants)('$name status card permissions', ({ component, actionStu
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('confirm', vi.fn(() => true))
+  })
+
+  it('opens the shared composer for editing without navigating the card', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const auth = useAuthStore()
+    auth.token = 'token'
+    auth.currentUser = {
+      id: 'owner',
+      suspended: false,
+      memorial: false,
+    } as CredentialAccount
+
+    const status = {
+      ...makeStatus('editable', 'owner'),
+      object_type: 'Article',
+      title: 'Timeline title',
+      article_summary: 'Timeline summary',
+      text: null,
+      quote_policy: 'followers',
+      language: 'ko',
+    } as Status
+    statusApiMocks.getStatusSource.mockResolvedValue({
+      data: {
+        id: 'editable',
+        object_type: 'Article',
+        title: 'Complete original title',
+        article_summary: 'Complete original summary',
+        text: 'Complete original body\n\nwith every paragraph.',
+        spoiler_text: '',
+      },
+    })
+
+    const wrapper = mount(component, {
+      props: { status },
+      global: {
+        plugins: [pinia, router, createTestI18n()],
+        stubs: {
+          [actionStub]: ActionStub,
+          Avatar: true,
+          StatusContent: true,
+          MediaGallery: true,
+          PreviewCard: true,
+          StatusPoll: true,
+          StatusReactions: true,
+          DeckStatusReactions: true,
+          ReportDialog: true,
+          ImageViewer: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    await wrapper.get('[data-test="edit-status"]').trigger('click')
+    await vi.waitFor(() => expect(useUiStore().composeModalOpen).toBe(true))
+
+    const compose = useComposeStore()
+    expect(statusApiMocks.getStatusSource).toHaveBeenCalledWith('editable', 'token')
+    expect(compose.editingId).toBe('editable')
+    expect(compose.objectType).toBe('Article')
+    expect(compose.title).toBe('Complete original title')
+    expect(compose.articleSummary).toBe('Complete original summary')
+    expect(compose.text).toBe('Complete original body\n\nwith every paragraph.')
+    expect(wrapper.emitted('navigate')).toBeUndefined()
+    expect(router.currentRoute.value.fullPath).toBe('/')
   })
 
   it('targets the displayed original and removes its rendered wrapper after delete', async () => {

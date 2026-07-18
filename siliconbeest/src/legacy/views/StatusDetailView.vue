@@ -73,7 +73,9 @@ async function loadThread() {
     const displayName = statusData.account?.display_name || statusData.account?.username || ''
     const acct = statusData.account?.acct || ''
     const contentSnippet = (statusData.content || '').replace(/<[^>]*>/g, '').substring(0, 50)
-    const statusTitle = contentSnippet
+    const statusTitle = statusData.object_type === 'Article' && statusData.title
+      ? statusData.title
+      : contentSnippet
       ? `${displayName}: "${contentSnippet}"`
       : `${displayName} (@${acct})`
     document.title = siteName ? `${statusTitle} | ${siteName}` : statusTitle
@@ -127,7 +129,7 @@ watch(() => route.params.statusId, (newId) => {
 
         <!-- Main status -->
         <div class="border-l-4 border-indigo-500">
-          <StatusCard :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
+          <StatusCard :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation) -->

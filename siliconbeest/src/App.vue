@@ -117,7 +117,7 @@ onMounted(async () => {
   <RouterView />
 
   <!-- Global compose modal -->
-  <Modal :open="ui.composeModalOpen" :title="$t('compose.title')" @close="handleModalClose">
+  <Modal :open="ui.composeModalOpen" :title="composeStore.editingId ? $t('status.editing') : $t('compose.title')" @close="handleModalClose">
     <StatusComposer :reply-to="composeReplyContext" @submit="handleGlobalCompose" />
   </Modal>
 </template>

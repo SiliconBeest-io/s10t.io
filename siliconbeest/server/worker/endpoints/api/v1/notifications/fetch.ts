@@ -53,6 +53,9 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
     id: string;
     uri: string;
     url: string | null;
+    object_type: 'Note' | 'Article';
+    title: string;
+    poll_id: string | null;
     content: string;
     visibility: string;
     sensitive: number;
@@ -97,7 +100,8 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
       new Date().toISOString(),
     );
     const sr = await env.DB.prepare(
-      `SELECT s.id, s.uri, s.url, s.content, s.visibility, s.sensitive,
+      `SELECT s.id, s.uri, s.url, s.object_type, s.title, s.poll_id,
+              s.content, s.visibility, s.sensitive,
               s.content_warning, s.language, s.created_at, s.in_reply_to_id,
               s.in_reply_to_account_id, s.reblogs_count, s.favourites_count,
               s.replies_count, s.edited_at, s.quote_policy,
@@ -138,12 +142,15 @@ app.get('/:id', authRequired, requireScope('read:notifications'), async (c) => {
         id: sr.id,
         uri: sr.uri,
         url: sr.url || null,
+        object_type: sr.poll_id ? 'Question' : sr.object_type,
+        title: sr.title || '',
+        article_summary: sr.object_type === 'Article' ? sr.content_warning || '' : '',
         created_at: ensureISO8601(sr.created_at),
         edited_at: sr.edited_at || null,
         content: sr.content || '',
         visibility: (sr.visibility || 'public') as Status['visibility'],
         sensitive: !!sr.sensitive,
-        spoiler_text: sr.content_warning || '',
+        spoiler_text: sr.object_type === 'Article' ? '' : sr.content_warning || '',
         language: sr.language || null,
         in_reply_to_id: sr.in_reply_to_id || null,
         in_reply_to_account_id: sr.in_reply_to_account_id || null,

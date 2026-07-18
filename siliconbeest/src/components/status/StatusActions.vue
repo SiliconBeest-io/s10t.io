@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getStatusActionPermissions } from '@/utils/permissions'
+import { shouldOpenMenuDown } from '@/utils/menuPlacement'
+import { useActionMenuCoordinator } from '@/composables/useActionMenuCoordinator'
 
 const { t } = useI18n()
 
@@ -68,53 +70,81 @@ const showMenu = ref(false)
 const showBoostMenu = ref(false)
 const showFavMenu = ref(false)
 // Anchor for the emoji-reaction picker (teleported to body)
+const boostBtnRef = ref<HTMLElement | null>(null)
 const favBtnRef = ref<HTMLElement | null>(null)
+const moreBtnRef = ref<HTMLElement | null>(null)
+const boostMenuRef = ref<HTMLElement | null>(null)
+const favMenuRef = ref<HTMLElement | null>(null)
+const moreMenuRef = ref<HTMLElement | null>(null)
+const menuOpensDown = ref(false)
+const menuCoordinator = useActionMenuCoordinator(() => closeAllMenus())
 
 function closeAllMenus() {
   showMenu.value = false
   showBoostMenu.value = false
   showFavMenu.value = false
+  menuCoordinator.release()
 }
 
-function toggleMenu() {
+async function toggleMenu() {
   const next = !showMenu.value
   closeAllMenus()
   showMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(moreBtnRef.value, moreMenuRef.value)
+  }
 }
 
-function toggleBoostMenu() {
+async function toggleBoostMenu() {
   const next = !showBoostMenu.value
   closeAllMenus()
   showBoostMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(boostBtnRef.value, boostMenuRef.value)
+  }
 }
 
-function toggleFavMenu() {
+async function toggleFavMenu() {
   const next = !showFavMenu.value
   closeAllMenus()
   showFavMenu.value = next
+  if (next) {
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(favBtnRef.value, favMenuRef.value)
+  }
 }
 
 function closeMenu() {
   showMenu.value = false
+  menuCoordinator.release()
 }
 
 function handleBoost() {
   showBoostMenu.value = false
+  menuCoordinator.release()
   if (canReblog.value && !props.loadingReblog) emit('reblog', props.statusId)
 }
 
 function handleQuoteItem() {
   showBoostMenu.value = false
+  menuCoordinator.release()
   if (canQuote.value) emit('quote', props.statusId)
 }
 
 function handleFavouriteItem() {
   showFavMenu.value = false
+  menuCoordinator.release()
   if (permissions.value.favourite && !props.loadingFavourite) emit('favourite', props.statusId)
 }
 
 function handleReact() {
   showFavMenu.value = false
+  menuCoordinator.release()
   if (permissions.value.react) emit('react', props.statusId, favBtnRef.value ?? undefined)
 }
 
@@ -156,6 +186,7 @@ function onBoostFocusOut(e: FocusEvent) {
   const container = e.currentTarget as HTMLElement
   if (!container?.contains(e.relatedTarget as Node)) {
     showBoostMenu.value = false
+    menuCoordinator.release()
   }
 }
 
@@ -163,6 +194,7 @@ function onFavFocusOut(e: FocusEvent) {
   const container = e.currentTarget as HTMLElement
   if (!container?.contains(e.relatedTarget as Node)) {
     showFavMenu.value = false
+    menuCoordinator.release()
   }
 }
 
@@ -190,6 +222,7 @@ function formatCount(n: number): string {
     <!-- Boost / Quote (consolidated menu) -->
     <div class="relative flex items-center" @focusout="onBoostFocusOut">
       <button
+        ref="boostBtnRef"
         data-test="reblog-action"
         @click="toggleBoostMenu"
         :disabled="!canReblog && !canQuote"
@@ -227,7 +260,9 @@ function formatCount(n: number): string {
 
       <div
         v-if="showBoostMenu"
-        class="sb-menu absolute bottom-full left-0 z-50 mb-1.5 w-48 animate-fade-in"
+        ref="boostMenuRef"
+        class="sb-menu absolute left-0 z-50 w-48 animate-fade-in"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
         role="menu"
       >
         <button
@@ -297,7 +332,9 @@ function formatCount(n: number): string {
 
       <div
         v-if="showFavMenu"
-        class="sb-menu absolute bottom-full left-1/2 z-50 mb-1.5 w-48 -translate-x-1/2 animate-fade-in"
+        ref="favMenuRef"
+        class="sb-menu absolute left-1/2 z-50 w-48 -translate-x-1/2 animate-fade-in"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
         role="menu"
       >
         <button
@@ -358,6 +395,7 @@ function formatCount(n: number): string {
       @focusout="onMenuFocusOut"
     >
       <button
+        ref="moreBtnRef"
         data-test="more-action"
         @click="toggleMenu"
         class="touch-manipulation rounded-full p-2 text-slate-500 transition-colors duration-150 hover:bg-brand-50 hover:text-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-slate-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
@@ -369,7 +407,9 @@ function formatCount(n: number): string {
       <!-- Dropdown -->
       <div
         v-if="showMenu"
-        class="sb-menu absolute bottom-full right-0 z-50 mb-1.5 w-44 animate-fade-in"
+        ref="moreMenuRef"
+        class="sb-menu absolute right-0 z-50 w-44 animate-fade-in"
+        :class="menuOpensDown ? 'top-full mt-1.5' : 'bottom-full mb-1.5'"
       >
         <button
           v-if="permissions.edit"

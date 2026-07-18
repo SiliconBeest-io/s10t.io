@@ -162,6 +162,10 @@ export type StatusRow = {
   readonly id: string;
   readonly uri: string;
   readonly url: string | null;
+  /** ActivityStreams object type. Poll rows are serialized as Question. */
+  readonly object_type: 'Note' | 'Article';
+  /** ActivityStreams name, used as the title of an Article. */
+  readonly title: string;
   readonly account_id: string;
   readonly in_reply_to_id: string | null;
   readonly in_reply_to_account_id: string | null;
@@ -653,6 +657,8 @@ export type StatusWithJoinedAccountRow = StatusRow & {
 
 /** Result of `SELECT content, spoiler_text, sensitive, created_at, ... FROM status_edits` */
 export type StatusEditRow = {
+  readonly object_type: 'Note' | 'Article';
+  readonly title: string;
   readonly content: string;
   readonly spoiler_text: string;
   readonly sensitive: number;

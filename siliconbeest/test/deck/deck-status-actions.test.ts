@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { flushPromises } from '@vue/test-utils';
+import { describe, it, expect, vi } from 'vitest';
 import DeckStatusActions from '@/deck/components/DeckStatusActions.vue';
 import { mountWithPlugins } from '../helpers';
 
@@ -79,6 +80,50 @@ describe('DeckStatusActions', () => {
     await wrapper.get('[data-test="more-action"]').trigger('click');
     await buttonByText(wrapper, 'Share')!.trigger('click');
     expect(wrapper.emitted('share')![0]).toEqual(['123']);
+  });
+
+  it('opens the menu downward when the column would clip it above', async () => {
+    const scrollContainer = document.createElement('div');
+    scrollContainer.dataset.deckScroll = '';
+    document.body.appendChild(scrollContainer);
+    let anchorTop = 120;
+    const rect = (top: number, bottom: number, height = bottom - top) => ({
+      x: 0,
+      y: top,
+      top,
+      bottom,
+      left: 0,
+      right: 300,
+      width: 300,
+      height,
+      toJSON: () => ({}),
+    }) as DOMRect;
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this === scrollContainer) return rect(100, 500);
+      if ((this as HTMLElement).matches('[data-test="more-action"]')) return rect(anchorTop, anchorTop + 40, 40);
+      if ((this as HTMLElement).classList.contains('dk-menu')) return rect(0, 220, 220);
+      return rect(0, 0, 0);
+    });
+
+    const wrapper = mountWithPlugins(DeckStatusActions, {
+      props: baseProps,
+      attachTo: scrollContainer,
+    });
+
+    await wrapper.get('[data-test="more-action"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('.dk-menu').classes()).toContain('top-full');
+    expect(wrapper.get('.dk-menu').classes()).not.toContain('bottom-full');
+
+    await wrapper.get('[data-test="more-action"]').trigger('click');
+    anchorTop = 440;
+    await wrapper.get('[data-test="more-action"]').trigger('click');
+    await flushPromises();
+    expect(wrapper.get('.dk-menu').classes()).toContain('bottom-full');
+
+    wrapper.unmount();
+    rectSpy.mockRestore();
+    scrollContainer.remove();
   });
 
   it('disables repost for private posts but keeps the chooser usable', async () => {
