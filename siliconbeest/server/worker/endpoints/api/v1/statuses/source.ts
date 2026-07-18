@@ -44,8 +44,9 @@ app.get('/:id/source', authRequired, requireScope('read:statuses'), async (c) =>
     id: status.id,
     object_type: status.object_type,
     title: status.title || '',
+    article_summary: status.object_type === 'Article' ? status.content_warning || '' : '',
     text: status.text || status.content || '',
-    spoiler_text: status.content_warning || '',
+    spoiler_text: status.object_type === 'Article' ? '' : status.content_warning || '',
   });
 });
 

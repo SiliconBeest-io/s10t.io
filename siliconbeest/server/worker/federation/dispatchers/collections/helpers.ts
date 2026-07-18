@@ -8,6 +8,7 @@
 
 import {
   Article,
+  LanguageString,
   Note,
   Question,
   Image,
@@ -173,7 +174,10 @@ function buildFedifyObjectValues(
   if (attachments.length > 0) values.attachments = attachments;
   if (status.edited_at) values.updated = toTemporalInstant(status.edited_at);
   if (status.text) {
-    values.source = new Source({ content: status.text, mediaType: 'text/plain' });
+    values.source = new Source({
+      content: status.text,
+      mediaType: status.object_type === 'Article' ? 'text/markdown' : 'text/plain',
+    });
   }
 
   const quoteStatusId = status.quote_id;
@@ -240,9 +244,15 @@ export function buildFedifyArticle(
   helpers: StatusObjectHelpers,
 ): FedifyArticleResult {
   const { values, tos, ccs } = buildFedifyObjectValues(status, account, domain, helpers);
+  const { content: _content, summary: _summary, ...articleValues } = values;
   const article = new Article({
-    ...values,
-    name: status.title || null,
+    ...articleValues,
+    contents: [status.content, new LanguageString(status.content, status.language || 'en')],
+    names: [status.title, new LanguageString(status.title, status.language || 'en')],
+    ...(status.content_warning
+      ? { summaries: [status.content_warning, new LanguageString(status.content_warning, status.language || 'en')] }
+      : {}),
+    mediaType: 'text/html',
   } as ConstructorParameters<typeof Article>[0]);
   return { article, tos, ccs };
 }

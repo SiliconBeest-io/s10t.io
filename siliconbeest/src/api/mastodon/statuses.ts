@@ -5,6 +5,7 @@ export interface CreateStatusParams {
   status?: string;
   object_type?: 'Note' | 'Article';
   title?: string;
+  summary?: string;
   media_ids?: string[];
   poll?: {
     options: string[];

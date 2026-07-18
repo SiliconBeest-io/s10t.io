@@ -47,7 +47,7 @@ describe('ActivityStreams Article support', () => {
   });
 
   it('creates, reads, edits, and federates a long-form Article', async () => {
-    const body = 'Long-form body. '.repeat(80);
+    const body = `## Article heading\n\n${'Long-form body. '.repeat(80)}\n\n\`inline code\``;
     expect(body.length).toBeGreaterThan(500);
 
     const createResponse = await SELF.fetch(`${BASE}/api/v1/statuses`, {
@@ -56,23 +56,30 @@ describe('ActivityStreams Article support', () => {
       body: JSON.stringify({
         object_type: 'Article',
         title: 'My first federated article',
+        summary: 'A concise Article summary.',
         status: body,
         visibility: 'public',
+        language: 'ko',
       }),
     });
     expect(createResponse.status).toBe(200);
     const created = await createResponse.json<Record<string, any>>();
     expect(created.object_type).toBe('Article');
     expect(created.title).toBe('My first federated article');
+    expect(created.article_summary).toBe('A concise Article summary.');
+    expect(created.spoiler_text).toBe('');
     expect(created.content).toContain('Long-form body.');
+    expect(created.content).toContain('<h2>Article heading</h2>');
+    expect(created.content).toContain('<code>inline code</code>');
 
     const stored = await env.DB.prepare(
-      'SELECT object_type, title, text FROM statuses WHERE id = ?1',
-    ).bind(created.id).first<{ object_type: string; title: string; text: string }>();
+      'SELECT object_type, title, text, content_warning FROM statuses WHERE id = ?1',
+    ).bind(created.id).first<{ object_type: string; title: string; text: string; content_warning: string }>();
     expect(stored).toMatchObject({
       object_type: 'Article',
       title: 'My first federated article',
       text: body.trim(),
+      content_warning: 'A concise Article summary.',
     });
 
     const articleResponse = await SELF.fetch(created.uri, {
@@ -82,6 +89,15 @@ describe('ActivityStreams Article support', () => {
     const article = await articleResponse.json<Record<string, unknown>>();
     expect(article.type).toBe('Article');
     expect(article.name).toBe('My first federated article');
+    expect(article.nameMap).toMatchObject({ ko: 'My first federated article' });
+    expect(article.contentMap).toMatchObject({ ko: expect.stringContaining('Long-form body.') });
+    expect(article.summary).toBe('A concise Article summary.');
+    expect(article.summaryMap).toMatchObject({ ko: 'A concise Article summary.' });
+    expect(article.mediaType).toBe('text/html');
+    expect(article.source).toMatchObject({
+      content: body,
+      mediaType: 'text/markdown',
+    });
 
     const searchResponse = await SELF.fetch(
       `${BASE}/api/v2/search?q=${encodeURIComponent('first federated article')}&type=statuses`,
@@ -97,6 +113,7 @@ describe('ActivityStreams Article support', () => {
       body: JSON.stringify({
         object_type: 'Article',
         title: 'An edited federated article',
+        summary: 'The edited Article summary.',
         status: `${body}\n\nEdited ending.`,
       }),
     });
@@ -104,6 +121,7 @@ describe('ActivityStreams Article support', () => {
     const edited = await editResponse.json<Record<string, any>>();
     expect(edited.object_type).toBe('Article');
     expect(edited.title).toBe('An edited federated article');
+    expect(edited.article_summary).toBe('The edited Article summary.');
     expect(edited.edited_at).toBeTruthy();
 
     const historyResponse = await SELF.fetch(`${BASE}/api/v1/statuses/${created.id}/history`, {
@@ -114,10 +132,12 @@ describe('ActivityStreams Article support', () => {
     expect(history[0]).toMatchObject({
       object_type: 'Article',
       title: 'My first federated article',
+      article_summary: 'A concise Article summary.',
     });
     expect(history.at(-1)).toMatchObject({
       object_type: 'Article',
       title: 'An edited federated article',
+      article_summary: 'The edited Article summary.',
     });
   });
 

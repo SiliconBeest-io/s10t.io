@@ -127,20 +127,31 @@ describe('Search API', () => {
         object: {
           type: 'Article',
           id: articleUri,
-          name: 'A long-form title',
+          nameMap: { en: 'A long-form title', ko: '장문 제목' },
           attributedTo: remoteActorUri,
           to: 'as:Public',
-          content: '<h1>Long-form post</h1><p>Article body</p>',
+          contentMap: { en: '<h1>Long-form post</h1><p>Article body</p>', ko: '<h1>장문</h1><p>본문</p>' },
+          summaryMap: { en: 'A compact summary', ko: '짧은 요약' },
+          url: [
+            'https://article-author.example/2026/07/long-form-post',
+            { type: 'Link', href: 'https://article-author.example/ko/long-form-post', hreflang: 'ko' },
+          ],
+          mediaType: 'text/html',
+          source: { content: '## Long-form post\n\nArticle body', mediaType: 'text/markdown' },
         },
       }, user.accountId, { fanout: false, notify: false });
 
       const stored = await env.DB.prepare(
-        'SELECT id, object_type, title, content, visibility FROM statuses WHERE uri = ?1 LIMIT 1',
-      ).bind(articleUri).first<{ id: string; object_type: string; title: string; content: string; visibility: string }>();
+        'SELECT id, object_type, title, text, content, content_warning, language, url, visibility FROM statuses WHERE uri = ?1 LIMIT 1',
+      ).bind(articleUri).first<{ id: string; object_type: string; title: string; text: string; content: string; content_warning: string; language: string; url: string; visibility: string }>();
       expect(stored).toMatchObject({
         object_type: 'Article',
         title: 'A long-form title',
+        text: '## Long-form post\n\nArticle body',
         content: '<h1>Long-form post</h1><p>Article body</p>',
+        content_warning: 'A compact summary',
+        language: 'en',
+        url: 'https://article-author.example/2026/07/long-form-post',
         visibility: 'public',
       });
 
@@ -151,6 +162,8 @@ describe('Search API', () => {
       const articleStatus = await articleResponse.json<Record<string, unknown>>();
       expect(articleStatus.object_type).toBe('Article');
       expect(articleStatus.title).toBe('A long-form title');
+      expect(articleStatus.article_summary).toBe('A compact summary');
+      expect(articleStatus.spoiler_text).toBe('');
     });
 
     it('does not return private or direct statuses by URL to unauthorized users', async () => {

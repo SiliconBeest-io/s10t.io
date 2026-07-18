@@ -16,6 +16,7 @@ import {
   Image,
   Document as APDocument,
   Source,
+  LanguageString,
   Emoji as APEmoji,
   QuoteRequest,
 } from '@fedify/vocab';
@@ -46,6 +47,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     status?: string;
     object_type?: string;
     title?: string;
+    summary?: string;
     media_ids?: string[];
     poll?: { options: string[]; expires_in: number; multiple?: boolean };
     in_reply_to_id?: string;
@@ -93,7 +95,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     title: body.title,
     visibility: requestedVisibility,
     sensitive: body.sensitive,
-    spoilerText: body.spoiler_text,
+    spoilerText: objectType === 'Article' ? (body.summary ?? body.spoiler_text) : body.spoiler_text,
     inReplyToId: body.in_reply_to_id,
     mediaIds,
     language: body.language,
@@ -573,7 +575,7 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     if (statusText) {
       noteValues.source = new Source({
         content: statusText,
-        mediaType: 'text/plain',
+        mediaType: storedObjectType === 'Article' ? 'text/markdown' : 'text/plain',
       });
     }
 
@@ -621,9 +623,15 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
       questionValues.voters = 0;
       fedifyObject = new Question(questionValues);
     } else if (storedObjectType === 'Article') {
+      const { content: _content, summary: _summary, ...articleValues } = noteValues;
       fedifyObject = new Article({
-        ...noteValues,
-        name: title,
+        ...articleValues,
+        contents: [fixedContent, new LanguageString(fixedContent, language)],
+        names: [title, new LanguageString(title, language)],
+        ...(spoilerText
+          ? { summaries: [spoilerText, new LanguageString(spoilerText, language)] }
+          : {}),
+        mediaType: 'text/html',
       } as ConstructorParameters<typeof Article>[0]);
     } else {
       fedifyObject = new Note(noteValues);
@@ -770,11 +778,12 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
         id: quotedRow.id as string,
         object_type: quotedRow.poll_id ? 'Question' : quotedRow.object_type === 'Article' ? 'Article' : 'Note',
         title: (quotedRow.title as string) || '',
+        article_summary: quotedRow.object_type === 'Article' ? (quotedRow.content_warning as string) || '' : '',
         created_at: quotedRow.created_at as string,
         in_reply_to_id: (quotedRow.in_reply_to_id as string) || null,
         in_reply_to_account_id: (quotedRow.in_reply_to_account_id as string) || null,
         sensitive: !!(quotedRow.sensitive),
-        spoiler_text: (quotedRow.content_warning as string) || '',
+        spoiler_text: quotedRow.object_type === 'Article' ? '' : (quotedRow.content_warning as string) || '',
         visibility: (quotedRow.visibility as string) || 'public',
         language: (quotedRow.language as string) || 'en',
         uri: quotedRow.uri as string,
@@ -830,11 +839,12 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     id: statusId,
     object_type: pollData ? 'Question' : storedObjectType,
     title,
+    article_summary: storedObjectType === 'Article' ? spoilerText : '',
     created_at: now,
     in_reply_to_id: inReplyToId,
     in_reply_to_account_id: inReplyToAccountId,
     sensitive: !!sensitive,
-    spoiler_text: spoilerText,
+    spoiler_text: storedObjectType === 'Article' ? '' : spoilerText,
     visibility,
     language,
     uri: statusUri,

@@ -283,7 +283,7 @@ function handleEdit() {
   // Use text field if available, otherwise strip HTML from content
   editText.value = s.text || stripHtml(s.content || '')
   editTitle.value = s.title || ''
-  editSpoilerText.value = s.spoiler_text || ''
+  editSpoilerText.value = s.object_type === 'Article' ? s.article_summary || '' : s.spoiler_text || ''
   editSensitive.value = s.sensitive || false
   isEditing.value = true
 }
@@ -304,7 +304,8 @@ async function submitEdit() {
       status: editText.value,
       object_type: displayStatus.value.object_type === 'Article' ? 'Article' : 'Note',
       title: displayStatus.value.object_type === 'Article' ? editTitle.value.trim() : undefined,
-      spoiler_text: editSpoilerText.value || undefined,
+      summary: displayStatus.value.object_type === 'Article' ? editSpoilerText.value.trim() || undefined : undefined,
+      spoiler_text: displayStatus.value.object_type === 'Article' ? undefined : editSpoilerText.value || undefined,
       sensitive: editSensitive.value,
     })
     isEditing.value = false
@@ -437,10 +438,10 @@ async function handleDelete() {
             rows="3"
           />
           <input
-            v-if="displayStatus.spoiler_text"
+              v-if="displayStatus.object_type === 'Article' || displayStatus.spoiler_text"
             v-model="editSpoilerText"
             type="text"
-            :placeholder="t('compose.cw_placeholder')"
+              :placeholder="displayStatus.object_type === 'Article' ? t('compose.article_summary_placeholder') : t('compose.cw_placeholder')"
             class="w-full mt-1 border border-gray-300 dark:border-gray-600 rounded-lg p-2 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
           <!-- Existing media attachments preview -->
@@ -476,10 +477,14 @@ async function handleDelete() {
 
         <!-- Normal content display -->
         <template v-else>
-          <h2
+            <h2
             v-if="displayStatus.object_type === 'Article' && displayStatus.title"
             class="mt-2 text-xl font-bold leading-snug text-gray-950 dark:text-white"
-          >{{ displayStatus.title }}</h2>
+            >{{ displayStatus.title }}</h2>
+            <p
+              v-if="displayStatus.object_type === 'Article' && displayStatus.article_summary"
+              class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400"
+            >{{ displayStatus.article_summary }}</p>
           <StatusContent
             :content="displayStatus.content"
             :spoiler-text="displayStatus.spoiler_text"

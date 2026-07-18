@@ -3,6 +3,9 @@
  * Converts plain text with @mentions, #hashtags, and URLs into HTML.
  */
 
+import { marked } from 'marked';
+import { sanitizeHtml } from './sanitize';
+
 export type ParsedMention = {
 	username: string;
 	domain: string | null;
@@ -50,6 +53,16 @@ export function parseContent(text: string, domain: string): ParsedContent {
 	const html = htmlParagraphs.join('');
 
 	return { html, mentions, tags };
+}
+
+/** Render long-form Article source as safe Markdown while retaining mention/tag discovery. */
+export function parseArticleContent(text: string, domain: string): ParsedContent {
+	const metadata = parseContent(text, domain);
+	const rendered = marked.parse(text, { async: false, gfm: true }) as string;
+	return {
+		...metadata,
+		html: sanitizeHtml(rendered),
+	};
 }
 
 /**

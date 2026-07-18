@@ -23,6 +23,7 @@ const emit = defineEmits<{
     content: string
     object_type: 'Note' | 'Article'
     title?: string
+    summary?: string
     spoiler_text: string
     visibility: string
     language: string
@@ -36,6 +37,7 @@ const emit = defineEmits<{
 const content = ref('')
 const objectType = ref<'Note' | 'Article'>('Note')
 const articleTitle = ref('')
+const articleSummary = ref('')
 const spoilerText = ref('')
 const showCw = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -423,9 +425,12 @@ const canSubmit = computed(() => {
   return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
 
-function toggleArticle() {
-  objectType.value = objectType.value === 'Article' ? 'Note' : 'Article'
-  if (objectType.value === 'Article' && compose.showPoll) togglePoll()
+function selectObjectType(type: 'Note' | 'Article') {
+  objectType.value = type
+  if (type === 'Article') {
+    if (compose.showPoll) togglePoll()
+    showCw.value = false
+  }
 }
 
 function togglePoll() {
@@ -516,6 +521,7 @@ function submit() {
     content: content.value,
     object_type: objectType.value,
     title: objectType.value === 'Article' ? articleTitle.value.trim() : undefined,
+    summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
     spoiler_text: showCw.value ? spoilerText.value : '',
     visibility: selectedVisibility.value.value,
     language: selectedLanguage.value.code,
@@ -533,6 +539,7 @@ watch(() => compose.publishedTick, () => {
   content.value = ''
   objectType.value = 'Note'
   articleTitle.value = ''
+  articleSummary.value = ''
   spoilerText.value = ''
   showCw.value = false
 })
@@ -672,6 +679,43 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
     </div>
 
+    <!-- Explicit post type selector: visible in every composer layout. -->
+    <fieldset class="mb-3">
+      <legend class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {{ t('compose.post_type') }}
+      </legend>
+      <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="t('compose.post_type')">
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Note'"
+          data-testid="compose-type-note"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Note'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Note')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.note_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.note_type_description') }}</span>
+        </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="objectType === 'Article'"
+          data-testid="compose-type-article"
+          class="rounded-xl border px-3 py-2.5 text-left transition"
+          :class="objectType === 'Article'
+            ? 'border-brand-500 bg-brand-50 text-brand-800 ring-2 ring-brand-500/20 dark:bg-brand-950/40 dark:text-brand-200'
+            : 'border-outline bg-surface text-slate-600 hover:border-brand-300 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-300'"
+          @click="selectObjectType('Article')"
+        >
+          <span class="block text-sm font-bold">{{ t('compose.article_type') }}</span>
+          <span class="mt-0.5 block text-xs opacity-75">{{ t('compose.article_type_description') }}</span>
+        </button>
+      </div>
+    </fieldset>
+
     <!-- Reply indicator -->
     <div v-if="replyTo" class="mb-2 text-sm text-slate-500 dark:text-slate-400">
       {{ t('compose.replying_to', { name: `@${replyTo.account.acct}` }) }}
@@ -686,11 +730,19 @@ watch(() => compose.publishedTick, () => {
         class="w-full rounded-xl border border-outline bg-surface px-3.5 py-3 text-xl font-bold text-slate-950 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-white dark:placeholder:text-slate-500"
       />
       <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleTitle.length }}/200</div>
+      <textarea
+        v-model="articleSummary"
+        rows="2"
+        maxlength="500"
+        :placeholder="t('compose.article_summary_placeholder')"
+        class="mt-2 w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-2.5 text-sm leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
+      />
+      <div class="mt-1 text-right text-xs tabular-nums text-slate-400">{{ articleSummary.length }}/500</div>
     </div>
 
     <!-- CW input -->
     <input
-      v-if="showCw"
+      v-if="objectType !== 'Article' && showCw"
       v-model="spoilerText"
       type="text"
       :placeholder="t('compose.cw_placeholder')"
@@ -702,16 +754,20 @@ watch(() => compose.publishedTick, () => {
       <textarea
         ref="textareaRef"
         v-model="content"
-        :placeholder="t('compose.placeholder')"
+        :placeholder="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         rows="5"
         class="w-full resize-none rounded-xl border border-outline bg-surface px-3.5 py-3 text-base leading-relaxed text-slate-900 transition placeholder:text-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-100 dark:placeholder:text-slate-500"
         @paste="onPaste"
         @drop.prevent="onDrop"
         @dragover.prevent
-        :aria-label="t('compose.placeholder')"
+        :aria-label="objectType === 'Article' ? t('compose.article_body_placeholder') : t('compose.placeholder')"
         @input="onTextareaInput"
         @keydown="onTextareaKeydown"
       />
+
+      <div v-if="objectType === 'Article'" class="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
+        {{ t('compose.article_markdown_help') }}
+      </div>
 
       <!-- Autocomplete dropdown -->
       <div
@@ -913,6 +969,7 @@ watch(() => compose.publishedTick, () => {
 
         <!-- CW toggle -->
         <button
+          v-if="objectType !== 'Article'"
           type="button"
           @click="showCw = !showCw"
           class="sb-btn sb-btn-ghost rounded-xl p-2"
@@ -939,18 +996,6 @@ watch(() => compose.publishedTick, () => {
         >
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" d="M4 19V9m5 10V5m5 14v-7m5 7V8" /></svg>
         </button>
-
-        <!-- Article toggle -->
-        <button
-          type="button"
-          @click="toggleArticle"
-          class="sb-btn sb-btn-ghost rounded-xl px-2.5 py-2 text-sm font-bold"
-          :class="objectType === 'Article'
-            ? 'bg-brand-600 text-white shadow-soft hover:bg-brand-600 hover:text-white dark:bg-brand-500'
-            : 'text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-950/40'"
-          :aria-label="t('compose.article_toggle')"
-          :title="t('compose.article_toggle')"
-        >A</button>
 
         <!-- Emoji picker -->
         <div class="relative" ref="emojiPickerRef">

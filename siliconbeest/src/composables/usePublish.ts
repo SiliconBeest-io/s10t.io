@@ -10,6 +10,7 @@ export interface PublishPayload {
   content: string;
   object_type?: 'Note' | 'Article';
   title?: string;
+  summary?: string;
   visibility?: string;
   sensitive?: boolean;
   spoiler_text?: string;
@@ -55,6 +56,7 @@ export function usePublish() {
     compose.text = payload.content;
     compose.objectType = payload.object_type ?? 'Note';
     compose.title = payload.title ?? '';
+    compose.articleSummary = payload.summary ?? '';
 
     // Determine visibility: if replying, clamp to parent visibility
     if (payload.in_reply_to_id) {

@@ -16,6 +16,29 @@ import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../pac
 import { areActivityPubUrisEquivalent } from '../../../../../packages/shared/permissions';
 import { canProcessIncomingActorUpdate } from '../../services/permissions';
 
+function firstString(value: unknown): string {
+	if (typeof value === 'string') return value;
+	if (Array.isArray(value)) {
+		for (const item of value) {
+			const found = firstString(item);
+			if (found) return found;
+		}
+		return '';
+	}
+	if (value && typeof value === 'object') {
+		for (const item of Object.values(value as Record<string, unknown>)) {
+			const found = firstString(item);
+			if (found) return found;
+		}
+	}
+	return '';
+}
+
+function firstLanguage(map: unknown): string | null {
+	if (!map || typeof map !== 'object' || Array.isArray(map)) return null;
+	return Object.keys(map as Record<string, unknown>)[0] ?? null;
+}
+
 class UpdateProcessor extends BaseProcessor {
 	async process(activity: APActivity): Promise<void> {
 		const object = activity.object;
@@ -103,27 +126,38 @@ class UpdateProcessor extends BaseProcessor {
 				return;
 			}
 
-			const sanitizedContent = sanitizeHtml(obj.content ?? '');
-			const sanitizedCw = sanitizeHtml(obj.summary ?? '');
+			const sanitizedContent = sanitizeHtml(
+				firstString(obj.content) || firstString(obj.contentMap),
+			);
+			const sanitizedSummary = sanitizeHtml(
+				firstString(obj.summary) || firstString(obj.summaryMap),
+			);
+			const sourceText = obj.source && typeof obj.source === 'object'
+				? firstString((obj.source as Record<string, unknown>).content)
+				: null;
 			const interactionPolicy = (obj as Record<string, unknown>).interactionPolicy;
 			const statusUpdates: Parameters<typeof this.statusRepo.update>[1] = {
 				object_type: obj.type === 'Article' ? 'Article' : 'Note',
-				title: obj.type === 'Article' ? sanitizePlainText(obj.name ?? '') : '',
+				title: obj.type === 'Article'
+					? sanitizePlainText(firstString(obj.name) || firstString(obj.nameMap))
+					: '',
 				content: sanitizedContent,
-				content_warning: sanitizedCw,
+				content_warning: sanitizedSummary,
+				language: firstLanguage(obj.contentMap) ?? status.language,
 				sensitive: obj.sensitive ? 1 : 0,
 				edited_at: now,
-				};
-				if (interactionPolicy !== undefined) {
-					const quotePolicyDetails = parseQuotePolicyDetailsFromInteractionPolicy(
-						interactionPolicy,
-						activity.actor,
-						`${activity.actor}/followers`,
-					);
-					statusUpdates.quote_policy = quotePolicyDetails.policy;
-					statusUpdates.quote_policy_automatic_approvals = JSON.stringify(quotePolicyDetails.automaticApprovals);
-					statusUpdates.quote_policy_manual_approvals = JSON.stringify(quotePolicyDetails.manualApprovals);
-				}
+			};
+			if (sourceText !== null) statusUpdates.text = sourceText;
+			if (interactionPolicy !== undefined) {
+				const quotePolicyDetails = parseQuotePolicyDetailsFromInteractionPolicy(
+					interactionPolicy,
+					activity.actor,
+					`${activity.actor}/followers`,
+				);
+				statusUpdates.quote_policy = quotePolicyDetails.policy;
+				statusUpdates.quote_policy_automatic_approvals = JSON.stringify(quotePolicyDetails.automaticApprovals);
+				statusUpdates.quote_policy_manual_approvals = JSON.stringify(quotePolicyDetails.manualApprovals);
+			}
 
 			await this.statusRepo.update(status.id, statusUpdates);
 

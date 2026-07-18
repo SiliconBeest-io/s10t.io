@@ -25,12 +25,14 @@ describe('Compose Store Article mode', () => {
     const compose = useComposeStore();
     compose.objectType = 'Article';
     compose.title = 'Draft title';
+    compose.articleSummary = 'Draft summary';
     compose.text = 'Draft body';
 
     compose.reset();
 
     expect(compose.objectType).toBe('Note');
     expect(compose.title).toBe('');
+    expect(compose.articleSummary).toBe('');
     expect(compose.characterLimit).toBe(500);
   });
 });

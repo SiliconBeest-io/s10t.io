@@ -115,6 +115,8 @@ export type Status = {
   url: string | null;
   object_type: 'Note' | 'Article' | 'Question';
   title: string;
+  /** ActivityStreams summary for long-form Articles. */
+  article_summary?: string;
   account: Account;
   content: string;
   visibility: 'public' | 'unlisted' | 'private' | 'direct';

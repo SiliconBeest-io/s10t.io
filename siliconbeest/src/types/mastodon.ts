@@ -93,6 +93,7 @@ export interface Status {
   created_at: string;
   object_type: 'Note' | 'Article' | 'Question';
   title: string;
+  article_summary?: string;
   account: Account;
   content: string;
   visibility: StatusVisibility;

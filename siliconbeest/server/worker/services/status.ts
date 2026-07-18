@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:workers';
 import { generateUlid } from '../utils/ulid';
-import { parseContent, type ParsedContent } from '../utils/contentParser';
+import { parseArticleContent, parseContent, type ParsedContent } from '../utils/contentParser';
 import { AppError } from '../middleware/errorHandler';
+import { sanitizeLocale } from '../utils/locales';
 import type {
   StatusRow,
   PollRow,
@@ -433,6 +434,7 @@ export interface CreateStatusData {
 }
 
 export const MAX_ARTICLE_TITLE_CHARACTERS = 200;
+export const MAX_ARTICLE_SUMMARY_CHARACTERS = 500;
 export const MAX_ARTICLE_CHARACTERS = 100_000;
 
 export interface LocalMention {
@@ -485,7 +487,7 @@ export async function createStatus(
   );
   const sensitive = data.sensitive ? 1 : 0;
   const spoilerText = data.spoilerText || '';
-  const language = data.language || 'en';
+  const language = sanitizeLocale(data.language, 'en');
   const statusText = (data.text || '').trim();
   const objectType = data.objectType === 'Article' ? 'Article' : 'Note';
   const title = objectType === 'Article' ? (data.title || '').trim() : '';
@@ -494,6 +496,9 @@ export async function createStatus(
   }
   if (title.length > MAX_ARTICLE_TITLE_CHARACTERS) {
     throw new AppError(422, 'Validation failed', 'Article title is too long');
+  }
+  if (objectType === 'Article' && spoilerText.length > MAX_ARTICLE_SUMMARY_CHARACTERS) {
+    throw new AppError(422, 'Validation failed', 'Article summary is too long');
   }
   if (objectType === 'Article' && statusText.length > MAX_ARTICLE_CHARACTERS) {
     throw new AppError(422, 'Validation failed', 'Article body is too long');
@@ -510,7 +515,9 @@ export async function createStatus(
     quotePolicy = normalizeQuotePolicy(pref?.default_quote_policy);
   }
 
-  const parsed = parseContent(statusText, domain);
+  const parsed = objectType === 'Article'
+    ? parseArticleContent(statusText, domain)
+    : parseContent(statusText, domain);
   const content = parsed.html;
   const statusUri = `https://${domain}/users/${username}/statuses/${statusId}`;
   const statusUrl = `https://${domain}/@${username}/${statusId}`;
@@ -926,11 +933,16 @@ export async function editStatus(
   }
   const sensitive = data.sensitive !== undefined ? (data.sensitive ? 1 : 0) : row.sensitive;
   const spoilerText = data.spoilerText !== undefined ? data.spoilerText : row.content_warning || '';
-  const language = data.language !== undefined ? data.language : row.language || 'en';
+  if (objectType === 'Article' && spoilerText.length > MAX_ARTICLE_SUMMARY_CHARACTERS) {
+    throw new AppError(422, 'Validation failed', 'Article summary is too long');
+  }
+  const language = sanitizeLocale(data.language ?? row.language, 'en');
   const mediaIds = data.mediaIds || [];
   await assertMediaAttachmentsAttachable(mediaIds, accountId, statusId);
 
-  const parsed = parseContent(statusText, domain);
+  const parsed = objectType === 'Article'
+    ? parseArticleContent(statusText, domain)
+    : parseContent(statusText, domain);
   const content = parsed.html;
 
   // Save current state as an edit history snapshot before applying changes

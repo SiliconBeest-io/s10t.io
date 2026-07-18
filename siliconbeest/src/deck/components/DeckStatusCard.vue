@@ -294,7 +294,7 @@ function handleEdit() {
   const s = displayStatus.value
   editText.value = s.text || stripHtml(s.content || '')
   editTitle.value = s.title || ''
-  editSpoilerText.value = s.spoiler_text || ''
+  editSpoilerText.value = s.object_type === 'Article' ? s.article_summary || '' : s.spoiler_text || ''
   editSensitive.value = s.sensitive || false
   isEditing.value = true
 }
@@ -315,7 +315,8 @@ async function submitEdit() {
       status: editText.value,
       object_type: displayStatus.value.object_type === 'Article' ? 'Article' : 'Note',
       title: displayStatus.value.object_type === 'Article' ? editTitle.value.trim() : undefined,
-      spoiler_text: editSpoilerText.value || undefined,
+      summary: displayStatus.value.object_type === 'Article' ? editSpoilerText.value.trim() || undefined : undefined,
+      spoiler_text: displayStatus.value.object_type === 'Article' ? undefined : editSpoilerText.value || undefined,
       sensitive: editSensitive.value,
     })
     isEditing.value = false
@@ -469,10 +470,10 @@ async function handleDelete() {
         rows="3"
       />
       <input
-        v-if="displayStatus.spoiler_text"
+          v-if="displayStatus.object_type === 'Article' || displayStatus.spoiler_text"
         v-model="editSpoilerText"
         type="text"
-        :placeholder="t('compose.cw_placeholder')"
+          :placeholder="displayStatus.object_type === 'Article' ? t('compose.article_summary_placeholder') : t('compose.cw_placeholder')"
         class="dk-input"
       />
       <div v-if="displayStatus.media_attachments?.length" class="flex flex-wrap gap-2">
@@ -508,10 +509,14 @@ async function handleDelete() {
 
     <!-- Normal content display -->
     <template v-else>
-      <h2
+        <h2
         v-if="displayStatus.object_type === 'Article' && displayStatus.title"
         class="dk-text mt-2.5 text-xl font-bold leading-snug"
-      >{{ displayStatus.title }}</h2>
+        >{{ displayStatus.title }}</h2>
+        <p
+          v-if="displayStatus.object_type === 'Article' && displayStatus.article_summary"
+          class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400"
+        >{{ displayStatus.article_summary }}</p>
       <div class="mt-2.5" style="font-size: var(--dk-fs)">
         <StatusContent
           :content="displayStatus.content"

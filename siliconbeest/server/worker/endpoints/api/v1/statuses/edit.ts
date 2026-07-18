@@ -18,6 +18,7 @@ import {
   Image,
   Document as APDocument,
   Source,
+  LanguageString,
   Emoji as APEmoji,
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
@@ -37,6 +38,7 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
     status?: string;
     object_type?: string;
     title?: string;
+    summary?: string;
     sensitive?: boolean;
     spoiler_text?: string;
     language?: string;
@@ -56,7 +58,7 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
     objectType: body.object_type as 'Note' | 'Article' | undefined,
     title: body.title,
     sensitive: body.sensitive,
-    spoilerText: body.spoiler_text,
+    spoilerText: body.object_type === 'Article' ? (body.summary ?? body.spoiler_text) : body.spoiler_text,
     language: body.language,
     mediaIds: body.media_ids,
   });
@@ -206,19 +208,31 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
 
       const statusText = (updatedRow.text as string) || '';
       if (statusText) {
-        noteValues.source = new Source({ content: statusText, mediaType: 'text/plain' });
+        noteValues.source = new Source({
+          content: statusText,
+          mediaType: updatedRow.object_type === 'Article' ? 'text/markdown' : 'text/plain',
+        });
       }
 
       if (editConvApUri) {
         noteValues.contexts = [new URL(editConvApUri)];
       }
 
-      const fedifyObject = updatedRow.object_type === 'Article'
-        ? new Article({
-            ...noteValues,
-            name: updatedRow.title || null,
-          } as ConstructorParameters<typeof Article>[0])
-        : new Note(noteValues);
+      let fedifyObject: Article | Note;
+      if (updatedRow.object_type === 'Article') {
+        const { content: _content, summary: _summary, ...articleValues } = noteValues;
+        fedifyObject = new Article({
+          ...articleValues,
+          contents: [content, new LanguageString(content, updatedRow.language || 'en')],
+          names: [updatedRow.title, new LanguageString(updatedRow.title, updatedRow.language || 'en')],
+          ...(updatedRow.content_warning
+            ? { summaries: [updatedRow.content_warning, new LanguageString(updatedRow.content_warning, updatedRow.language || 'en')] }
+            : {}),
+          mediaType: 'text/html',
+        } as ConstructorParameters<typeof Article>[0]);
+      } else {
+        fedifyObject = new Note(noteValues);
+      }
 
       // -- Build Update activity --
       const update = new Update({
@@ -242,11 +256,12 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
     id: statusId,
     object_type: updatedRow.poll_id ? 'Question' : updatedRow.object_type,
     title: updatedRow.title || '',
+    article_summary: updatedRow.object_type === 'Article' ? (updatedRow.content_warning as string) || '' : '',
     created_at: updatedRow.created_at as string,
     in_reply_to_id: (updatedRow.in_reply_to_id as string) || null,
     in_reply_to_account_id: (updatedRow.in_reply_to_account_id as string) || null,
     sensitive: !!(updatedRow.sensitive),
-    spoiler_text: (updatedRow.content_warning as string) || '',
+    spoiler_text: updatedRow.object_type === 'Article' ? '' : (updatedRow.content_warning as string) || '',
     visibility: (updatedRow.visibility as string) || 'public',
     language: (updatedRow.language as string) || 'en',
     uri: updatedRow.uri as string,

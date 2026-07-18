@@ -27,6 +27,7 @@ export const useComposeStore = defineStore('compose', () => {
   const text = ref('');
   const objectType = ref<'Note' | 'Article'>('Note');
   const title = ref('');
+  const articleSummary = ref('');
   const contentWarning = ref('');
   const showContentWarning = ref(false);
   const visibility = ref<StatusVisibility>(defaultVisibility.value);
@@ -68,6 +69,7 @@ export const useComposeStore = defineStore('compose', () => {
     text.value = '';
     objectType.value = 'Note';
     title.value = '';
+    articleSummary.value = '';
     contentWarning.value = '';
     showContentWarning.value = false;
     visibility.value = defaultVisibility.value;
@@ -138,6 +140,7 @@ export const useComposeStore = defineStore('compose', () => {
     editingId.value = status.id;
     objectType.value = status.object_type === 'Article' ? 'Article' : 'Note';
     title.value = status.title ?? '';
+    articleSummary.value = status.article_summary ?? '';
     text.value = status.text ?? '';
     contentWarning.value = status.spoiler_text;
     showContentWarning.value = !!status.spoiler_text;
@@ -174,6 +177,7 @@ export const useComposeStore = defineStore('compose', () => {
         status: text.value,
         object_type: objectType.value,
         title: objectType.value === 'Article' ? title.value.trim() : undefined,
+        summary: objectType.value === 'Article' ? articleSummary.value.trim() || undefined : undefined,
         media_ids: mediaAttachments.value.map((m) => m.id),
         in_reply_to_id: inReplyToId.value ?? undefined,
         sensitive: sensitive.value,
@@ -230,6 +234,7 @@ export const useComposeStore = defineStore('compose', () => {
     text,
     objectType,
     title,
+    articleSummary,
     contentWarning,
     showContentWarning,
     visibility,
