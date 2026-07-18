@@ -84,7 +84,7 @@ watch(
 </script>
 
 <template>
-  <div class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
+  <div data-status-scroll class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
     <!-- Timeline view -->
     <template v-if="activeView === 'timeline'">
       <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 border-b px-4 py-3">

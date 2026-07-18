@@ -72,7 +72,7 @@ watch(
 </script>
 
 <template>
-  <div class="h-full min-h-0 overflow-y-auto overscroll-contain">
+  <div data-status-scroll class="h-full min-h-0 overflow-y-auto overscroll-contain">
     <!-- Notifications list view -->
     <template v-if="activeView === 'notifications'">
       <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 flex items-center justify-between border-b px-4 py-3">

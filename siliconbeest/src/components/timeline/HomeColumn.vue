@@ -89,7 +89,7 @@ watch(
 </script>
 
 <template>
-  <div class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
+  <div data-status-scroll class="h-full min-h-0 overflow-y-auto overscroll-contain" @scroll.passive="handleScroll">
     <template v-if="activeView === 'timeline'">
       <header v-if="!hideHeader" class="sb-glass sticky top-0 z-10 flex flex-nowrap items-center justify-between gap-2 border-b px-4 py-3">
         <h2 class="sb-heading min-w-0 truncate text-lg">{{ t('nav.home') }}</h2>

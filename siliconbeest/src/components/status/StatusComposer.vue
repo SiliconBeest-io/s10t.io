@@ -7,6 +7,8 @@ import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
@@ -34,12 +36,13 @@ const emit = defineEmits<{
   }]
 }>()
 
-const content = ref('')
-const objectType = ref<'Note' | 'Article'>('Note')
-const articleTitle = ref('')
-const articleSummary = ref('')
-const spoilerText = ref('')
-const showCw = ref(false)
+const isEditing = computed(() => compose.editingId !== null)
+const content = ref(isEditing.value ? compose.text : '')
+const objectType = ref<'Note' | 'Article'>(isEditing.value ? compose.objectType : 'Note')
+const articleTitle = ref(isEditing.value ? compose.title : '')
+const articleSummary = ref(isEditing.value ? compose.articleSummary : '')
+const spoilerText = ref(isEditing.value ? compose.contentWarning : '')
+const showCw = ref(isEditing.value ? compose.showContentWarning : false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
@@ -181,6 +184,33 @@ function insertAtCursor(text: string) {
     ta.selectionEnd = pos
     ta.focus()
   })
+}
+
+function insertArticleMedia(media: MediaAttachment, fileName?: string) {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const markdown = `${prefix}${articleMediaMarkdown(media, fileName)}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id)
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    insertArticleMedia(media, file.name)
+  }
 }
 
 // ── Autocomplete state ──────────────────────────────────────────────
@@ -418,6 +448,24 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
+function loadEditingDraft() {
+  if (!compose.editingId) return
+  content.value = compose.text
+  objectType.value = compose.objectType
+  articleTitle.value = compose.title
+  articleSummary.value = compose.articleSummary
+  spoilerText.value = compose.contentWarning
+  showCw.value = compose.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === compose.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === compose.language)
+    ?? languageOptions[1]!
+}
+
+watch(() => compose.editingId, (editingId) => {
+  if (editingId) loadEditingDraft()
+}, { immediate: true })
+
 const canSubmit = computed(() => {
   const hasContent = content.value.trim().length > 0 || compose.mediaAttachments.length > 0 || !!compose.quoteStatus
   const validTitle = objectType.value !== 'Article'
@@ -425,11 +473,15 @@ const canSubmit = computed(() => {
   return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
 
-function selectObjectType(type: 'Note' | 'Article') {
+async function selectObjectType(type: 'Note' | 'Article') {
   objectType.value = type
   if (type === 'Article') {
     if (compose.showPoll) togglePoll()
     showCw.value = false
+    for (const media of [...compose.mediaAttachments]) {
+      insertArticleMedia(media)
+      await nextTick()
+    }
   }
 }
 
@@ -453,7 +505,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -496,7 +548,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -510,7 +562,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }
@@ -562,10 +614,10 @@ watch(() => compose.publishedTick, () => {
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
       <!-- Visibility selector -->
-      <Listbox v-model="selectedVisibility">
+      <Listbox v-model="selectedVisibility" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.visibility.label')"
             :title="t('compose.visibility.label')"
           >
@@ -601,10 +653,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Quote policy selector -->
-      <Listbox v-model="compose.quotePolicy">
+      <Listbox v-model="compose.quotePolicy" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.quote_policy.label')"
             :title="t('compose.quote_policy.label')"
           >
@@ -640,10 +692,10 @@ watch(() => compose.publishedTick, () => {
       </Listbox>
 
       <!-- Language selector -->
-      <Listbox v-model="selectedLanguage">
+      <Listbox v-model="selectedLanguage" :disabled="isEditing">
         <div class="relative">
           <ListboxButton
-            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+            class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-60 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
             :aria-label="t('compose.language')"
             :title="t('compose.language')"
           >
@@ -680,7 +732,7 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- Explicit post type selector: visible in every composer layout. -->
-    <fieldset class="mb-3">
+    <fieldset class="mb-3 disabled:cursor-not-allowed disabled:opacity-60" :disabled="isEditing">
       <legend class="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {{ t('compose.post_type') }}
       </legend>
@@ -689,6 +741,7 @@ watch(() => compose.publishedTick, () => {
           type="button"
           role="radio"
           :aria-checked="objectType === 'Note'"
+          :disabled="isEditing"
           data-testid="compose-type-note"
           class="rounded-xl border px-3 py-2.5 text-left transition"
           :class="objectType === 'Note'
@@ -703,6 +756,7 @@ watch(() => compose.publishedTick, () => {
           type="button"
           role="radio"
           :aria-checked="objectType === 'Article'"
+          :disabled="isEditing"
           data-testid="compose-type-article"
           class="rounded-xl border px-3 py-2.5 text-left transition"
           :class="objectType === 'Article'
@@ -1046,7 +1100,7 @@ watch(() => compose.publishedTick, () => {
           class="sb-btn sb-btn-primary"
         >
           <svg v-if="compose.publishing" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-          {{ t('compose.submit') }}
+          {{ isEditing ? t('status.edit') : t('compose.submit') }}
         </button>
       </div>
     </div>

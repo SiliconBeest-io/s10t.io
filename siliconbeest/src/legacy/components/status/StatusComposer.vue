@@ -7,6 +7,8 @@ import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/legacy/components/common/EmojiPicker.vue'
+import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
@@ -179,6 +181,33 @@ function insertAtCursor(text: string) {
     ta.selectionEnd = pos
     ta.focus()
   })
+}
+
+function insertArticleMedia(media: MediaAttachment, fileName?: string) {
+  const ta = textareaRef.value
+  const start = ta?.selectionStart ?? content.value.length
+  const end = ta?.selectionEnd ?? content.value.length
+  const before = content.value.substring(0, start)
+  const after = content.value.substring(end)
+  const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
+  const markdown = `${prefix}${articleMediaMarkdown(media, fileName)}${suffix}`
+  content.value = before + markdown + after
+  nextTick(() => {
+    if (!ta) return
+    const pos = start + markdown.length
+    ta.selectionStart = pos
+    ta.selectionEnd = pos
+    ta.focus()
+  })
+  compose.removeMedia(media.id)
+}
+
+async function addComposerMedia(file: File) {
+  const media = await compose.addMedia(file)
+  if (media && objectType.value === 'Article') {
+    insertArticleMedia(media, file.name)
+  }
 }
 
 // ── Autocomplete state ──────────────────────────────────────────────
@@ -423,9 +452,15 @@ const canSubmit = computed(() => {
   return hasContent && validTitle && charsRemaining.value >= 0 && !compose.uploading
 })
 
-function toggleArticle() {
+async function toggleArticle() {
   objectType.value = objectType.value === 'Article' ? 'Note' : 'Article'
-  if (objectType.value === 'Article' && compose.showPoll) togglePoll()
+  if (objectType.value === 'Article') {
+    if (compose.showPoll) togglePoll()
+    for (const media of [...compose.mediaAttachments]) {
+      insertArticleMedia(media)
+      await nextTick()
+    }
+  }
 }
 
 function togglePoll() {
@@ -448,7 +483,7 @@ async function onFileSelect(event: Event) {
 
   for (const file of Array.from(input.files)) {
     if (compose.mediaAttachments.length >= 4) break
-    await compose.addMedia(file)
+    await addComposerMedia(file)
   }
 
   // Reset input so the same file can be re-selected
@@ -491,7 +526,7 @@ async function onPaste(event: ClipboardEvent) {
       event.preventDefault()
       const file = item.getAsFile()
       if (file && compose.mediaAttachments.length < 4) {
-        await compose.addMedia(file)
+        await addComposerMedia(file)
       }
     }
   }
@@ -505,7 +540,7 @@ async function onDrop(event: DragEvent) {
   for (const file of Array.from(files)) {
     if (compose.mediaAttachments.length >= 4) break
     if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
-      await compose.addMedia(file)
+      await addComposerMedia(file)
     }
   }
 }

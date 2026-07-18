@@ -130,7 +130,7 @@ watch(() => route.params.statusId, (newId) => {
         <!-- Main status (elevated focal card) — no overflow-hidden so action
              menus and the emoji picker are never clipped -->
         <div class="sb-card my-3 animate-rise-in shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
-          <StatusCard class="rounded-2xl" :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
+          <StatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation, quiet) -->

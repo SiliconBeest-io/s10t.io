@@ -128,8 +128,8 @@ watch(() => route.params.statusId, (newId) => {
         <StatusCard v-for="s in ancestors" :key="s.id" :status="s" @navigate="handleNavigate" @deleted="handleDeleted" />
 
         <!-- Main status (elevated focal card) -->
-        <div class="sb-card my-3 animate-rise-in overflow-hidden shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
-          <StatusCard :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
+        <div class="sb-card my-3 animate-rise-in shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
+          <StatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation, quiet) -->

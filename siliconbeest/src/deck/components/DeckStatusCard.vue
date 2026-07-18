@@ -25,6 +25,7 @@ import ImageViewer from '@/components/common/ImageViewer.vue'
 import { emojifyPlainText } from '@/utils/customEmoji'
 import { canUseAuthenticatedActions, getStatusActionPermissions } from '@/utils/permissions'
 import { blockAccount, muteAccount } from '@/api/mastodon/accounts'
+import { articleTimelinePreview } from '@/utils/articlePreview'
 
 const { t } = useI18n()
 const statusesStore = useStatusesStore()
@@ -36,9 +37,12 @@ const uiStore = useUiStore()
 const instanceStore = useInstanceStore()
 const { now } = useNow()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   status: Status
-}>()
+  expanded?: boolean
+}>(), {
+  expanded: false,
+})
 
 const emit = defineEmits<{
   reply: [status: Status]
@@ -57,12 +61,18 @@ const displayStatus = computed(() => {
   return cachedStatus.value
 })
 
-const isEditing = ref(false)
-const editText = ref('')
-const editTitle = ref('')
-const editSpoilerText = ref('')
-const editSensitive = ref(false)
-const editLoading = ref(false)
+const isArticle = computed(() => displayStatus.value.object_type === 'Article')
+const showArticleBody = computed(() => !isArticle.value || props.expanded)
+const articlePreview = computed(() => articleTimelinePreview(
+  displayStatus.value.article_summary,
+  displayStatus.value.content,
+))
+const quotedArticlePreview = computed(() => {
+  const quote = displayStatus.value.quote
+  return quote?.object_type === 'Article'
+    ? articleTimelinePreview(quote.article_summary, quote.content)
+    : ''
+})
 
 const loadingFavourite = ref(false)
 const loadingReblog = ref(false)
@@ -276,54 +286,10 @@ async function copyShareUrl() {
   }
 }
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>\s*<p>/gi, '\n\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim()
-}
-
-function handleEdit() {
+async function handleEdit() {
   if (!statusActionPermissions.value.edit) return
-  const s = displayStatus.value
-  editText.value = s.text || stripHtml(s.content || '')
-  editTitle.value = s.title || ''
-  editSpoilerText.value = s.object_type === 'Article' ? s.article_summary || '' : s.spoiler_text || ''
-  editSensitive.value = s.sensitive || false
-  isEditing.value = true
-}
-
-function cancelEdit() {
-  isEditing.value = false
-  editText.value = ''
-  editTitle.value = ''
-  editSpoilerText.value = ''
-  editSensitive.value = false
-}
-
-async function submitEdit() {
-  if (!statusActionPermissions.value.edit || editLoading.value) return
-  editLoading.value = true
-  try {
-    await statusesStore.editStatus(displayStatus.value.id, {
-      status: editText.value,
-      object_type: displayStatus.value.object_type === 'Article' ? 'Article' : 'Note',
-      title: displayStatus.value.object_type === 'Article' ? editTitle.value.trim() : undefined,
-      summary: displayStatus.value.object_type === 'Article' ? editSpoilerText.value.trim() || undefined : undefined,
-      spoiler_text: displayStatus.value.object_type === 'Article' ? undefined : editSpoilerText.value || undefined,
-      sensitive: editSensitive.value,
-    })
-    isEditing.value = false
-  } catch {
-    // Error handling - keep edit mode open
-  } finally {
-    editLoading.value = false
+  if (await composeStore.beginEditing(displayStatus.value)) {
+    uiStore.openComposeModal()
   }
 }
 
@@ -451,73 +417,18 @@ async function handleDelete() {
       </div>
     </div>
 
-    <!-- Edit mode -->
-    <div v-if="isEditing" class="mt-2.5 space-y-2">
-      <div class="dk-mono text-[10.5px] font-semibold uppercase tracking-wide" style="color: var(--dk-acc)">
-        {{ t('status.editing') }}
-      </div>
-      <input
-        v-if="displayStatus.object_type === 'Article'"
-        v-model="editTitle"
-        type="text"
-        maxlength="200"
-        :placeholder="t('compose.article_title_placeholder')"
-        class="dk-input text-lg font-bold"
-      />
-      <textarea
-        v-model="editText"
-        class="dk-input resize-none"
-        rows="3"
-      />
-      <input
-          v-if="displayStatus.object_type === 'Article' || displayStatus.spoiler_text"
-        v-model="editSpoilerText"
-        type="text"
-          :placeholder="displayStatus.object_type === 'Article' ? t('compose.article_summary_placeholder') : t('compose.cw_placeholder')"
-        class="dk-input"
-      />
-      <div v-if="displayStatus.media_attachments?.length" class="flex flex-wrap gap-2">
-        <div
-          v-for="media in displayStatus.media_attachments"
-          :key="media.id"
-          class="h-20 w-20 overflow-hidden rounded-xl"
-          style="border: 1px solid var(--dk-border)"
-        >
-          <img
-            :src="media.preview_url || media.url"
-            :alt="media.description || ''"
-            class="h-full w-full object-cover"
-          />
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <button
-          :disabled="editLoading || !editText.trim() || (displayStatus.object_type === 'Article' && !editTitle.trim())"
-          class="dk-btn-accent !px-4 !py-2 !text-[13px]"
-          @click="submitEdit"
-        >
-          {{ t('common.save') }}
-        </button>
-        <button
-          class="dk-pill-btn"
-          @click="cancelEdit"
-        >
-          {{ t('common.cancel') }}
-        </button>
-      </div>
-    </div>
-
-    <!-- Normal content display -->
-    <template v-else>
+    <!-- Content display -->
         <h2
         v-if="displayStatus.object_type === 'Article' && displayStatus.title"
         class="dk-text mt-2.5 text-xl font-bold leading-snug"
         >{{ displayStatus.title }}</h2>
         <p
-          v-if="displayStatus.object_type === 'Article' && displayStatus.article_summary"
-          class="mt-1.5 text-sm leading-relaxed text-slate-500 dark:text-slate-400"
-        >{{ displayStatus.article_summary }}</p>
-      <div class="mt-2.5" style="font-size: var(--dk-fs)">
+          v-if="isArticle && (expanded ? displayStatus.article_summary : articlePreview)"
+          data-testid="article-preview"
+          class="dk-dim-text mt-1.5 whitespace-pre-line text-sm leading-relaxed"
+          :class="{ 'line-clamp-4': !displayStatus.article_summary }"
+        >{{ expanded ? displayStatus.article_summary : articlePreview }}</p>
+      <div v-if="showArticleBody" class="mt-2.5" style="font-size: var(--dk-fs)">
         <StatusContent
           :content="displayStatus.content"
           :spoiler-text="displayStatus.spoiler_text"
@@ -529,7 +440,7 @@ async function handleDelete() {
 
       <!-- Poll -->
       <StatusPoll
-        v-if="displayStatus.poll"
+        v-if="showArticleBody && displayStatus.poll"
         :poll="displayStatus.poll"
         @updated="handlePollUpdate"
         @click.stop
@@ -537,7 +448,7 @@ async function handleDelete() {
 
       <!-- Media -->
       <MediaGallery
-        v-if="displayStatus.media_attachments?.length"
+        v-if="showArticleBody && displayStatus.media_attachments?.length"
         :attachments="displayStatus.media_attachments"
         class="mt-2.5"
         @expand="openImageViewer"
@@ -546,14 +457,14 @@ async function handleDelete() {
 
       <!-- Preview Card -->
       <PreviewCard
-        v-if="displayStatus.card && !displayStatus.media_attachments?.length"
+        v-if="showArticleBody && displayStatus.card && !displayStatus.media_attachments?.length"
         :card="displayStatus.card"
         @click.stop
       />
 
       <!-- Quote -->
       <div
-        v-if="displayStatus.quote"
+        v-if="showArticleBody && displayStatus.quote"
         class="mt-2.5 cursor-pointer rounded-xl px-3 py-2.5 transition-colors"
         style="border: 1px solid var(--dk-border); border-left: 3px solid var(--dk-acc2); background: var(--dk-surface2)"
         @click.stop="emit('navigate', displayStatus.quote)"
@@ -566,15 +477,34 @@ async function handleDelete() {
           v-if="displayStatus.quote.object_type === 'Article' && displayStatus.quote.title"
           class="dk-text mb-1.5 font-bold"
         >{{ displayStatus.quote.title }}</h3>
+        <p
+          v-if="displayStatus.quote.object_type === 'Article'"
+          class="dk-dim-text mt-1.5 whitespace-pre-line text-sm leading-relaxed line-clamp-3"
+        >{{ quotedArticlePreview }}</p>
         <StatusContent
+          v-else
           :content="displayStatus.quote.content"
           :spoiler-text="displayStatus.quote.spoiler_text"
           :sensitive="displayStatus.quote.sensitive"
           :emojis="displayStatus.quote.emojis"
         />
+        <div
+          v-if="displayStatus.quote.object_type === 'Article'"
+          class="dk-mono dk-dim-text mt-2 border-t pt-2 text-center text-[11px] font-semibold"
+          style="border-color: var(--dk-border); color: var(--dk-acc)"
+        >{{ t('status.read_full_article') }}</div>
       </div>
-    </template>
 
+      <router-link
+        v-if="isArticle && !expanded"
+        :to="`/@${displayStatus.account.acct}/${displayStatus.id}`"
+        data-testid="read-full-article"
+        class="dk-mono mt-3 flex w-full items-center justify-center rounded-xl px-4 py-3 text-[12px] font-semibold transition-colors"
+        style="border: 1px solid var(--dk-border); background: var(--dk-surface2); color: var(--dk-acc)"
+        @click.stop="handleCardClick"
+      >
+        {{ t('status.read_full_article') }}
+      </router-link>
     <!-- Emoji reactions -->
     <DeckStatusReactions
       ref="reactionsRef"

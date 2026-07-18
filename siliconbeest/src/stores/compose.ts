@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import type { StatusVisibility, MediaAttachment, Status, QuotePolicy } from '@/types/mastodon';
-import { createStatus, editStatus } from '@/api/mastodon/statuses';
+import { createStatus, editStatus, getStatusSource } from '@/api/mastodon/statuses';
 import { updateCredentials } from '@/api/mastodon/accounts';
 import { uploadMedia } from '@/api/mastodon/media';
 import { useAuthStore } from './auth';
@@ -11,6 +11,19 @@ import { useTimelinesStore } from './timelines';
 const MAX_NOTE_CHARACTERS = 500;
 const MAX_ARTICLE_CHARACTERS = 100_000;
 const MAX_ARTICLE_TITLE_CHARACTERS = 200;
+
+function plainTextFromHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>\s*<p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+}
 
 export const useComposeStore = defineStore('compose', () => {
   const defaultVisibility = ref<StatusVisibility>('public');
@@ -137,17 +150,43 @@ export const useComposeStore = defineStore('compose', () => {
   }
 
   function setEditing(status: Status) {
+    // Editing starts a clean compose session so stale reply, quote, poll, or
+    // draft state cannot be submitted with the edited status.
+    reset();
     editingId.value = status.id;
     objectType.value = status.object_type === 'Article' ? 'Article' : 'Note';
     title.value = status.title ?? '';
     articleSummary.value = status.article_summary ?? '';
-    text.value = status.text ?? '';
+    text.value = status.text ?? plainTextFromHtml(status.content ?? '');
     contentWarning.value = status.spoiler_text;
     showContentWarning.value = !!status.spoiler_text;
     visibility.value = status.visibility;
     sensitive.value = status.sensitive;
     mediaAttachments.value = [...status.media_attachments];
     language.value = status.language ?? 'en';
+    quotePolicy.value = status.quote_policy ?? defaultQuotePolicy.value;
+  }
+
+  async function beginEditing(status: Status) {
+    const auth = useAuthStore();
+    if (!auth.token) return false;
+
+    try {
+      const { data: source } = await getStatusSource(status.id, auth.token);
+      setEditing({
+        ...status,
+        object_type: source.object_type,
+        title: source.title,
+        article_summary: source.article_summary,
+        text: source.text,
+        spoiler_text: source.spoiler_text,
+      });
+    } catch {
+      // The source endpoint is authoritative, but the cached status still
+      // provides a usable fallback if the request fails temporarily.
+      setEditing(status);
+    }
+    return true;
   }
 
   async function addMedia(file: File) {
@@ -158,6 +197,7 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const { data } = await uploadMedia(file, { token: auth.token });
       mediaAttachments.value.push(data);
+      return data;
     } finally {
       uploading.value = false;
     }
@@ -267,6 +307,7 @@ export const useComposeStore = defineStore('compose', () => {
     setQuote,
     clearQuote,
     setEditing,
+    beginEditing,
     addMedia,
     removeMedia,
     publish,

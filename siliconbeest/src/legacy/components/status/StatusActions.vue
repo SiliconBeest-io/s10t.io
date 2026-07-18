@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getStatusActionPermissions } from '@/utils/permissions'
+import { shouldOpenMenuDown } from '@/utils/menuPlacement'
+import { useActionMenuCoordinator } from '@/composables/useActionMenuCoordinator'
 
 const { t } = useI18n()
 
@@ -63,13 +65,25 @@ const emit = defineEmits<{
 }>()
 
 const showMenu = ref(false)
+const moreBtnRef = ref<HTMLElement | null>(null)
+const moreMenuRef = ref<HTMLElement | null>(null)
+const menuOpensDown = ref(false)
+const menuCoordinator = useActionMenuCoordinator(() => closeMenu())
 
-function toggleMenu() {
-  showMenu.value = !showMenu.value
+async function toggleMenu() {
+  const next = !showMenu.value
+  closeMenu()
+  if (next) {
+    showMenu.value = true
+    menuCoordinator.claim()
+    await nextTick()
+    menuOpensDown.value = shouldOpenMenuDown(moreBtnRef.value, moreMenuRef.value)
+  }
 }
 
 function closeMenu() {
   showMenu.value = false
+  menuCoordinator.release()
 }
 
 function handleEdit(id: string) {
@@ -244,6 +258,7 @@ function formatCount(n: number): string {
       @focusout="onMenuFocusOut"
     >
       <button
+        ref="moreBtnRef"
         data-test="more-action"
         @click="toggleMenu"
         class="p-2 rounded-full text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
@@ -255,7 +270,9 @@ function formatCount(n: number): string {
       <!-- Dropdown -->
       <div
         v-if="showMenu"
-        class="absolute right-0 bottom-full mb-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 py-1"
+        ref="moreMenuRef"
+        class="absolute right-0 z-50 w-40 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+        :class="menuOpensDown ? 'top-full mt-1' : 'bottom-full mb-1'"
       >
         <button
           v-if="permissions.edit"

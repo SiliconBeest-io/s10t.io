@@ -129,7 +129,7 @@ watch(() => route.params.statusId, (newId) => {
 
         <!-- Main status -->
         <div class="border-l-4 border-indigo-500">
-          <StatusCard :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
+          <StatusCard :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation) -->
