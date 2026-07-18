@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue';
+import { onMounted, computed, ref } from 'vue';
 import { RouterView, useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useInstanceStore } from '@/stores/instance';
@@ -18,6 +18,7 @@ const notifStore = useNotificationsStore();
 const composeStore = useComposeStore();
 const router = useRouter();
 const { publish } = usePublish();
+const composerRef = ref<InstanceType<typeof StatusComposer> | null>(null);
 
 const composeReplyContext = computed(() => {
   if (!composeStore.inReplyToStatus) return undefined;
@@ -42,8 +43,8 @@ async function handleGlobalCompose(payload: PublishPayload) {
 }
 
 function handleModalClose() {
+  composerRef.value?.finishDraftSession();
   ui.closeComposeModal();
-  composeStore.reset();
 }
 
 onMounted(async () => {
@@ -118,6 +119,6 @@ onMounted(async () => {
 
   <!-- Global compose modal -->
   <Modal :open="ui.composeModalOpen" :title="composeStore.editingId ? $t('status.editing') : $t('compose.title')" @close="handleModalClose">
-    <StatusComposer :reply-to="composeReplyContext" @submit="handleGlobalCompose" />
+    <StatusComposer v-if="ui.composeModalOpen" ref="composerRef" :reply-to="composeReplyContext" @submit="handleGlobalCompose" />
   </Modal>
 </template>

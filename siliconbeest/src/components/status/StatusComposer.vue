@@ -3,6 +3,7 @@ import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Listbox, ListboxButton, ListboxOptions, ListboxOption } from '@headlessui/vue'
 import { useComposeStore } from '@/stores/compose'
+import { useDraftsStore, hasDraftContent, type ComposeDraft, type ComposeDraftInput } from '@/stores/drafts'
 import { useEmojis } from '@/composables/useEmojis'
 import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
@@ -12,6 +13,7 @@ import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
 const compose = useComposeStore()
+const drafts = useDraftsStore()
 const auth = useAuthStore()
 const { fetchCustomEmojis, searchEmojis } = useEmojis()
 
@@ -33,8 +35,11 @@ const emit = defineEmits<{
     quote_id?: string
     quote_policy?: import('@/types/mastodon').QuotePolicy
     media_ids?: string[]
+    draft_id?: string
   }]
 }>()
+
+defineExpose({ finishDraftSession })
 
 const isEditing = computed(() => compose.editingId !== null)
 const content = ref(isEditing.value ? compose.text : '')
@@ -47,11 +52,14 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const charLimit = computed(() => objectType.value === 'Article' ? 100_000 : (props.maxChars ?? 500))
 const charsRemaining = computed(() => charLimit.value - content.value.length)
+const mountedPublishedTick = compose.publishedTick
 
 // ── Emoji picker state ──────────────────────────────────────────────
 const showEmojiPicker = ref(false)
 const emojiPickerRef = ref<HTMLElement | null>(null)
 const emojiButtonRef = ref<HTMLElement | null>(null)
+const showDraftMenu = ref(false)
+const draftMenuRef = ref<HTMLElement | null>(null)
 
 /** Position the emoji picker above the button, teleported to body */
 const emojiPickerPosition = computed(() => {
@@ -141,12 +149,13 @@ function populateReplyMentions(replyTo: typeof props.replyTo) {
 
 // When reply target changes
 watch(() => props.replyTo?.id, (newId, oldId) => {
-  if (!newId || newId === oldId) return
+  if (!newId || newId === oldId || isHydratingDraft.value) return
   populateReplyMentions(props.replyTo)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  finishDraftSession()
 })
 
 function handleClickOutside(e: MouseEvent) {
@@ -155,6 +164,9 @@ function handleClickOutside(e: MouseEvent) {
   }
   if (autocompleteVisible.value && autocompleteRef.value && !autocompleteRef.value.contains(e.target as Node)) {
     closeAutocomplete()
+  }
+  if (showDraftMenu.value && draftMenuRef.value && !draftMenuRef.value.contains(e.target as Node)) {
+    showDraftMenu.value = false
   }
 }
 
@@ -448,6 +460,171 @@ const quotePolicyIcons: Record<import('@/types/mastodon').QuotePolicy, string> =
   nobody: '⊘',
 }
 
+const AUTOSAVE_DELAY_MS = 1000
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null
+let draftSessionFinished = false
+const isHydratingDraft = ref(false)
+const draftSavedAt = ref<string | null>(null)
+const draftSaveLabel = computed(() => draftSavedAt.value ? t('compose.draft_saved') : t('compose.save_draft'))
+
+function draftSnapshot(): ComposeDraftInput {
+  return {
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showContentWarning: showCw.value,
+    visibility: selectedVisibility.value.value as import('@/types/mastodon').StatusVisibility,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: [...compose.mediaAttachments],
+    showPoll: compose.showPoll,
+    pollOptions: [...compose.pollOptions],
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    inReplyToStatus: compose.inReplyToStatus,
+    quoteId: compose.quoteId,
+    quoteStatus: compose.quoteStatus,
+  }
+}
+
+const canSaveDraft = computed(() => !isEditing.value && hasDraftContent(draftSnapshot()))
+
+function saveDraftNow() {
+  if (isEditing.value || isHydratingDraft.value) return null
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  const saved = drafts.save(draftSnapshot())
+  draftSavedAt.value = saved?.updatedAt ?? null
+  return saved
+}
+
+function finishDraftSession() {
+  if (draftSessionFinished) return
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+  if (!isEditing.value && compose.publishedTick === mountedPublishedTick) {
+    saveDraftNow()
+  }
+  drafts.startFresh()
+  compose.reset()
+  content.value = ''
+  objectType.value = 'Note'
+  articleTitle.value = ''
+  articleSummary.value = ''
+  spoilerText.value = ''
+  showCw.value = false
+  draftSavedAt.value = null
+  showDraftMenu.value = false
+  draftSessionFinished = true
+}
+
+function scheduleDraftSave() {
+  if (draftSessionFinished || isEditing.value || isHydratingDraft.value) return
+  draftSavedAt.value = null
+  if (autosaveTimer) clearTimeout(autosaveTimer)
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null
+    saveDraftNow()
+  }, AUTOSAVE_DELAY_MS)
+}
+
+function loadDraft(id: string) {
+  saveDraftNow()
+  const draft = drafts.drafts.find((item) => item.id === id)
+  if (!draft) return
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer)
+    autosaveTimer = null
+  }
+
+  isHydratingDraft.value = true
+  compose.reset()
+  drafts.select(id)
+  content.value = draft.content
+  objectType.value = draft.objectType
+  articleTitle.value = draft.articleTitle
+  articleSummary.value = draft.articleSummary
+  spoilerText.value = draft.spoilerText
+  showCw.value = draft.showContentWarning
+  selectedVisibility.value = visibilityOptions.find(option => option.value === draft.visibility)
+    ?? visibilityOptions[0]!
+  selectedLanguage.value = languageOptions.find(option => option.code === draft.language)
+    ?? languageOptions[1]!
+  compose.sensitive = draft.sensitive
+  compose.quotePolicy = draft.quotePolicy
+  compose.mediaAttachments = draft.mediaAttachments.map(media => ({ ...media }))
+  compose.showPoll = draft.showPoll
+  compose.pollOptions = [...draft.pollOptions]
+  compose.pollExpiresIn = draft.pollExpiresIn
+  compose.pollMultiple = draft.pollMultiple
+  compose.inReplyToId = draft.inReplyToId
+  compose.inReplyToStatus = draft.inReplyToStatus
+  compose.quoteId = draft.quoteId
+  compose.quoteStatus = draft.quoteStatus
+  draftSavedAt.value = draft.updatedAt
+  showDraftMenu.value = false
+
+  nextTick(() => {
+    isHydratingDraft.value = false
+    textareaRef.value?.focus()
+  })
+}
+
+function removeDraft(id: string) {
+  drafts.remove(id)
+  if (drafts.activeDraftId === null) draftSavedAt.value = null
+}
+
+function draftTitle(draft: ComposeDraft): string {
+  return draft.articleTitle.trim()
+    || draft.content.trim().split(/\r?\n/, 1)[0]?.slice(0, 80)
+    || t('compose.untitled_draft')
+}
+
+function formatDraftDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+watch(
+  () => ({
+    content: content.value,
+    objectType: objectType.value,
+    articleTitle: articleTitle.value,
+    articleSummary: articleSummary.value,
+    spoilerText: spoilerText.value,
+    showCw: showCw.value,
+    visibility: selectedVisibility.value.value,
+    language: selectedLanguage.value.code,
+    sensitive: compose.sensitive,
+    quotePolicy: compose.quotePolicy,
+    mediaAttachments: compose.mediaAttachments,
+    showPoll: compose.showPoll,
+    pollOptions: compose.pollOptions,
+    pollExpiresIn: compose.pollExpiresIn,
+    pollMultiple: compose.pollMultiple,
+    inReplyToId: compose.inReplyToId,
+    quoteId: compose.quoteId,
+    draftAccountId: drafts.accountId,
+  }),
+  scheduleDraftSave,
+  { deep: true },
+)
+
 function loadEditingDraft() {
   if (!compose.editingId) return
   content.value = compose.text
@@ -581,6 +758,7 @@ function submit() {
     quote_id: compose.quoteId ?? undefined,
     quote_policy: compose.quotePolicy,
     media_ids: compose.mediaAttachments.map(m => m.id),
+    draft_id: drafts.activeDraftId ?? undefined,
   })
   // Draft is NOT cleared here — publishing may still fail. The compose
   // store bumps publishedTick only on success (its reset() clears media
@@ -613,6 +791,46 @@ watch(() => compose.publishedTick, () => {
     />
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
+      <!-- Saved drafts -->
+      <div v-if="!isEditing" ref="draftMenuRef" class="relative">
+        <button
+          type="button"
+          data-testid="draft-menu-button"
+          class="inline-flex items-center gap-2 rounded-xl border border-outline bg-surface px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-soft transition-all hover:border-brand-300 hover:bg-brand-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-outline-dark dark:bg-surface-2-dark dark:text-slate-200 dark:hover:border-brand-700 dark:hover:bg-brand-950/30"
+          :aria-expanded="showDraftMenu"
+          @click.stop="showDraftMenu = !showDraftMenu"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5A3.375 3.375 0 0010.125 2.25H8.25m0 12.75h7.5m-7.5 3H12m-1.5-15.75H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.625a9 9 0 00-9-9z" />
+          </svg>
+          <span>{{ t('compose.drafts') }}</span>
+          <span v-if="drafts.count" class="rounded-full bg-brand-100 px-1.5 py-0.5 text-[11px] text-brand-700 dark:bg-brand-950 dark:text-brand-300">{{ drafts.count }}</span>
+        </button>
+
+        <div v-if="showDraftMenu" class="sb-menu absolute left-0 top-full z-30 mt-1.5 w-80 max-w-[calc(100vw-3rem)] p-2" @click.stop>
+          <p v-if="drafts.count === 0" class="px-3 py-4 text-center text-sm text-slate-500 dark:text-slate-400">
+            {{ t('compose.no_drafts') }}
+          </p>
+          <div v-for="draft in drafts.drafts" :key="draft.id" class="flex items-center gap-1 rounded-lg hover:bg-brand-50 dark:hover:bg-brand-950/30">
+            <button type="button" class="min-w-0 flex-1 px-3 py-2 text-left" @click="loadDraft(draft.id)">
+              <span class="block truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{{ draftTitle(draft) }}</span>
+              <span class="block text-xs text-slate-400 dark:text-slate-500">{{ formatDraftDate(draft.updatedAt) }}</span>
+            </button>
+            <button
+              type="button"
+              class="mr-1 rounded-lg p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+              :aria-label="t('compose.discard_draft')"
+              :title="t('compose.discard_draft')"
+              @click="removeDraft(draft.id)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Visibility selector -->
       <Listbox v-model="selectedVisibility" :disabled="isEditing">
         <div class="relative">
@@ -1007,7 +1225,7 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- Toolbar -->
-    <div class="mt-3 flex items-center justify-between border-t border-outline pt-3 dark:border-outline-dark">
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-outline pt-3 dark:border-outline-dark">
       <div class="flex items-center gap-1.5 flex-wrap">
         <!-- Media upload -->
         <button
@@ -1084,7 +1302,18 @@ watch(() => compose.publishedTick, () => {
         </span>
       </div>
 
-      <div class="flex items-center gap-3">
+      <div class="ml-auto flex items-center gap-2 sm:gap-3">
+        <button
+          v-if="!isEditing"
+          type="button"
+          data-testid="save-draft-button"
+          :disabled="!canSaveDraft"
+          class="sb-btn sb-btn-secondary"
+          @click="saveDraftNow"
+        >
+          {{ draftSaveLabel }}
+        </button>
+
         <!-- Char counter -->
         <span
           class="text-sm tabular-nums"
