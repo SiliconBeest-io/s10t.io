@@ -47,7 +47,7 @@ describe('ActivityStreams Article support', () => {
   });
 
   it('creates, reads, edits, and federates a long-form Article', async () => {
-    const body = `## Article heading\n\n${'Long-form body. '.repeat(80)}\n\n\`inline code\``;
+    const body = `## Article heading\n\n${'Long-form body. '.repeat(80)}\n\n\`inline code\`\n\n![Diagram](https://example.com/diagram.png)`;
     expect(body.length).toBeGreaterThan(500);
 
     const createResponse = await SELF.fetch(`${BASE}/api/v1/statuses`, {
@@ -71,6 +71,7 @@ describe('ActivityStreams Article support', () => {
     expect(created.content).toContain('Long-form body.');
     expect(created.content).toContain('<h2>Article heading</h2>');
     expect(created.content).toContain('<code>inline code</code>');
+    expect(created.content).toContain('<img src="https://example.com/diagram.png" alt="Diagram" />');
 
     const stored = await env.DB.prepare(
       'SELECT object_type, title, text, content_warning FROM statuses WHERE id = ?1',
@@ -97,6 +98,10 @@ describe('ActivityStreams Article support', () => {
     expect(article.source).toMatchObject({
       content: body,
       mediaType: 'text/markdown',
+    });
+    expect(article.preview).toMatchObject({
+      type: 'Note',
+      content: '<p><strong>My first federated article</strong></p><p>A concise Article summary.</p>',
     });
 
     const searchResponse = await SELF.fetch(

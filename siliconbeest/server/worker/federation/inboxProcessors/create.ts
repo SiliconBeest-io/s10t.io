@@ -11,7 +11,7 @@ import { env } from 'cloudflare:workers';
 import type { APActivity, APObject, APTag, APNote, APQuestion, APQuestionOption } from '../../types/activitypub';
 import type { StatusWithJoinedAccountRow } from '../../types/db';
 import { generateUlid } from '../../utils/ulid';
-import { sanitizeHtml, sanitizePlainText } from '../../utils/sanitize';
+import { sanitizeArticleHtml, sanitizeHtml, sanitizePlainText } from '../../utils/sanitize';
 import { BaseProcessor } from './BaseProcessor';
 import { getQuoteUri, verifyQuoteAuthorization } from '../helpers/quote';
 import { customEmojiTagDomain, emojiTagToCustomEmoji } from '../../../../../packages/shared/utils/customEmoji';
@@ -202,7 +202,10 @@ class CreateProcessor extends BaseProcessor {
 		const rawContent = firstString(note.content)
 			|| firstString((apNote as Record<string, unknown>).contentMap)
 			|| firstString(apNote._misskey_content);
-		const noteContent = sanitizeHtml(rawContent);
+		const objectType = note.type === 'Article' ? 'Article' : 'Note';
+		const noteContent = objectType === 'Article'
+			? sanitizeArticleHtml(rawContent)
+			: sanitizeHtml(rawContent);
 		const sourceText = note.source && typeof note.source === 'object'
 			? firstString((note.source as Record<string, unknown>).content)
 			: '';
@@ -210,7 +213,6 @@ class CreateProcessor extends BaseProcessor {
 			|| firstString((apNote as Record<string, unknown>).summaryMap)
 			|| firstString(apNote._misskey_summary);
 		const contentWarning = sanitizeHtml(rawCw);
-		const objectType = note.type === 'Article' ? 'Article' : 'Note';
 		const title = objectType === 'Article'
 			? sanitizePlainText(firstString(note.name) || firstString(note.nameMap))
 			: '';

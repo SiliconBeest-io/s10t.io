@@ -4,7 +4,7 @@
  */
 
 import { marked } from 'marked';
-import { sanitizeHtml } from './sanitize';
+import { sanitizeArticleHtml, sanitizePlainText } from './sanitize';
 
 export type ParsedMention = {
 	username: string;
@@ -61,8 +61,16 @@ export function parseArticleContent(text: string, domain: string): ParsedContent
 	const rendered = marked.parse(text, { async: false, gfm: true }) as string;
 	return {
 		...metadata,
-		html: sanitizeHtml(rendered),
+		html: sanitizeArticleHtml(rendered),
 	};
+}
+
+/** Build the compact Note fallback recommended by FEP-b2b8. */
+export function buildArticlePreviewContent(title: string, summary: string): string {
+	const titleHtml = title ? `<p><strong>${escapeHtml(title)}</strong></p>` : '';
+	const summaryText = sanitizePlainText(summary);
+	const summaryHtml = summaryText ? `<p>${escapeHtml(summaryText)}</p>` : '';
+	return `${titleHtml}${summaryHtml}`;
 }
 
 /**

@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeHtml } from '../../server/worker/utils/sanitize';
+import { sanitizeArticleHtml, sanitizeHtml } from '../../server/worker/utils/sanitize';
+
+describe('sanitizeArticleHtml', () => {
+  it('keeps the embedded media subset recommended by FEP-b2b8', () => {
+    expect(sanitizeArticleHtml(
+      '<p>Body</p><img src="https://example.com/image.png" alt="Example" width="640">' +
+      '<video src="https://example.com/video.mp4" controls autoplay></video>',
+    )).toBe(
+      '<p>Body</p><img src="https://example.com/image.png" alt="Example" width="640" />' +
+      '<video src="https://example.com/video.mp4" controls=""></video>',
+    );
+  });
+
+  it('removes unsafe embedded media URLs and event handlers', () => {
+    expect(sanitizeArticleHtml(
+      '<img src="javascript:alert(1)" onerror="alert(1)" alt="Unsafe">',
+    )).toBe('<img alt="Unsafe" />');
+  });
+});
 
 describe('sanitizeHtml', () => {
   // -------------------------------------------------------------------

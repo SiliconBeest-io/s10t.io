@@ -23,6 +23,7 @@ import {
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import { generateUlid } from '../../../../utils/ulid';
+import { buildArticlePreviewContent } from '../../../../utils/contentParser';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -229,6 +230,13 @@ app.put('/:id', authRequired, requireScope('write:statuses'), async (c) => {
             ? { summaries: [updatedRow.content_warning, new LanguageString(updatedRow.content_warning, updatedRow.language || 'en')] }
             : {}),
           mediaType: 'text/html',
+          preview: new Note({
+            attribution: new URL(actorUri),
+            content: buildArticlePreviewContent(updatedRow.title, updatedRow.content_warning || ''),
+            published: Temporal.Instant.from(updatedRow.created_at as string),
+            ...(allTags.length > 0 ? { tags: allTags } : {}),
+            ...(mediaAttachmentObjects.length > 0 ? { attachments: mediaAttachmentObjects } : {}),
+          }),
         } as ConstructorParameters<typeof Article>[0]);
       } else {
         fedifyObject = new Note(noteValues);

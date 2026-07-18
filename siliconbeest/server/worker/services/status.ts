@@ -3,6 +3,7 @@ import { generateUlid } from '../utils/ulid';
 import { parseArticleContent, parseContent, type ParsedContent } from '../utils/contentParser';
 import { AppError } from '../middleware/errorHandler';
 import { sanitizeLocale } from '../utils/locales';
+import { sanitizeHtml, sanitizePlainText } from '../utils/sanitize';
 import type {
   StatusRow,
   PollRow,
@@ -486,11 +487,12 @@ export async function createStatus(
     data.visibility ?? 'public',
   );
   const sensitive = data.sensitive ? 1 : 0;
-  const spoilerText = data.spoilerText || '';
+  const requestedSummary = data.spoilerText || '';
   const language = sanitizeLocale(data.language, 'en');
   const statusText = (data.text || '').trim();
   const objectType = data.objectType === 'Article' ? 'Article' : 'Note';
-  const title = objectType === 'Article' ? (data.title || '').trim() : '';
+  const title = objectType === 'Article' ? sanitizePlainText(data.title || '') : '';
+  const spoilerText = objectType === 'Article' ? sanitizeHtml(requestedSummary) : requestedSummary;
   if (objectType === 'Article' && !title) {
     throw new AppError(422, 'Validation failed', 'Article title is required');
   }
@@ -920,7 +922,7 @@ export async function editStatus(
     throw new AppError(422, 'Validation failed', 'Status type cannot be changed after publishing');
   }
   const title = objectType === 'Article'
-    ? (data.title !== undefined ? data.title.trim() : row.title)
+    ? sanitizePlainText(data.title !== undefined ? data.title : row.title)
     : '';
   if (objectType === 'Article' && !title) {
     throw new AppError(422, 'Validation failed', 'Article title is required');
@@ -932,7 +934,8 @@ export async function editStatus(
     throw new AppError(422, 'Validation failed', 'Article body is too long');
   }
   const sensitive = data.sensitive !== undefined ? (data.sensitive ? 1 : 0) : row.sensitive;
-  const spoilerText = data.spoilerText !== undefined ? data.spoilerText : row.content_warning || '';
+  const requestedSummary = data.spoilerText !== undefined ? data.spoilerText : row.content_warning || '';
+  const spoilerText = objectType === 'Article' ? sanitizeHtml(requestedSummary) : requestedSummary;
   if (objectType === 'Article' && spoilerText.length > MAX_ARTICLE_SUMMARY_CHARACTERS) {
     throw new AppError(422, 'Validation failed', 'Article summary is too long');
   }

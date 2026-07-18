@@ -24,6 +24,7 @@ import { Temporal } from '@js-temporal/polyfill';
 import type { AccountRow, StatusRow, PollRow } from '../../../types/db';
 import { normalizeQuotePolicy, quotePolicyAutomaticApprovals } from '../../../../../../packages/shared/utils/quotePolicy';
 import { canEmbedQuote } from '../../../../../../packages/shared/permissions';
+import { buildArticlePreviewContent } from '../../../utils/contentParser';
 
 export const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
 
@@ -253,6 +254,13 @@ export function buildFedifyArticle(
       ? { summaries: [status.content_warning, new LanguageString(status.content_warning, status.language || 'en')] }
       : {}),
     mediaType: 'text/html',
+    preview: new Note({
+      attribution: new URL(`https://${domain}/users/${account.username}`),
+      content: buildArticlePreviewContent(status.title, status.content_warning || ''),
+      published: toTemporalInstant(status.created_at),
+      ...(articleValues.tags?.length ? { tags: articleValues.tags } : {}),
+      ...(articleValues.attachments?.length ? { attachments: articleValues.attachments } : {}),
+    }),
   } as ConstructorParameters<typeof Article>[0]);
   return { article, tos, ccs };
 }

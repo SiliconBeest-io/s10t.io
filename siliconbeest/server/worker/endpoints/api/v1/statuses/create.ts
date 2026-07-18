@@ -22,6 +22,7 @@ import {
 } from '@fedify/vocab';
 import { Temporal } from '@js-temporal/polyfill';
 import { generateUlid } from '../../../../utils/ulid';
+import { buildArticlePreviewContent } from '../../../../utils/contentParser';
 import type { StatusWithJoinedAccountRow, MediaAttachmentRow } from '../../../../types/db';
 import { createStatus } from '../../../../services/status';
 import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
@@ -632,6 +633,13 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
           ? { summaries: [spoilerText, new LanguageString(spoilerText, language)] }
           : {}),
         mediaType: 'text/html',
+        preview: new Note({
+          attribution: new URL(actorUri),
+          content: buildArticlePreviewContent(title, spoilerText),
+          published: Temporal.Instant.from(now),
+          ...(allTags.length > 0 ? { tags: allTags } : {}),
+          ...(mediaAttachmentObjects.length > 0 ? { attachments: mediaAttachmentObjects } : {}),
+        }),
       } as ConstructorParameters<typeof Article>[0]);
     } else {
       fedifyObject = new Note(noteValues);
