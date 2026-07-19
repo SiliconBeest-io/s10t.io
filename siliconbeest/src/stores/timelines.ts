@@ -15,6 +15,10 @@ import { refreshAffectedStatusPagePrefetches } from '@/composables/useStatusPage
 import { playNewPostSound } from '@/utils/newPostSound';
 import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
+import {
+  refreshNotificationsForRemovedAccount,
+  refreshNotificationsForRemovedStatuses,
+} from './notificationPrefetchInvalidation';
 
 export type TimelineType = 'home' | 'recommended' | 'social' | 'public' | 'local' | 'tag';
 export type AudibleTimelineScopeOwner = string | symbol;
@@ -638,6 +642,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
     );
     refreshAffectedPagePrefetches(affectsRemovedStatus, affectedKeys);
     refreshAffectedStatusPagePrefetches(affectsRemovedStatus);
+    refreshNotificationsForRemovedStatuses(removedIds);
   }
 
   function removeAccountStatuses(accountId: string) {
@@ -671,6 +676,7 @@ export const useTimelinesStore = defineStore('timelines', () => {
     );
     refreshAffectedPagePrefetches(belongsToRemovedAccount, affectedKeys);
     refreshAffectedStatusPagePrefetches(belongsToRemovedAccount);
+    refreshNotificationsForRemovedAccount(accountId);
   }
 
   function isStreamPaused(stream: string): boolean {

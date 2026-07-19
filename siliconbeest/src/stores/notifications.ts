@@ -11,6 +11,10 @@ import { parseLinkHeader, apiFetch } from '@/api/client';
 import { StreamingClient } from '@/api/streaming';
 import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
+import {
+  registerNotificationMutationHandler,
+  type NotificationMutation,
+} from './notificationPrefetchInvalidation';
 
 type NotificationPagePrefetchResult =
   | { ok: true; response: ApiResponse<Notification[]> }
@@ -21,8 +25,12 @@ interface NotificationPagePrefetch {
   maxId: string;
   requestGeneration: number;
   controller: AbortController;
+  invalidators: NotificationPredicate[];
+  refreshAfterSettle: boolean;
   promise: Promise<NotificationPagePrefetchResult>;
 }
+
+type NotificationPredicate = (notification: Notification) => boolean;
 
 export const useNotificationsStore = defineStore('notifications', () => {
   const items = ref<Notification[]>([]);
@@ -35,7 +43,10 @@ export const useNotificationsStore = defineStore('notifications', () => {
   const streamingClient = ref<StreamingClient | null>(null);
   const serverUnreadCount = ref(0);
   let requestGeneration = 0;
+  let activeToken: string | undefined;
   let pagePrefetch: NotificationPagePrefetch | undefined;
+  let queuedPrefetchRestart: NotificationPagePrefetch | undefined;
+  let prefetchRestartQueued = false;
 
   const unreadCount = computed(() => serverUnreadCount.value);
 
@@ -57,17 +68,17 @@ export const useNotificationsStore = defineStore('notifications', () => {
     pagePrefetch = undefined;
   }
 
-  function startPagePrefetch(token: string) {
-    const cursor = maxId.value;
-    if (!hasMore.value || !cursor) {
-      clearPagePrefetch();
-      return;
-    }
-
+  function startPagePrefetchAt(
+    token: string,
+    cursor: string,
+    generation: number,
+    force = false,
+  ) {
     if (
-      pagePrefetch?.token === token
+      !force
+      && pagePrefetch?.token === token
       && pagePrefetch.maxId === cursor
-      && pagePrefetch.requestGeneration === requestGeneration
+      && pagePrefetch.requestGeneration === generation
     ) return;
 
     clearPagePrefetch();
@@ -86,41 +97,155 @@ export const useNotificationsStore = defineStore('notifications', () => {
     pagePrefetch = {
       token,
       maxId: cursor,
-      requestGeneration,
+      requestGeneration: generation,
       controller,
+      invalidators: [],
+      refreshAfterSettle: false,
       promise,
     };
+  }
+
+  function startPagePrefetch(token: string, force = false) {
+    const cursor = maxId.value;
+    if (!hasMore.value || !cursor) {
+      clearPagePrefetch();
+      return;
+    }
+    startPagePrefetchAt(token, cursor, requestGeneration, force);
+  }
+
+  function restartPagePrefetch(expected: NotificationPagePrefetch) {
+    if (
+      pagePrefetch !== expected
+      || requestGeneration !== expected.requestGeneration
+    ) return;
+    startPagePrefetchAt(
+      expected.token,
+      expected.maxId,
+      expected.requestGeneration,
+      true,
+    );
+  }
+
+  function queuePagePrefetchRestart(expected: NotificationPagePrefetch) {
+    queuedPrefetchRestart = expected;
+    if (prefetchRestartQueued) return;
+    prefetchRestartQueued = true;
+    queueMicrotask(() => {
+      prefetchRestartQueued = false;
+      const current = queuedPrefetchRestart;
+      queuedPrefetchRestart = undefined;
+      if (current) restartPagePrefetch(current);
+    });
+  }
+
+  function responseNeedsRefresh(
+    entry: NotificationPagePrefetch,
+    notifications: readonly Notification[],
+  ) {
+    return entry.invalidators.some((predicate) => notifications.some(predicate));
+  }
+
+  function refreshAffectedPagePrefetch(
+    predicate: NotificationPredicate,
+    force: boolean,
+  ) {
+    const entry = pagePrefetch;
+    if (!entry) {
+      if (force && activeToken) startPagePrefetch(activeToken, true);
+      return;
+    }
+    entry.invalidators.push(predicate);
+    if (force) {
+      entry.refreshAfterSettle = true;
+      queuePagePrefetchRestart(entry);
+      return;
+    }
+    void entry.promise.then((result) => {
+      if (
+        result.ok
+        && pagePrefetch === entry
+        && responseNeedsRefresh(entry, result.response.data)
+      ) queuePagePrefetchRestart(entry);
+    });
+  }
+
+  function applyNotificationMutation(mutation: NotificationMutation) {
+    const predicate: NotificationPredicate = mutation.type === 'statuses'
+      ? (notification) => {
+          const status = notification.status;
+          return !!status && (
+            mutation.statusIds.has(status.id)
+            || !!status.reblog && mutation.statusIds.has(status.reblog.id)
+          );
+        }
+      : (notification) => (
+          notification.account.id === mutation.accountId
+          || notification.status?.account.id === mutation.accountId
+          || notification.status?.reblog?.account.id === mutation.accountId
+        );
+    const previousLength = items.value.length;
+    items.value = items.value.filter((notification) => !predicate(notification));
+    refreshAffectedPagePrefetch(predicate, items.value.length !== previousLength);
+  }
+
+  // A module-level bridge is useful only for the browser's singleton Pinia.
+  // Never retain a request-scoped SSR store in a Worker isolate.
+  if (typeof window !== 'undefined') {
+    registerNotificationMutationHandler(applyNotificationMutation);
   }
 
   async function consumePagePrefetch(
     token: string,
     cursor: string,
     generation: number,
+    retryAfterPrefetchFailure?: boolean,
   ): Promise<ApiResponse<Notification[]> | undefined> {
     if (requestGeneration !== generation) return undefined;
-    const entry = pagePrefetch;
-    if (!entry) return undefined;
+    let entry = pagePrefetch;
+    if (!entry) {
+      startPagePrefetchAt(token, cursor, generation);
+      entry = pagePrefetch;
+      retryAfterPrefetchFailure = false;
+      if (!entry) return undefined;
+    } else if (retryAfterPrefetchFailure === undefined) {
+      retryAfterPrefetchFailure = true;
+    }
     if (
       entry.token !== token
       || entry.maxId !== cursor
       || entry.requestGeneration !== generation
     ) {
       clearPagePrefetch();
-      return undefined;
+      return consumePagePrefetch(token, cursor, generation, false);
     }
 
     const result = await entry.promise;
     if (requestGeneration !== generation) return undefined;
     if (pagePrefetch !== entry) {
-      return consumePagePrefetch(token, cursor, generation);
+      return consumePagePrefetch(token, cursor, generation, retryAfterPrefetchFailure);
+    }
+    if (!result.ok) {
+      pagePrefetch = undefined;
+      if (retryAfterPrefetchFailure) {
+        return consumePagePrefetch(token, cursor, generation, false);
+      }
+      throw result.error;
+    }
+    if (
+      entry.refreshAfterSettle
+      || responseNeedsRefresh(entry, result.response.data)
+    ) {
+      restartPagePrefetch(entry);
+      return consumePagePrefetch(token, cursor, generation, retryAfterPrefetchFailure);
     }
     pagePrefetch = undefined;
-    if (requestGeneration !== generation || !result.ok) return undefined;
     return result.response;
   }
 
   async function fetch(token: string) {
     const generation = ++requestGeneration;
+    activeToken = token;
     clearPagePrefetch();
     loadingMore.value = false;
     loading.value = true;
@@ -175,11 +300,8 @@ export const useNotificationsStore = defineStore('notifications', () => {
     error.value = null;
 
     try {
-      let response = await consumePagePrefetch(token, cursor, generation);
-      if (!response) {
-        if (requestGeneration !== generation) return;
-        response = await fetchNotifications({ token, max_id: cursor });
-      }
+      const response = await consumePagePrefetch(token, cursor, generation);
+      if (!response) return;
       if (requestGeneration !== generation) return;
 
       const { data, headers } = response;
@@ -323,6 +445,8 @@ export const useNotificationsStore = defineStore('notifications', () => {
   function reset() {
     requestGeneration += 1;
     clearPagePrefetch();
+    queuedPrefetchRestart = undefined;
+    activeToken = undefined;
     disconnectStream();
     items.value = [];
     loading.value = false;
