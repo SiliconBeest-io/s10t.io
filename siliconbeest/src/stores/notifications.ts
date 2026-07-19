@@ -346,7 +346,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     await apiDismissNotification(id, token);
     if (requestGeneration !== generation) return;
     items.value = items.value.filter((n) => n.id !== id);
-    maxId.value = items.value.at(-1)?.id;
+    maxId.value = items.value[items.value.length - 1]?.id;
     startPagePrefetch(token);
   }
 
