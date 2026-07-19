@@ -47,10 +47,10 @@ const timelineEntries = computed<Array<{
   emoji: string
   labelKey: string
 }>>(() => [
-  { type: 'home', emoji: '🏠', labelKey: 'deck.nav_home' },
   ...(recommendedAvailable.value
     ? [{ type: 'recommended' as const, emoji: '✨', labelKey: 'timeline.ai_recommended_nav' }]
     : []),
+  { type: 'home', emoji: '🏠', labelKey: 'deck.nav_home' },
   { type: 'local', emoji: '🦬', labelKey: 'deck.nav_local' },
   { type: 'social', emoji: '🫂', labelKey: 'deck.nav_social' },
   { type: 'federated', emoji: '📡', labelKey: 'deck.nav_federated' },

@@ -21,10 +21,10 @@ const notifStore = useNotificationsStore()
 const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
 const navItems = computed(() => [
-  { key: 'home', path: '/home', icon: '🏠' },
   ...(recommendedAvailable.value
     ? [{ key: 'recommended', path: '/recommended', icon: '✨' }]
     : []),
+  { key: 'home', path: '/home', icon: '🏠' },
   { key: 'local_timeline', path: '/explore/local', icon: '👥' },
   { key: 'federated_timeline', path: '/explore/public', icon: '🌐' },
   { key: 'notifications', path: '/notifications', icon: '🔔' },
