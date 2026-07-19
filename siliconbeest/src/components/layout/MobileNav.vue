@@ -3,9 +3,10 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useUiStore, ALL_COLUMNS, type ColumnType } from '@/stores/ui'
+import { useUiStore, ALL_COLUMNS, type StandardColumnType } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 import { withCurrentDesign } from '@/utils/safeRedirect'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -13,6 +14,7 @@ const ui = useUiStore()
 const notifStore = useNotificationsStore()
 const router = useRouter()
 const route = useRoute()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
 const menuOpen = ref(false)
 const navigating = ref(false)
@@ -24,7 +26,7 @@ function designedPath(path: string): string {
 }
 
 // Heroicons 24 outline paths for the deck column picker
-const columnIcons: Record<ColumnType, string> = {
+const columnIcons: Record<StandardColumnType, string> = {
   home: 'M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
   local: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
   federated: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m-18.432 0A8.959 8.959 0 013 12c0-.778.099-1.533.284-2.253',
@@ -34,8 +36,8 @@ const columnIcons: Record<ColumnType, string> = {
   follow_requests: 'M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 019.374 21c-2.331 0-4.512-.645-6.374-1.766z',
 }
 
-function getColumnTitle(type: ColumnType): string {
-  const map: Record<ColumnType, string> = {
+function getColumnTitle(type: StandardColumnType): string {
+  const map: Record<StandardColumnType, string> = {
     home: t('nav.home'),
     local: t('nav.local_timeline'),
     federated: t('nav.federated_timeline'),
@@ -55,7 +57,7 @@ function handleHomeTab() {
   }
 }
 
-async function selectDeckColumn(type: ColumnType) {
+async function selectDeckColumn(type: StandardColumnType) {
   ui.setMobileColumn(type)
   if (!isOnDeck.value) {
     await navigateTo('/home')
@@ -178,6 +180,17 @@ onBeforeRouteLeave(() => {
             <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
           </svg>
           <span>{{ t('nav.profile') }}</span>
+        </button>
+        <button
+          v-if="recommendedAvailable"
+          data-recommended-nav
+          class="sb-menu-item gap-3 py-3 text-left"
+          @click="navigateTo('/recommended')"
+        >
+          <svg class="h-5 w-5 shrink-0 text-slate-400 dark:text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.847-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.847a4.5 4.5 0 003.09 3.09L15.75 12l-2.847.813a4.5 4.5 0 00-3.09 3.091zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+          </svg>
+          <span>{{ t('timeline.ai_recommended_nav') }}</span>
         </button>
         <button @click="navigateTo('/explore/local')" class="sb-menu-item gap-3 py-3 text-left">
           <svg class="h-5 w-5 shrink-0 text-slate-400 dark:text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">

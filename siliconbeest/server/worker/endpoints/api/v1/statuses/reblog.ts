@@ -14,6 +14,8 @@ import { Announce } from '@fedify/fedify/vocab';
 import { reblogStatus } from '../../../../services/status';
 import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
 import { assertStatusRebloggable } from '../../../../services/permissions';
+import { recordRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 const app = new Hono<HonoEnv>();
 
@@ -42,6 +44,19 @@ app.post('/:id/reblog', authRequired, requireScope('write:statuses'), async (c) 
     statusId,
   );
   c.set('contributionApplied', created);
+
+  if (created) {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      recordRecommendationActivity(currentUser.account_id, 'reposted', statusId),
+      {
+        operation: 'record_recommendation_activity',
+        activityKind: 'reposted',
+        accountId: currentUser.account_id,
+        statusId,
+      },
+    );
+  }
 
   if (!created) {
     // Return the existing reblog

@@ -3,6 +3,9 @@ import { mount, renderToString } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { nextTick } from 'vue';
 import DeckView from '@/deck/views/DeckView.vue';
+import type { Instance } from '@/types/mastodon';
+import { useAuthStore } from '@/stores/auth';
+import { useInstanceStore } from '@/stores/instance';
 import { useUiStore } from '@/stores/ui';
 import { useTimelinesStore } from '@/stores/timelines';
 import { createTestI18n } from '../helpers';
@@ -27,6 +30,10 @@ function deckGlobal(pinia: ReturnType<typeof createPinia>) {
       DeckFollowRequestsColumn: {
         props: ['fluid'],
         template: '<div data-deck-column data-column-type="follow_requests" />',
+      },
+      DeckRecommendedColumn: {
+        props: ['fluid'],
+        template: '<div data-deck-column data-column-type="recommended" />',
       },
     },
   };
@@ -69,6 +76,30 @@ describe('DeckView', () => {
     expect(typeof scopeOwner).toBe('symbol');
     expect((scopeOwner as symbol).description).toBe('deck-home');
     expect(scopeTypes).toEqual(['home']);
+  });
+
+  it('renders a selected recommended feed as its own deck column', () => {
+    useAuthStore().setToken('deck-view-token');
+    useInstanceStore().instance = {
+      configuration: {
+        ai: { enabled: true, recommended_timeline: true, image_description: false },
+      },
+    } as Instance;
+    const ui = useUiStore();
+    ui.isMobile = false;
+    ui.hydrateFromServer('deck-view-token', {
+      'ui:columns': '["recommended","home"]',
+      'ui:show_trending': null,
+    });
+    const timelines = useTimelinesStore();
+    const soundScope = vi.spyOn(timelines, 'setAudibleTimelineScope');
+
+    const wrapper = mountDeck(pinia);
+
+    expect(
+      wrapper.findAll('[data-deck-column]').map((column) => column.attributes('data-column-type')),
+    ).toEqual(['recommended', 'home']);
+    expect(soundScope.mock.calls.at(-1)?.[1]).toEqual(['recommended', 'home']);
   });
 
   it('includes the selected column order in the server-rendered HTML', async () => {

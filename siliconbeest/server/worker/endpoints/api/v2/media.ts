@@ -5,8 +5,10 @@ import { authRequired } from '../../../middleware/auth';
 import { requireScope } from '../../../middleware/scopeCheck';
 import { AppError } from '../../../middleware/errorHandler';
 import { generateUlid } from '../../../utils/ulid';
-import { serializeMediaAttachment } from '../../../utils/mastodonSerializer';
 import type { MediaAttachmentRow } from '../../../types/db';
+import { generateImageAltText } from '../../../services/workersAi';
+import { isWorkersAiFeatureEnabled } from '../../../services/workersAiFeatures';
+import { consumeWorkersAiRateLimit } from '../../../services/workersAiRateLimit';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -27,6 +29,103 @@ const BLOCKED_MIME_TYPES = new Set([
   'application/x-bat',
   'application/x-msdos-program',
 ]);
+
+/** Raster formats accepted by the configured Workers AI image caption model. */
+const AI_ALT_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+/** Keep inference memory/cost bounded without rejecting the underlying upload. */
+const AI_ALT_MAX_BYTES = 10 * 1024 * 1024;
+
+type DescriptionGenerationStatus = 'pending' | 'complete' | 'failed' | 'disabled';
+
+const AI_ALT_STATUS_TTL_SECONDS = 10 * 60;
+
+function descriptionGenerationStatusKey(accountId: string, mediaId: string): string {
+  return `workers-ai:media-description:v1:${accountId}:${mediaId}`;
+}
+
+async function readDescriptionGenerationStatus(
+  accountId: string,
+  mediaId: string,
+): Promise<DescriptionGenerationStatus | null> {
+  try {
+    const value = await env.CACHE.get(descriptionGenerationStatusKey(accountId, mediaId));
+    return value === 'pending' || value === 'complete' || value === 'failed' || value === 'disabled'
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeDescriptionGenerationStatus(
+  accountId: string,
+  mediaId: string,
+  status: DescriptionGenerationStatus,
+): Promise<void> {
+  try {
+    await env.CACHE.put(
+      descriptionGenerationStatusKey(accountId, mediaId),
+      status,
+      { expirationTtl: AI_ALT_STATUS_TTL_SECONDS },
+    );
+  } catch {
+    // Generation status is a progressive-enhancement hint. Uploads and manual
+    // ALT editing must keep working if KV is temporarily unavailable.
+  }
+}
+
+async function generateAndPersistImageDescription(input: {
+  readonly accountId: string;
+  readonly mediaId: string;
+  readonly bytes: ArrayBuffer;
+  readonly contentType: string;
+}): Promise<void> {
+  const { accountId, mediaId, bytes, contentType } = input;
+
+  try {
+    const rateLimit = await consumeWorkersAiRateLimit('imageDescription', accountId);
+    if (!rateLimit.allowed) {
+      await writeDescriptionGenerationStatus(accountId, mediaId, 'failed');
+      return;
+    }
+
+    // Pass the uploaded bytes directly. This works with local/private R2 as
+    // well as production and avoids depending on a public media URL.
+    const generatedDescription = await generateImageAltText(bytes, contentType, env);
+    if (!generatedDescription) {
+      await writeDescriptionGenerationStatus(accountId, mediaId, 'failed');
+      return;
+    }
+
+    await env.DB.prepare(
+      `UPDATE media_attachments
+       SET description = ?1, updated_at = ?2
+       WHERE id = ?3
+         AND account_id = ?4
+         AND description IS NULL`,
+    )
+      .bind(
+        generatedDescription,
+        new Date().toISOString(),
+        mediaId,
+        accountId,
+      )
+      .run();
+
+    // NULL is reserved for a pending automatic description. Manual saves use
+    // a string (including ''), so metadata updates may freely change
+    // updated_at without weakening the user's ALT-text precedence.
+    await writeDescriptionGenerationStatus(accountId, mediaId, 'complete');
+  } catch (error) {
+    console.warn('Workers AI ALT generation failed; continuing without ALT text', error);
+    await writeDescriptionGenerationStatus(accountId, mediaId, 'failed');
+  }
+}
 
 /** Well-known extension mappings for common media types. */
 const MIME_TO_EXT: Record<string, string> = {
@@ -86,8 +185,9 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
     throw new AppError(422, 'Validation failed', 'file is required');
   }
 
-  const description = (formData.get('description') as string) || '';
-  const focus = (formData.get('focus') as string) || '0.0,0.0';
+  const descriptionValue = formData.get('description');
+  const description = typeof descriptionValue === 'string' ? descriptionValue : '';
+  const _focus = (formData.get('focus') as string) || '0.0,0.0';
 
   const contentType = file.type;
   if (
@@ -112,6 +212,23 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
   await env.MEDIA_BUCKET.put(fileKey, arrayBuffer, {
     httpMetadata: { contentType },
   });
+  const mediaUrl = `https://${domain}/media/${fileKey}`;
+
+  const hasClientDescription = description.trim().length > 0;
+  const canGenerateDescription =
+    !hasClientDescription
+    && AI_ALT_MIME_TYPES.has(contentType)
+    && arrayBuffer.byteLength <= AI_ALT_MAX_BYTES;
+  let shouldGenerateDescription = false;
+  if (canGenerateDescription) {
+    try {
+      shouldGenerateDescription = await isWorkersAiFeatureEnabled('imageDescription');
+    } catch (error) {
+      // Feature lookup is optional infrastructure. It must not turn a valid
+      // upload into an error when AI is disabled or unavailable.
+      console.warn('Workers AI ALT feature lookup failed; skipping generation', error);
+    }
+  }
 
   // Insert media_attachments row
   await env.DB.prepare(
@@ -127,11 +244,31 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
       fileKey,
       contentType,
       arrayBuffer.byteLength,
-      description,
+      hasClientDescription
+        ? description
+        : shouldGenerateDescription
+          ? null
+          : '',
       type,
       now,
     )
     .run();
+
+  const descriptionGenerationStatus: DescriptionGenerationStatus =
+    shouldGenerateDescription ? 'pending' : 'disabled';
+  if (shouldGenerateDescription) {
+    await writeDescriptionGenerationStatus(
+      currentUser.account_id,
+      mediaId,
+      descriptionGenerationStatus,
+    );
+    c.executionCtx.waitUntil(generateAndPersistImageDescription({
+      accountId: currentUser.account_id,
+      mediaId,
+      bytes: arrayBuffer,
+      contentType,
+    }));
+  }
 
   // Enqueue process_media for thumbnail/metadata extraction
   await env.QUEUE_INTERNAL.send({
@@ -139,8 +276,6 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
     mediaAttachmentId: mediaId,
     accountId: currentUser.account_id,
   });
-
-  const mediaUrl = `https://${domain}/media/${fileKey}`;
 
   return c.json(
     {
@@ -151,7 +286,8 @@ app.post('/', authRequired, requireScope('write:media'), async (c) => {
       remote_url: null,
       text_url: null,
       meta: null,
-      description: description || null,
+      description: hasClientDescription ? description : null,
+      description_generation_status: descriptionGenerationStatus,
       blurhash: null,
     },
     202,
@@ -178,6 +314,9 @@ app.get('/:id', authRequired, requireScope('write:media'), async (c) => {
   const previewUrl = row.thumbnail_key
     ? `https://${domain}/media/${row.thumbnail_key}`
     : mediaUrl;
+  const descriptionGenerationStatus = (row.description?.trim().length ?? 0) > 0
+    ? 'complete'
+    : await readDescriptionGenerationStatus(currentUser.account_id, mediaId) ?? 'disabled';
 
   return c.json({
     id: row.id,
@@ -191,6 +330,7 @@ app.get('/:id', authRequired, requireScope('write:media'), async (c) => {
         ? { original: { width: row.width, height: row.height } }
         : null,
     description: row.description || null,
+    description_generation_status: descriptionGenerationStatus,
     blurhash: row.blurhash ?? null,
   });
 });
@@ -201,12 +341,26 @@ app.put('/:id', authRequired, requireScope('write:media'), async (c) => {
   const domain = env.INSTANCE_DOMAIN;
   const mediaId = c.req.param('id');
 
-  let body: { description?: string; focus?: string };
+  let rawBody: unknown;
   try {
-    body = await c.req.json();
+    rawBody = await c.req.json();
   } catch {
     throw new AppError(422, 'Validation failed', 'Unable to parse request body');
   }
+  if (typeof rawBody !== 'object' || rawBody === null || Array.isArray(rawBody)) {
+    throw new AppError(422, 'Validation failed', 'Request body must be an object');
+  }
+  const bodyRecord = rawBody as Record<string, unknown>;
+  if (bodyRecord.description !== undefined && typeof bodyRecord.description !== 'string') {
+    throw new AppError(422, 'Validation failed', 'description must be a string');
+  }
+  if (bodyRecord.focus !== undefined && typeof bodyRecord.focus !== 'string') {
+    throw new AppError(422, 'Validation failed', 'focus must be a string');
+  }
+  const body: { description?: string; focus?: string } = {
+    description: bodyRecord.description as string | undefined,
+    focus: bodyRecord.focus as string | undefined,
+  };
 
   const row = await env.DB.prepare(
     'SELECT * FROM media_attachments WHERE id = ?1 AND account_id = ?2',
@@ -221,15 +375,31 @@ app.put('/:id', authRequired, requireScope('write:media'), async (c) => {
   const now = new Date().toISOString();
   const newDescription =
     body.description !== undefined ? body.description : row.description;
-
-  const update = await env.DB.prepare(
-    `UPDATE media_attachments
-     SET description = ?1, updated_at = ?2
-     WHERE id = ?3 AND description IS NOT ?1`,
-  )
-    .bind(newDescription, now, mediaId)
-    .run();
-  c.set('contributionApplied', (update.meta?.changes ?? 0) > 0);
+  let descriptionGenerationStatus: DescriptionGenerationStatus;
+  if (body.description !== undefined) {
+    // Explicit saves always replace the NULL pending sentinel with a string,
+    // including an intentional blank, so background AI cannot overwrite it.
+    const update = await env.DB.prepare(
+      `UPDATE media_attachments
+       SET description = ?1, updated_at = ?2
+       WHERE id = ?3`,
+    )
+      .bind(newDescription, now, mediaId)
+      .run();
+    c.set(
+      'contributionApplied',
+      (update.meta?.changes ?? 0) > 0 && newDescription !== row.description,
+    );
+    descriptionGenerationStatus = 'complete';
+    c.executionCtx.waitUntil(
+      writeDescriptionGenerationStatus(currentUser.account_id, mediaId, 'complete'),
+    );
+  } else {
+    c.set('contributionApplied', false);
+    descriptionGenerationStatus = (row.description?.trim().length ?? 0) > 0
+      ? 'complete'
+      : await readDescriptionGenerationStatus(currentUser.account_id, mediaId) ?? 'disabled';
+  }
 
   const mediaUrl = `https://${domain}/media/${row.file_key}`;
   const previewUrl = row.thumbnail_key
@@ -248,6 +418,7 @@ app.put('/:id', authRequired, requireScope('write:media'), async (c) => {
         ? { original: { width: row.width, height: row.height } }
         : null,
     description: newDescription || null,
+    description_generation_status: descriptionGenerationStatus,
     blurhash: row.blurhash ?? null,
   });
 });

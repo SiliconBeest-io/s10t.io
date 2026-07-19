@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { useUiStore, ALL_COLUMNS, type ColumnType } from '@/stores/ui'
+import { useUiStore, ALL_COLUMNS, type ColumnType, type StandardColumnType } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useInstanceStore } from '@/stores/instance'
 import type { TimelineType } from '@/stores/timelines'
@@ -38,7 +38,11 @@ let resizeObserver: ResizeObserver | null = null
 const hydrated = ref(false)
 const showMobileDeck = computed(() => hydrated.value && ui.isMobile)
 
-const columns = computed(() => ui.columns)
+// Deck-only columns stay persisted when switching designs, but Aurora must not
+// reinterpret them as a standard home timeline.
+const columns = computed<StandardColumnType[]>(() =>
+  ui.columns.filter((column): column is StandardColumnType => column !== 'recommended'),
+)
 
 const maxVisibleCount = computed(() => {
   if (containerWidth.value === 0) return 1
@@ -57,8 +61,10 @@ const visibleColumns = computed(() => {
 const mobileColumns = ALL_COLUMNS
 // The deck design can select column types Aurora doesn't render — fall back
 // to home instead of showing an empty view.
-const activeMobileColumn = computed<ColumnType>(() =>
-  mobileColumns.includes(ui.mobileColumn) ? ui.mobileColumn : 'home',
+const activeMobileColumn = computed<StandardColumnType>(() =>
+  ui.mobileColumn !== 'recommended' && mobileColumns.includes(ui.mobileColumn)
+    ? ui.mobileColumn
+    : 'home',
 )
 const audibleTimelineTypes = computed<TimelineType[]>(() => {
   const displayedColumns = ui.isMobile ? [activeMobileColumn.value] : visibleColumns.value
@@ -68,7 +74,7 @@ const audibleTimelineTypes = computed<TimelineType[]>(() => {
 })
 useAudibleTimelineScope('aurora-home', () => audibleTimelineTypes.value)
 
-const visitedMobileColumns = ref<Set<ColumnType>>(new Set([activeMobileColumn.value]))
+const visitedMobileColumns = ref<Set<StandardColumnType>>(new Set([activeMobileColumn.value]))
 const tabStrip = ref<HTMLElement | null>(null)
 
 watch(
@@ -86,7 +92,7 @@ watch(
 )
 
 // Heroicons 24 outline paths for the deck tab strip
-const columnIcons: Record<ColumnType, string> = {
+const columnIcons: Record<StandardColumnType, string> = {
   home: 'M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25',
   local: 'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
   federated: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m-18.432 0A8.959 8.959 0 013 12c0-.778.099-1.533.284-2.253',
@@ -119,8 +125,8 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
 })
 
-function getColumnTitle(type: ColumnType): string {
-  const map: Record<ColumnType, string> = {
+function getColumnTitle(type: StandardColumnType): string {
+  const map: Record<StandardColumnType, string> = {
     home: t('nav.home'),
     local: t('nav.local_timeline'),
     federated: t('nav.federated_timeline'),
@@ -132,17 +138,17 @@ function getColumnTitle(type: ColumnType): string {
   return map[type]
 }
 
-function getTimelineType(type: ColumnType): 'home' | 'local' | 'public' {
+function getTimelineType(type: StandardColumnType): 'home' | 'local' | 'public' {
   if (type === 'federated') return 'public'
   if (type === 'local') return 'local'
   return 'home'
 }
 
-function getBannerKey(type: ColumnType): string {
+function getBannerKey(type: StandardColumnType): string {
   return `siliconbeest_banner_dismissed_${type}`
 }
 
-function getBannerText(type: ColumnType): string {
+function getBannerText(type: StandardColumnType): string {
   const map: Record<string, string> = {
     local: t('timeline.local_banner'),
     federated: t('timeline.federated_banner'),

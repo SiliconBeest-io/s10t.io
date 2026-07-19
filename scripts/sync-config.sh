@@ -71,9 +71,8 @@ _PRE_D1="${D1_DATABASE_ID:-}"
 _PRE_KVC="${KV_CACHE_ID:-}"
 _PRE_KVS="${KV_SESSIONS_ID:-}"
 _PRE_KVF="${KV_FEDIFY_ID:-}"
-_PRE_DOM="${INSTANCE_DOMAIN:-}"
 
-if [[ -n "$_PRE_D1" && -n "$_PRE_KVC" && -n "$_PRE_KVS" && -n "$_PRE_KVF" && -n "$_PRE_DOM" ]]; then
+if [[ -n "$_PRE_D1" && -n "$_PRE_KVC" && -n "$_PRE_KVS" && -n "$_PRE_KVF" ]]; then
   info "All resource IDs provided in config.env — skipping wrangler auth check"
 else
   # Verify wrangler is authenticated (needed to fetch missing IDs)
@@ -185,14 +184,14 @@ fi
 # --- Instance Domain ---
 CURRENT_DOMAIN="${INSTANCE_DOMAIN:-}"
 if [[ -z "$CURRENT_DOMAIN" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
-  CURRENT_DOMAIN=$(sed 's|//.*$||' "$MAIN_DIR/wrangler.jsonc" | node -e "
+  CURRENT_DOMAIN=$(sed '/^[[:space:]]*\/\//d' "$MAIN_DIR/wrangler.jsonc" | node -e "
     try {
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       if (d.vars?.INSTANCE_DOMAIN) console.log(d.vars.INSTANCE_DOMAIN);
     } catch(e) {}
   " 2>/dev/null || true)
 fi
-if [[ -n "$CURRENT_DOMAIN" && "$CURRENT_DOMAIN" != "social.example.com" ]]; then
+if [[ -n "$CURRENT_DOMAIN" ]]; then
   info "Instance domain: $CURRENT_DOMAIN"
 else
   warn "No INSTANCE_DOMAIN configured — using placeholder"
@@ -202,7 +201,7 @@ fi
 # --- Instance Title ---
 CURRENT_TITLE="${INSTANCE_TITLE:-}"
 if [[ -z "$CURRENT_TITLE" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
-  CURRENT_TITLE=$(sed 's|//.*$||' "$MAIN_DIR/wrangler.jsonc" | node -e "
+  CURRENT_TITLE=$(sed '/^[[:space:]]*\/\//d' "$MAIN_DIR/wrangler.jsonc" | node -e "
     try {
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       if (d.vars?.INSTANCE_TITLE) console.log(d.vars.INSTANCE_TITLE);
@@ -214,7 +213,7 @@ CURRENT_TITLE="${CURRENT_TITLE:-SiliconBeest}"
 # --- Registration Mode ---
 CURRENT_REG="${REGISTRATION_MODE:-}"
 if [[ -z "$CURRENT_REG" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
-  CURRENT_REG=$(sed 's|//.*$||' "$MAIN_DIR/wrangler.jsonc" | node -e "
+  CURRENT_REG=$(sed '/^[[:space:]]*\/\//d' "$MAIN_DIR/wrangler.jsonc" | node -e "
     try {
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       if (d.vars?.REGISTRATION_MODE) console.log(d.vars.REGISTRATION_MODE);
@@ -226,7 +225,7 @@ CURRENT_REG="${CURRENT_REG:-open}"
 # --- Repository URL ---
 CURRENT_REPOSITORY_URL="${REPOSITORY_URL:-}"
 if [[ -z "$CURRENT_REPOSITORY_URL" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
-  CURRENT_REPOSITORY_URL=$(sed 's|//.*$||' "$MAIN_DIR/wrangler.jsonc" | node -e "
+  CURRENT_REPOSITORY_URL=$(sed '/^[[:space:]]*\/\//d' "$MAIN_DIR/wrangler.jsonc" | node -e "
     try {
       const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
       if (d.vars?.REPOSITORY_URL) console.log(d.vars.REPOSITORY_URL);
@@ -234,6 +233,147 @@ if [[ -z "$CURRENT_REPOSITORY_URL" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
   " 2>/dev/null || true)
 fi
 CURRENT_REPOSITORY_URL="${CURRENT_REPOSITORY_URL:-https://github.com/SJang1/siliconbeest}"
+
+# --- Optional Workers AI ---
+CURRENT_WORKERS_AI_ENABLED="${WORKERS_AI_ENABLED:-false}"
+if [[ "$CURRENT_WORKERS_AI_ENABLED" != "true" \
+   && "$CURRENT_WORKERS_AI_ENABLED" != "false" ]]; then
+  error "WORKERS_AI_ENABLED must be boolean true or false"
+  exit 1
+fi
+
+CURRENT_WORKERS_AI_RECOMMENDATION_MODEL="${WORKERS_AI_RECOMMENDATION_MODEL:-@cf/baai/bge-m3}"
+CURRENT_WORKERS_AI_TRANSLATION_MODEL="${WORKERS_AI_TRANSLATION_MODEL:-@cf/meta/m2m100-1.2b}"
+CURRENT_WORKERS_AI_IMAGE_CAPTION_MODEL="${WORKERS_AI_IMAGE_CAPTION_MODEL:-@cf/moondream/moondream3.1-9B-A2B}"
+CURRENT_WORKERS_AI_RATE_LIMITS="${WORKERS_AI_RATE_LIMITS:-true}"
+if [[ "$CURRENT_WORKERS_AI_RATE_LIMITS" != "true" \
+   && "$CURRENT_WORKERS_AI_RATE_LIMITS" != "false" ]]; then
+  error "WORKERS_AI_RATE_LIMITS must be boolean true or false"
+  exit 1
+fi
+
+CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT="${WORKERS_AI_RECOMMENDATION_RATE_LIMIT:-2}"
+CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS="${WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS:-60}"
+CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT="${WORKERS_AI_TRANSLATION_RATE_LIMIT:-6}"
+CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS="${WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS:-60}"
+CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT="${WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT:-4}"
+CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS="${WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS:-60}"
+CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID="${WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID:-1001}"
+CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID="${WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID:-1002}"
+CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID="${WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID:-1003}"
+
+validate_positive_integer() {
+  local variable_name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+    error "$variable_name must be a positive integer"
+    exit 1
+  fi
+}
+
+validate_rate_limit_period() {
+  local variable_name="$1"
+  local value="$2"
+  if [[ "$value" != "10" && "$value" != "60" ]]; then
+    error "$variable_name must be 10 or 60"
+    exit 1
+  fi
+}
+
+validate_positive_integer \
+  "WORKERS_AI_RECOMMENDATION_RATE_LIMIT" \
+  "$CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT"
+validate_positive_integer \
+  "WORKERS_AI_TRANSLATION_RATE_LIMIT" \
+  "$CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT"
+validate_positive_integer \
+  "WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT" \
+  "$CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT"
+validate_rate_limit_period \
+  "WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS" \
+  "$CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS"
+validate_rate_limit_period \
+  "WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS" \
+  "$CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS"
+validate_rate_limit_period \
+  "WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS" \
+  "$CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS"
+
+if [[ "$CURRENT_WORKERS_AI_ENABLED" == "true" \
+   && "$CURRENT_WORKERS_AI_RATE_LIMITS" == "true" ]]; then
+  validate_positive_integer \
+    "WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID" \
+    "$CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID"
+  validate_positive_integer \
+    "WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID" \
+    "$CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID"
+  validate_positive_integer \
+    "WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID" \
+    "$CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID"
+
+  if [[ "$CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID" == "$CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID" \
+     || "$CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID" == "$CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID" \
+     || "$CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID" == "$CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID" ]]; then
+    error "Workers AI rate-limit namespace IDs must be pairwise distinct"
+    exit 1
+  fi
+fi
+
+WORKERS_AI_BINDING_BLOCK=""
+if [[ "$CURRENT_WORKERS_AI_ENABLED" == "true" ]]; then
+  WORKERS_AI_BINDING_BLOCK=$(cat <<EOF
+
+	// Optional Workers AI (remote inference)
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	},
+EOF
+)
+fi
+
+if [[ "$CURRENT_WORKERS_AI_ENABLED" == "true" \
+   && "$CURRENT_WORKERS_AI_RATE_LIMITS" == "true" ]]; then
+  WORKERS_AI_BINDING_BLOCK+=$(cat <<EOF
+
+	// Account-keyed, per-feature Workers AI request limits
+	"ratelimits": [
+		{
+			"name": "AI_RECOMMENDATION_RATE_LIMITER",
+			"namespace_id": "${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID}",
+			"simple": {
+				"limit": ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT},
+				"period": ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS}
+			}
+		},
+		{
+			"name": "AI_TRANSLATION_RATE_LIMITER",
+			"namespace_id": "${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID}",
+			"simple": {
+				"limit": ${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT},
+				"period": ${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS}
+			}
+		},
+		{
+			"name": "AI_IMAGE_DESCRIPTION_RATE_LIMITER",
+			"namespace_id": "${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID}",
+			"simple": {
+				"limit": ${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT},
+				"period": ${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS}
+			}
+		}
+	],
+EOF
+)
+fi
+
+if [[ -n "$WORKERS_AI_BINDING_BLOCK" ]]; then
+  WORKERS_AI_BINDING_BLOCK+=$'\n'
+fi
+
+# Preserve the checked-in main Wrangler formatting byte-for-byte. Keeping the
+# mixed legacy indent in a value avoids introducing whitespace errors here.
+WRANGLER_COMPATIBILITY_FLAGS_INDENT=$'  \t'
 
 # --- Fedify Signature Verification Override ---
 # config.env/environment wins. Otherwise preserve the main worker value; the
@@ -306,6 +446,16 @@ echo "  Title:          ${CURRENT_TITLE}"
 echo "  Repository URL: ${CURRENT_REPOSITORY_URL}"
 echo "  Registration:   ${CURRENT_REG}"
 echo "  Skip signatures: ${CURRENT_SKIP_SIGNATURE_VERIFICATION}"
+echo "  Workers AI:      ${CURRENT_WORKERS_AI_ENABLED}"
+echo "  AI recommend:    ${CURRENT_WORKERS_AI_RECOMMENDATION_MODEL}"
+echo "  AI translation:  ${CURRENT_WORKERS_AI_TRANSLATION_MODEL}"
+echo "  AI image caption: ${CURRENT_WORKERS_AI_IMAGE_CAPTION_MODEL}"
+echo "  AI rate limits:   ${CURRENT_WORKERS_AI_RATE_LIMITS}"
+echo "  AI rate-limit levels: ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT}/${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS}s, ${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT}/${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS}s, ${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT}/${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS}s"
+if [[ "$CURRENT_WORKERS_AI_ENABLED" == "true" \
+   && "$CURRENT_WORKERS_AI_RATE_LIMITS" == "true" ]]; then
+  echo "  AI rate-limit namespaces: ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID}/${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID}/${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID}"
+fi
 echo ""
 
 if ! $APPLY; then
@@ -335,30 +485,51 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 {
 	"\$schema": "node_modules/wrangler/config-schema.json",
 	"name": "${MAIN_WORKER_NAME}",
-	"main": "server/index.ts",
+	"preview_urls": true,
 	"compatibility_date": "2026-06-16",
-	"compatibility_flags": ["nodejs_compat"],
+	"main": ".output/server/index.mjs",
 	"assets": {
-		"directory": "./dist/client",
+		"directory": "./.output/public",
 		"not_found_handling": "none",
 		"binding": "ASSETS"
 	},
 	"observability": {
-		"enabled": true
+	  "enabled": false,
+	  "head_sampling_rate": 1,
+	  "logs": {
+	    "enabled": true,
+	    "head_sampling_rate": 1,
+	    "persist": true,
+	    "invocation_logs": true
+	  },
+	  "traces": {
+	    "enabled": true,
+	    "persist": true,
+	    "head_sampling_rate": 1
+	  }
 	},
+${WRANGLER_COMPATIBILITY_FLAGS_INDENT}"compatibility_flags": ["nodejs_compat"],
 	"placement": {
 		"mode": "smart"
 	},
 
-	// Environment Variables (secrets set via \`wrangler secret put\`)
+	// Environment Variables (set SETUP_SECRET via \`wrangler secret put SETUP_SECRET\` before first-run setup)
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"INSTANCE_TITLE": "${CURRENT_TITLE}",
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"REGISTRATION_MODE": "${CURRENT_REG}",
-		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION}
+		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION},
+		"WORKERS_AI_ENABLED": ${CURRENT_WORKERS_AI_ENABLED},
+		"WORKERS_AI_RECOMMENDATION_MODEL": "${CURRENT_WORKERS_AI_RECOMMENDATION_MODEL}",
+		"WORKERS_AI_TRANSLATION_MODEL": "${CURRENT_WORKERS_AI_TRANSLATION_MODEL}",
+		"WORKERS_AI_IMAGE_CAPTION_MODEL": "${CURRENT_WORKERS_AI_IMAGE_CAPTION_MODEL}",
+		"WORKERS_AI_RATE_LIMITS": ${CURRENT_WORKERS_AI_RATE_LIMITS},
+		"WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS": ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS},
+		"WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS": ${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS},
+		"WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS": ${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS}
 	},
-
+${WORKERS_AI_BINDING_BLOCK}
 	// D1 Database
 	"d1_databases": [
 		{
@@ -426,7 +597,7 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 		}
 	],
 
-	// Workers Routes (custom domain)
+	// Workers Routes (catch-all for custom domain)
 	"routes": [
 		{
 			"custom_domain": true,
@@ -450,6 +621,13 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 		"enabled": true
 	},
 	"workers_dev": false,
+	// Force all @fedify/* imports (including cross-package from siliconbeest-worker)
+	// to resolve from THIS package's node_modules to avoid dual-package bundling.
+	"alias": {
+		"@fedify/fedify": "./node_modules/@fedify/fedify/dist/mod.js",
+		"@fedify/fedify/vocab": "./node_modules/@fedify/fedify/dist/vocab/mod.js",
+		"@fedify/cfworkers": "./node_modules/@fedify/cfworkers/dist/mod.js"
+	},
 	"placement": {
 		"mode": "smart"
 	},
@@ -458,8 +636,7 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION}
 	},
-
-	// D1 Database (same as main worker)
+	// D1 Database
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -488,18 +665,8 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 		}
 	],
 
-	// Queue consumers
+	// Queues (consume federation + internal + federation-dlq, produce for re-enqueue/fanout)
 	"queues": {
-		"producers": [
-			{
-				"binding": "QUEUE_FEDERATION",
-				"queue": "${QUEUE_FEDERATION}"
-			},
-			{
-				"binding": "QUEUE_INTERNAL",
-				"queue": "${QUEUE_INTERNAL}"
-			}
-		],
 		"consumers": [
 			{
 				"queue": "${QUEUE_FEDERATION}",
@@ -511,8 +678,20 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 				"max_retries": 3
 			},
 			{
+				// Dead-lettered federation messages: reprocess once more, then
+				// park persistent failures into the federation_dlq_parked table.
 				"queue": "${QUEUE_DLQ}",
 				"max_retries": 2
+			}
+		],
+		"producers": [
+			{
+				"binding": "QUEUE_FEDERATION",
+				"queue": "${QUEUE_FEDERATION}"
+			},
+			{
+				"binding": "QUEUE_INTERNAL",
+				"queue": "${QUEUE_INTERNAL}"
 			}
 		]
 	},
@@ -541,6 +720,7 @@ cat > "$EMAIL_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"observability": {
 		"enabled": true
 	},
+	"workers_dev": false,
 
 	// Consumes from dedicated email queue
 	"queues": {

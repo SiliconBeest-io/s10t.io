@@ -7,6 +7,7 @@ import { useUiStore, type ColumnType } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAnnouncementsStore } from '@/stores/announcements'
 import { useDeckColumns } from '../composables/useDeckColumns'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -15,6 +16,7 @@ const auth = useAuthStore()
 const ui = useUiStore()
 const notifStore = useNotificationsStore()
 const announcementsStore = useAnnouncementsStore()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 const { configRows } = useDeckColumns()
 const moreOpen = ref(false)
 
@@ -37,6 +39,9 @@ const announcementBadge = computed(() => {
 })
 
 const timelineEntries = computed<MobileMenuEntry[]>(() => [
+  ...(recommendedAvailable.value
+    ? [{ path: '/timelines/recommended', label: t('timeline.ai_recommended_nav'), emoji: '✨' }]
+    : []),
   { path: '/timelines/home', label: t('deck.nav_home'), emoji: '🏠' },
   { path: '/timelines/local', label: t('deck.nav_local'), emoji: '🦬' },
   { path: '/timelines/social', label: t('deck.nav_social'), emoji: '🫂' },
@@ -84,6 +89,7 @@ function isActive(path: string): boolean {
 const isOnDeck = computed(() => route.name === 'home')
 
 const COLUMN_EMOJI: Record<ColumnType, string> = {
+  recommended: '✨',
   home: '🏠',
   social: '🫂',
   local: '🦬',
@@ -94,6 +100,7 @@ const COLUMN_EMOJI: Record<ColumnType, string> = {
 }
 
 const COLUMN_LABEL_KEYS: Record<ColumnType, string> = {
+  recommended: 'timeline.ai_recommended_nav',
   home: 'deck.col_home',
   social: 'deck.col_social',
   local: 'deck.col_local',

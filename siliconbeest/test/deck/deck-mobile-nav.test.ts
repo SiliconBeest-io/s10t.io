@@ -5,6 +5,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import DeckMobileNav from '@/deck/layout/DeckMobileNav.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAnnouncementsStore } from '@/stores/announcements'
+import type { Instance } from '@/types/mastodon'
+import { useInstanceStore } from '@/stores/instance'
 import { createTestI18n } from '../helpers'
 
 describe('DeckMobileNav', () => {
@@ -55,6 +57,11 @@ describe('DeckMobileNav', () => {
 
   it('includes every desktop rail destination in the mobile More menu', async () => {
     useAuthStore().setToken('mobile-nav-token')
+    useInstanceStore().instance = {
+      configuration: {
+        ai: { enabled: true, recommended_timeline: true, image_description: false },
+      },
+    } as Instance
     const wrapper = await mountNav()
     await wrapper.get('button[aria-label="More"]').trigger('click')
 
@@ -63,6 +70,7 @@ describe('DeckMobileNav', () => {
 
     expect(paths).toEqual(expect.arrayContaining([
       '/home',
+      '/timelines/recommended',
       '/timelines/home',
       '/timelines/local',
       '/timelines/social',
@@ -83,6 +91,19 @@ describe('DeckMobileNav', () => {
       '/aurora/home',
       '/old/',
     ]))
+  })
+
+  it('hides AI recommendations from More when disabled', async () => {
+    useAuthStore().setToken('mobile-nav-token')
+    useInstanceStore().instance = {
+      configuration: {
+        ai: { enabled: true, recommended_timeline: false, image_description: false },
+      },
+    } as Instance
+    const wrapper = await mountNav()
+    await wrapper.get('button[aria-label="More"]').trigger('click')
+
+    expect(document.body.querySelector('[data-mobile-menu-path="/timelines/recommended"]')).toBeNull()
   })
 
   it('does not show an announcement badge to signed-out users', async () => {

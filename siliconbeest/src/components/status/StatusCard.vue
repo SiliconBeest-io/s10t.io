@@ -12,6 +12,7 @@ import { useUiStore } from '@/stores/ui'
 import { useNow } from '@/composables/useNow'
 import Avatar from '../common/Avatar.vue'
 import StatusContent from './StatusContent.vue'
+import StatusTranslation from './StatusTranslation.vue'
 import StatusActions from './StatusActions.vue'
 import MediaGallery from './MediaGallery.vue'
 import PreviewCard from './PreviewCard.vue'
@@ -405,14 +406,18 @@ async function handleDelete() {
             class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-slate-500 dark:text-slate-400"
             :class="{ 'line-clamp-4': !displayStatus.article_summary }"
           >{{ expanded ? displayStatus.article_summary : articlePreview }}</p>
-          <StatusContent
+          <StatusTranslation
             v-if="showArticleBody"
-            :content="displayStatus.content"
-            :spoiler-text="displayStatus.spoiler_text"
-            :sensitive="displayStatus.sensitive"
-            :emojis="displayStatus.emojis"
-            :hide-quote-inline="!!displayStatus.quote"
-          />
+            :status="displayStatus"
+          >
+            <StatusContent
+              :content="displayStatus.content"
+              :spoiler-text="displayStatus.spoiler_text"
+              :sensitive="displayStatus.sensitive"
+              :emojis="displayStatus.emojis"
+              :hide-quote-inline="!!displayStatus.quote"
+            />
+          </StatusTranslation>
 
           <!-- Poll -->
           <StatusPoll

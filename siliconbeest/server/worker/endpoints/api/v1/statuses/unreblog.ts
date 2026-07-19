@@ -12,6 +12,8 @@ import { Announce, Undo } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { unreblogStatus } from '../../../../services/status';
 import { canViewStatusById } from '../../../../services/permissions';
+import { removeRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -29,6 +31,18 @@ app.post('/:id/unreblog', authRequired, requireScope('write:statuses'), async (c
   const canView = await canViewStatusById(statusId, currentAccountId);
   const { reblogId } = await unreblogStatus(currentAccountId, statusId);
   c.set('contributionApplied', reblogId !== null);
+  if (reblogId) {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      removeRecommendationActivity(currentAccountId, 'reposted', statusId),
+      {
+        operation: 'remove_recommendation_activity',
+        activityKind: 'reposted',
+        accountId: currentAccountId,
+        statusId,
+      },
+    );
+  }
 
   // Federation: deliver Undo(Announce) to followers
   if (reblogId && row) {

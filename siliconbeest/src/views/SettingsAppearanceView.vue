@@ -41,6 +41,7 @@ function moveColumnDown(index: number) {
 
 function columnLabel(type: ColumnType): string {
   const map: Record<ColumnType, string> = {
+    recommended: t('timeline.ai_recommended_nav'),
     home: t('settings.column_home'),
     local: t('settings.column_local'),
     federated: t('settings.column_federated'),

@@ -47,37 +47,46 @@ describe('Auth Store', () => {
   it('resets per-account state only when setToken changes the token', () => {
     const store = useAuthStore();
     const ui = useUiStore();
+    const timelines = useTimelinesStore();
     store.setToken('first-token');
     store.currentUser = { id: 'first-user', username: 'first-user' } as any;
     ui.hydrateFromServer('first-token', {
       'ui:columns': '["home"]',
       'ui:show_trending': null,
     });
+    const firstAccountTimeline = timelines.getTimeline('recommended');
+    firstAccountTimeline.statusIds = ['first-account-private'];
+    firstAccountTimeline.nextPage = '/api/v1/timelines/recommended?cursor=first-account';
 
     store.setToken('first-token');
     expect(store.currentUser?.id).toBe('first-user');
     expect(ui.columns).toEqual(['home']);
+    expect(firstAccountTimeline.statusIds).toEqual(['first-account-private']);
+    expect(firstAccountTimeline.nextPage).toContain('first-account');
 
     store.setToken('second-token');
     expect(store.currentUser).toBeNull();
     expect(ui.columns).toEqual([]);
     expect(ui.serverLoaded).toBe(false);
+    expect(firstAccountTimeline.statusIds).toEqual([]);
+    expect(firstAccountTimeline.nextPage).toBeUndefined();
+    expect(timelines.timelines.size).toBe(0);
   });
 
-  it('disconnects the previous account streams when the token changes', () => {
+  it('resets timelines and disconnects notifications when the token changes', () => {
     const store = useAuthStore();
     const timelines = useTimelinesStore();
     const notifications = useNotificationsStore();
-    const disconnectTimelines = vi.spyOn(timelines, 'disconnectStream');
+    const resetTimelines = vi.spyOn(timelines, 'reset');
     const disconnectNotifications = vi.spyOn(notifications, 'disconnectStream');
 
     store.setToken('first-token');
-    disconnectTimelines.mockClear();
+    resetTimelines.mockClear();
     disconnectNotifications.mockClear();
 
     store.setToken('second-token');
 
-    expect(disconnectTimelines).toHaveBeenCalledOnce();
+    expect(resetTimelines).toHaveBeenCalledOnce();
     expect(disconnectNotifications).toHaveBeenCalledOnce();
   });
 
@@ -122,26 +131,35 @@ describe('Auth Store', () => {
   it('resets per-account state when the cookie token changes or disappears', () => {
     const store = useAuthStore();
     const ui = useUiStore();
+    const timelines = useTimelinesStore();
     store.setToken('first-token');
     ui.hydrateFromServer('first-token', {
       'ui:columns': '["local"]',
       'ui:show_trending': null,
     });
+    const firstTimeline = timelines.getTimeline('recommended');
+    firstTimeline.nextPage = '/api/v1/timelines/recommended?cursor=first';
 
     store.syncTokenFromCookie('first-token');
     expect(ui.columns).toEqual(['local']);
+    expect(firstTimeline.nextPage).toContain('first');
 
     store.syncTokenFromCookie('second-token');
     expect(store.token).toBe('second-token');
     expect(ui.columns).toEqual([]);
+    expect(firstTimeline.nextPage).toBeUndefined();
 
     ui.hydrateFromServer('second-token', {
       'ui:columns': '["federated"]',
       'ui:show_trending': null,
     });
+    const secondTimeline = timelines.getTimeline('recommended');
+    secondTimeline.statusIds = ['second-private'];
     store.syncTokenFromCookie(null);
     expect(store.token).toBeNull();
     expect(ui.columns).toEqual([]);
+    expect(secondTimeline.statusIds).toEqual([]);
+    expect(timelines.timelines.size).toBe(0);
   });
 
   it('restores token from cookie', () => {
@@ -159,11 +177,18 @@ describe('Auth Store', () => {
 
   it('clears state on logout', async () => {
     const store = useAuthStore();
+    const timelines = useTimelinesStore();
     store.setToken('test-token');
+    const timeline = timelines.getTimeline('recommended');
+    timeline.statusIds = ['private-status'];
+    timeline.nextPage = '/api/v1/timelines/recommended?cursor=private';
     await store.logout();
     expect(store.token).toBeNull();
     expect(store.isAuthenticated).toBe(false);
     expect(document.cookie).not.toContain('siliconbeest_token=');
+    expect(timeline.statusIds).toEqual([]);
+    expect(timeline.nextPage).toBeUndefined();
+    expect(timelines.timelines.size).toBe(0);
   });
 
   it('clearToken also nulls currentUser', () => {

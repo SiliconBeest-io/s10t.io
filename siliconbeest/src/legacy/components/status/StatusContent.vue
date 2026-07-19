@@ -111,13 +111,21 @@ function stripQuoteInline(html: string): string {
 
 const processedContent = computed(() => stripQuoteInline(emojifyHtml(enrichMentions(props.content), props.emojis)))
 const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoilerText || ''), props.emojis))
+const requiresDisclosure = computed(() => !!props.spoilerText || !!props.sensitive)
 </script>
 
 <template>
   <div class="status-content mt-1">
-    <!-- CW / Spoiler -->
-    <div v-if="spoilerText">
-      <p class="text-sm text-gray-700 dark:text-gray-300" v-html="processedSpoiler" />
+    <!-- CW / sensitive-content disclosure -->
+    <div v-if="requiresDisclosure">
+      <p
+        v-if="spoilerText"
+        class="text-sm text-gray-700 dark:text-gray-300"
+        v-html="processedSpoiler"
+      />
+      <p v-else class="text-sm text-gray-700 dark:text-gray-300">
+        {{ t('status.sensitiveContent') }}
+      </p>
       <button
         @click.stop="revealed = !revealed"
         class="mt-1 px-3 py-1 text-xs font-semibold rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
@@ -127,9 +135,9 @@ const processedSpoiler = computed(() => emojifyHtml(enrichMentions(props.spoiler
       </button>
     </div>
 
-    <!-- Content (hidden behind CW if spoiler_text present) -->
+    <!-- Content (hidden behind a CW or sensitive-content disclosure) -->
     <div
-      v-if="!spoilerText || revealed"
+      v-if="!requiresDisclosure || revealed"
       class="prose prose-sm dark:prose-invert max-w-none mt-1 break-words"
       v-html="processedContent"
     />

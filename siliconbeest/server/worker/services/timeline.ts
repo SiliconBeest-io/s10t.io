@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { parsePaginationParams, buildPaginationQuery } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 import { AppError } from '../middleware/errorHandler';
+import type { TimelineStatusRow } from '../types/db';
 import {
   buildReblogOriginalSurfaceSqlPredicate,
   buildStatusRelationshipSqlPredicate,
@@ -40,6 +41,7 @@ export interface PublicTimelineOpts extends TimelinePaginationOpts {
   remote?: boolean;
   onlyMedia?: boolean;
   viewerAccountId?: string;
+  originalsOnly?: boolean;
 }
 
 export interface TagTimelineOpts extends TimelinePaginationOpts {
@@ -159,7 +161,7 @@ async function addChronologicalCursorFilters(
 export async function getHomeTimeline(
   accountId: string,
   opts: TimelinePaginationOpts,
-): Promise<Record<string, unknown>[]> {
+): Promise<TimelineStatusRow[]> {
   const pag = parsePaginationParams({
     max_id: opts.maxId,
     since_id: opts.sinceId,
@@ -190,8 +192,8 @@ export async function getHomeTimeline(
   `;
   binds.push(pag.limit);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  return (results ?? []) as Record<string, unknown>[];
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<TimelineStatusRow>();
+  return results ?? [];
 }
 
 // ----------------------------------------------------------------
@@ -205,7 +207,7 @@ export async function getHomeTimeline(
 export async function getSocialTimeline(
   accountId: string,
   opts: TimelinePaginationOpts,
-): Promise<Record<string, unknown>[]> {
+): Promise<TimelineStatusRow[]> {
   const pag = parsePaginationParams({
     max_id: opts.maxId,
     since_id: opts.sinceId,
@@ -241,8 +243,8 @@ export async function getSocialTimeline(
   `;
   binds.push(pag.limit);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  return (results ?? []) as Record<string, unknown>[];
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<TimelineStatusRow>();
+  return results ?? [];
 }
 
 // ----------------------------------------------------------------
@@ -251,7 +253,7 @@ export async function getSocialTimeline(
 
 export async function getPublicTimeline(
   opts: PublicTimelineOpts,
-): Promise<Record<string, unknown>[]> {
+): Promise<TimelineStatusRow[]> {
   const pag = parsePaginationParams({
     max_id: opts.maxId,
     since_id: opts.sinceId,
@@ -279,6 +281,9 @@ export async function getPublicTimeline(
   if (opts.onlyMedia) {
     conditions.push('EXISTS (SELECT 1 FROM media_attachments ma WHERE ma.status_id = s.id)');
   }
+  if (opts.originalsOnly) {
+    conditions.push('s.reblog_of_id IS NULL');
+  }
   addStatusSurfaceFilters(conditions, binds, opts.viewerAccountId);
 
   const sql = `
@@ -291,8 +296,254 @@ export async function getPublicTimeline(
   `;
   binds.push(limitValue);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  return (results ?? []) as Record<string, unknown>[];
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<TimelineStatusRow>();
+  return results ?? [];
+}
+
+export type RecommendationCandidateWindowOptions = {
+  readonly viewerAccountId: string;
+  readonly upperBound: string;
+  readonly excludedIds: readonly string[];
+  readonly limit: number;
+};
+
+/**
+ * Fetch one rolling recommendation window from the public/home union.
+ *
+ * Previously displayed or invalidated originals are removed inside D1 through
+ * one JSON binding. Boost wrappers are normalized to their original status ID,
+ * while the wrapper and original must both still satisfy their respective
+ * home-surface permissions. The fixed upper bound prevents posts created after
+ * a refresh from leaking into that refresh's later pages.
+ */
+export async function getRecommendationCandidateWindow({
+  viewerAccountId,
+  upperBound,
+  excludedIds,
+  limit,
+}: RecommendationCandidateWindowOptions): Promise<TimelineStatusRow[]> {
+  const now = new Date().toISOString();
+  const directMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
+  const directVisibility = buildStatusVisibilitySqlPredicate('status', viewerAccountId);
+  const directRelationship = buildStatusRelationshipSqlPredicate(
+    'status',
+    viewerAccountId,
+    now,
+  );
+  const boostMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
+  const boostVisibility = buildStatusVisibilitySqlPredicate('status', viewerAccountId);
+  const boostRelationship = buildStatusRelationshipSqlPredicate(
+    'status',
+    viewerAccountId,
+    now,
+  );
+  const originalVisibility = buildStatusVisibilitySqlPredicate(
+    'reblogged_status',
+    viewerAccountId,
+  );
+  const originalRelationship = buildStatusRelationshipSqlPredicate(
+    'reblogged_status',
+    viewerAccountId,
+    now,
+  );
+
+  const sql = `
+    WITH excluded_ids(id) AS (
+      SELECT CAST(value AS TEXT)
+      FROM json_each(?)
+    ), candidate_sources(candidate_id, surface_created_at) AS (
+      SELECT s.id, s.created_at
+      FROM statuses s
+      WHERE s.created_at <= ?
+        AND s.reblog_of_id IS NULL
+        AND s.deleted_at IS NULL
+        AND s.visibility != 'direct'
+        AND (s.visibility = 'public' OR ${directMembership.sql})
+        AND ${directVisibility.sql}
+        AND ${directRelationship.sql}
+
+      UNION ALL
+
+      SELECT rs.id, s.created_at
+      FROM statuses s
+      JOIN statuses rs ON rs.id = s.reblog_of_id
+      WHERE s.created_at <= ?
+        AND s.reblog_of_id IS NOT NULL
+        AND s.deleted_at IS NULL
+        AND s.visibility != 'direct'
+        AND ${boostMembership.sql}
+        AND ${boostVisibility.sql}
+        AND ${boostRelationship.sql}
+        AND rs.reblog_of_id IS NULL
+        AND rs.deleted_at IS NULL
+        AND rs.visibility != 'direct'
+        AND ${originalVisibility.sql}
+        AND ${originalRelationship.sql}
+    ), recent_ids AS (
+      SELECT source.candidate_id,
+             MAX(source.surface_created_at) AS surface_created_at
+      FROM candidate_sources source
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM excluded_ids excluded
+        WHERE excluded.id = source.candidate_id
+      )
+      GROUP BY source.candidate_id
+      ORDER BY surface_created_at DESC, source.candidate_id DESC
+      LIMIT ?
+    )
+    SELECT s.*, ${ACCOUNT_COLUMNS}
+    FROM recent_ids recent
+    JOIN statuses s ON s.id = recent.candidate_id
+    JOIN accounts a ON a.id = s.account_id
+    ORDER BY recent.surface_created_at DESC, recent.candidate_id DESC
+  `;
+  const excludedJson = JSON.stringify([...new Set(excludedIds)]);
+  const { results } = await env.DB.prepare(sql).bind(
+    excludedJson,
+    upperBound,
+    ...directMembership.bindings,
+    ...directVisibility.bindings,
+    ...directRelationship.bindings,
+    upperBound,
+    ...boostMembership.bindings,
+    ...boostVisibility.bindings,
+    ...boostRelationship.bindings,
+    ...originalVisibility.bindings,
+    ...originalRelationship.bindings,
+    Math.min(200, Math.max(1, Math.trunc(limit))),
+  ).all<TimelineStatusRow>();
+  return results ?? [];
+}
+
+/**
+ * Re-fetch an ordered recommendation ID set through the public-or-home
+ * membership, visibility, relationship, and account-state filters. Callers
+ * restore their own ranking order after this query; this function returns only
+ * rows that remain safe to show to the viewer now and never returns DMs.
+ */
+const RECOMMENDATION_ID_QUERY_BATCH_SIZE = 50;
+
+async function getVisibleRecommendationStatusBatch(
+  uniqueIds: readonly string[],
+  viewerAccountId: string,
+): Promise<TimelineStatusRow[]> {
+  const placeholders = uniqueIds.map(() => '?').join(',');
+  const homeMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
+  const conditions: string[] = [
+    `s.id IN (${placeholders})`,
+    `(s.visibility = 'public' OR ${homeMembership.sql})`,
+    `s.visibility != 'direct'`,
+    's.deleted_at IS NULL',
+    's.reblog_of_id IS NULL',
+  ];
+  const binds: (string | number)[] = [
+    ...uniqueIds,
+    ...homeMembership.bindings,
+  ];
+  const visibility = buildStatusVisibilitySqlPredicate('status', viewerAccountId);
+  conditions.push(visibility.sql);
+  binds.push(...visibility.bindings);
+  addStatusSurfaceFilters(conditions, binds, viewerAccountId);
+
+  const directQuery = env.DB.prepare(
+    `SELECT s.*, ${ACCOUNT_COLUMNS}
+     FROM statuses s
+     JOIN accounts a ON a.id = s.account_id
+     WHERE ${conditions.join(' AND ')}`,
+  ).bind(...binds).all<TimelineStatusRow>();
+
+  // A followed account's boost is a home-timeline surface even when the
+  // original author is not followed. Normalize that eligible wrapper to the
+  // original row without weakening either side's visibility/relationship
+  // checks. Permission helpers intentionally use `s` for the wrapper and `rs`
+  // for the original here.
+  const originalVisibility = buildStatusVisibilitySqlPredicate(
+    'reblogged_status',
+    viewerAccountId,
+  );
+  const originalConditions: string[] = [
+    `rs.id IN (${placeholders})`,
+    'rs.deleted_at IS NULL',
+    'rs.reblog_of_id IS NULL',
+    `rs.visibility != 'direct'`,
+    originalVisibility.sql,
+  ];
+  const originalBinds: (string | number)[] = [
+    ...uniqueIds,
+    ...originalVisibility.bindings,
+  ];
+  addStatusSurfaceFilters(
+    originalConditions,
+    originalBinds,
+    viewerAccountId,
+    'reblogged_status',
+  );
+  const boostMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
+  const boostVisibility = buildStatusVisibilitySqlPredicate('status', viewerAccountId);
+  const boostConditions: string[] = [
+    boostMembership.sql,
+    's.deleted_at IS NULL',
+    `s.visibility != 'direct'`,
+    's.reblog_of_id IS NOT NULL',
+    boostVisibility.sql,
+  ];
+  const boostBinds: (string | number)[] = [
+    ...boostMembership.bindings,
+    ...boostVisibility.bindings,
+  ];
+  addStatusSurfaceFilters(boostConditions, boostBinds, viewerAccountId);
+  const boostQuery = env.DB.prepare(
+    `SELECT rs.*, ${ACCOUNT_COLUMNS}
+     FROM statuses rs
+     JOIN accounts a ON a.id = rs.account_id
+     WHERE ${originalConditions.join(' AND ')}
+       AND EXISTS (
+         SELECT 1
+         FROM statuses s
+         WHERE s.reblog_of_id = rs.id
+           AND ${boostConditions.join(' AND ')}
+       )`,
+  ).bind(...originalBinds, ...boostBinds).all<TimelineStatusRow>();
+
+  const [direct, boosted] = await Promise.all([directQuery, boostQuery]);
+  return [...new Map(
+    [
+      ...(direct.results ?? []),
+      ...(boosted.results ?? []),
+    ].map((row) => [row.id, row] as const),
+  ).values()];
+}
+
+export async function getVisibleRecommendationStatusesByIds(
+  statusIds: readonly string[],
+  viewerAccountId: string,
+): Promise<TimelineStatusRow[]> {
+  const uniqueIds = [...new Set(statusIds)].slice(0, 200);
+
+  // D1 allows at most 100 bound parameters per statement. Permission
+  // predicates add their own bindings, so keep ID batches comfortably below
+  // that limit while preserving the caller's larger recommendation reservoir.
+  const batches = Array.from(
+    { length: Math.ceil(uniqueIds.length / RECOMMENDATION_ID_QUERY_BATCH_SIZE) },
+    (_, index) => uniqueIds.slice(
+      index * RECOMMENDATION_ID_QUERY_BATCH_SIZE,
+      (index + 1) * RECOMMENDATION_ID_QUERY_BATCH_SIZE,
+    ),
+  );
+  // Keep batches sequential: each batch intentionally runs its two independent
+  // permission queries together, while D1 permits only six concurrent
+  // connections per Worker invocation.
+  const rows = await batches.reduce<Promise<TimelineStatusRow[]>>(
+    async (collectedPromise, batch) => {
+      const collected = await collectedPromise;
+      const batchRows = await getVisibleRecommendationStatusBatch(batch, viewerAccountId);
+      return [...collected, ...batchRows];
+    },
+    Promise.resolve([]),
+  );
+
+  return [...new Map(rows.map((row) => [row.id, row] as const)).values()];
 }
 
 // ----------------------------------------------------------------
@@ -302,7 +553,7 @@ export async function getPublicTimeline(
 export async function getTagTimeline(
   tag: string,
   opts: TagTimelineOpts,
-): Promise<Record<string, unknown>[]> {
+): Promise<TimelineStatusRow[]> {
   const tagName = tag.toLowerCase();
 
   const pag = parsePaginationParams({
@@ -343,8 +594,8 @@ export async function getTagTimeline(
   `;
   binds.push(limitValue);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  return (results ?? []) as Record<string, unknown>[];
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<TimelineStatusRow>();
+  return results ?? [];
 }
 
 // ----------------------------------------------------------------
@@ -355,7 +606,7 @@ export async function getListTimeline(
   listId: string,
   accountId: string,
   opts: TimelinePaginationOpts,
-): Promise<Record<string, unknown>[]> {
+): Promise<TimelineStatusRow[]> {
   // Verify list ownership
   const list = await env.DB
     .prepare('SELECT id FROM lists WHERE id = ?1 AND account_id = ?2')
@@ -399,6 +650,6 @@ export async function getListTimeline(
   `;
   binds.push(limitValue);
 
-  const { results } = await env.DB.prepare(sql).bind(...binds).all();
-  return (results ?? []) as Record<string, unknown>[];
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<TimelineStatusRow>();
+  return results ?? [];
 }

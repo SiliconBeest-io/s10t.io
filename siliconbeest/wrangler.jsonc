@@ -35,7 +35,15 @@
 		"INSTANCE_TITLE": "My SiliconBeest Instance",
 		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
 		"REGISTRATION_MODE": "open",
-		"SKIP_SIGNATURE_VERIFICATION": false
+		"SKIP_SIGNATURE_VERIFICATION": false,
+		"WORKERS_AI_ENABLED": true,
+		"WORKERS_AI_RECOMMENDATION_MODEL": "@cf/baai/bge-m3",
+		"WORKERS_AI_TRANSLATION_MODEL": "@cf/meta/m2m100-1.2b",
+		"WORKERS_AI_IMAGE_CAPTION_MODEL": "@cf/moondream/moondream3.1-9B-A2B",
+		"WORKERS_AI_RATE_LIMITS": false,
+		"WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS": 60
 	},
 
 	// D1 Database
@@ -111,5 +119,10 @@
 			"custom_domain": true,
 			"pattern": "social.example.com"
 		}
-	]
+	],
+
+	"ai": {
+		"binding": "AI",
+		"remote": true
+	}
 }

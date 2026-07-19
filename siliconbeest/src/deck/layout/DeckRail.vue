@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useAnnouncementsStore } from '@/stores/announcements'
 import { useDeckColumns } from '../composables/useDeckColumns'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 import type { ColumnType } from '@/stores/ui'
 import Avatar from '@/components/common/Avatar.vue'
 
@@ -19,6 +20,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const notifStore = useNotificationsStore()
 const announcementsStore = useAnnouncementsStore()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
 // Same-origin: the worker always serves /thumbnail.png (SVG fallback inside)
 const instanceIcon = '/thumbnail.png'
@@ -26,6 +28,7 @@ const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns
 
 // Short labels — the rail buttons are 58px wide, long labels overflow
 const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
+  recommended: { emoji: '✨', labelKey: 'timeline.ai_recommended_nav' },
   home: { emoji: '🏠', labelKey: 'deck.nav_home' },
   social: { emoji: '🫂', labelKey: 'deck.nav_social' },
   local: { emoji: '🦬', labelKey: 'deck.nav_local' },
@@ -36,12 +39,21 @@ const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
 }
 
 // Single-timeline navigation entries (after the Deck entry)
-const timelineEntries: { type: 'home' | 'social' | 'local' | 'federated'; emoji: string; labelKey: string }[] = [
+type DeckTimelineNavType = 'home' | 'recommended' | 'social' | 'local' | 'federated'
+
+const timelineEntries = computed<Array<{
+  type: DeckTimelineNavType
+  emoji: string
+  labelKey: string
+}>>(() => [
   { type: 'home', emoji: '🏠', labelKey: 'deck.nav_home' },
+  ...(recommendedAvailable.value
+    ? [{ type: 'recommended' as const, emoji: '✨', labelKey: 'timeline.ai_recommended_nav' }]
+    : []),
   { type: 'local', emoji: '🦬', labelKey: 'deck.nav_local' },
   { type: 'social', emoji: '🫂', labelKey: 'deck.nav_social' },
   { type: 'federated', emoji: '📡', labelKey: 'deck.nav_federated' },
-]
+])
 
 const onDeck = computed(() => route.name === 'home')
 
@@ -227,7 +239,7 @@ function isRouteActive(path: string): boolean {
     <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
     <span class="dk-rail-caption" aria-hidden="true">{{ t('deck.section_timelines') }}</span>
 
-    <!-- Single timelines: Home | Local | Social | Federated -->
+    <!-- Single timelines: Home | AI recommendations | Local | Social | Federated -->
     <router-link
       v-for="entry in timelineEntries"
       :key="entry.type"
@@ -236,6 +248,7 @@ function isRouteActive(path: string): boolean {
       :class="{ 'dk-rail-item-active': isTimelineActive(entry.type) }"
       :title="t(entry.labelKey)"
       :aria-label="t(entry.labelKey)"
+      :data-recommended-nav="entry.type === 'recommended' ? '' : undefined"
     >
       <img
         v-if="entry.type === 'local'"

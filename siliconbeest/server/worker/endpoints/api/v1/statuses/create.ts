@@ -34,6 +34,8 @@ import {
   type StatusVisibility,
 } from '../../../../../../../packages/shared/permissions';
 import { canSurfaceStatusToViewer } from '../../../../services/permissions';
+import { recordRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -120,6 +122,18 @@ app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
     visibility, sensitive, spoilerText, language,
   } = result;
   const now = new Date().toISOString();
+  if (visibility === 'public') {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      recordRecommendationActivity(currentUser.account_id, 'posted', statusId, now),
+      {
+        operation: 'record_recommendation_activity',
+        activityKind: 'posted',
+        accountId: currentUser.account_id,
+        statusId,
+      },
+    );
+  }
   let quoteAuthorizationUri = initialQuoteAuthorizationUri;
   let quoteApprovalStatus = initialQuoteApprovalStatus;
 

@@ -1,22 +1,58 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useUiStore } from '@/stores/ui';
+import { useAuthStore } from '@/stores/auth';
+import { useInstanceStore } from '@/stores/instance';
+import type { Instance } from '@/types/mastodon';
 import { useDeckColumns, DECK_COLUMN_TYPES } from '@/deck/composables/useDeckColumns';
 
 beforeEach(() => {
   setActivePinia(createPinia());
 });
 
+function enableRecommendedTimeline() {
+  useAuthStore().setToken('deck-columns-token');
+  useInstanceStore().instance = {
+    configuration: {
+      ai: { enabled: true, recommended_timeline: true, image_description: false },
+    },
+  } as Instance;
+}
+
 describe('useDeckColumns', () => {
   it('defaults to no desktop columns while keeping every type configurable', () => {
-    const { columns, configRows } = useDeckColumns();
+    enableRecommendedTimeline();
+    const { columns, configRows, isEnabled } = useDeckColumns();
     expect(columns.value).toEqual([]);
     expect(configRows.value).toEqual([
-      'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+      'recommended', 'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
     ]);
+    expect(isEnabled('recommended')).toBe(false);
     expect(DECK_COLUMN_TYPES).toEqual([
-      'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
+      'recommended', 'home', 'social', 'local', 'federated', 'notifications', 'search', 'follow_requests',
     ]);
+  });
+
+  it('hides the recommended option when the instance feature is disabled', () => {
+    const ui = useUiStore();
+    ui.columns = ['recommended', 'home'];
+
+    const { columns, configRows } = useDeckColumns();
+
+    expect(columns.value).toEqual(['home']);
+    expect(configRows.value).not.toContain('recommended');
+    expect(ui.columns).toEqual(['recommended', 'home']);
+  });
+
+  it('keeps normal append behavior when the first default option is selected', () => {
+    enableRecommendedTimeline();
+    const ui = useUiStore();
+    ui.columns = ['home'];
+    const { toggle } = useDeckColumns();
+
+    toggle('recommended');
+
+    expect(ui.columns).toEqual(['home', 'recommended']);
   });
 
   it('toggle adds a column at the end and removes it preserving order', () => {

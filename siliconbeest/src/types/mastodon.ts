@@ -146,6 +146,8 @@ export interface MediaAttachment {
   remote_url: string | null;
   meta: Record<string, unknown> | null;
   description: string | null;
+  /** SiliconBeest extension for optional background Workers AI captions. */
+  description_generation_status?: 'pending' | 'complete' | 'failed' | 'disabled';
   blurhash: string | null;
 }
 
@@ -297,6 +299,12 @@ export interface InstanceConfiguration {
   };
   translation: {
     enabled: boolean;
+  };
+  /** Optional Workers AI capabilities advertised by this instance. */
+  ai?: {
+    enabled: boolean;
+    recommended_timeline: boolean;
+    image_description: boolean;
   };
   turnstile?: {
     enabled: boolean;

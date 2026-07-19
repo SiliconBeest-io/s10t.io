@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { useUiStore, type ColumnType } from '@/stores/ui'
+import { useUiStore, type ColumnType, type StandardColumnType } from '@/stores/ui'
 import type { TimelineType } from '@/stores/timelines'
 import { useAudibleTimelineScope } from '@/composables/useAudibleTimelineScope'
 import AppShell from '@/legacy/components/layout/AppShell.vue'
@@ -19,7 +19,11 @@ const gridContainer = ref<HTMLElement | null>(null)
 const containerWidth = ref(0)
 let resizeObserver: ResizeObserver | null = null
 
-const columns = computed(() => ui.columns)
+// Deck-only columns stay persisted when switching designs, but Classic must
+// not reinterpret them as a standard home timeline.
+const columns = computed<StandardColumnType[]>(() =>
+  ui.columns.filter((column): column is StandardColumnType => column !== 'recommended'),
+)
 
 const maxVisibleCount = computed(() => {
   if (containerWidth.value === 0) return 1
@@ -53,8 +57,8 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
 })
 
-function getColumnTitle(type: ColumnType): string {
-  const map: Record<ColumnType, string> = {
+function getColumnTitle(type: StandardColumnType): string {
+  const map: Record<StandardColumnType, string> = {
     home: t('nav.home'),
     local: t('nav.local_timeline'),
     federated: t('nav.federated_timeline'),
@@ -66,17 +70,17 @@ function getColumnTitle(type: ColumnType): string {
   return map[type]
 }
 
-function getTimelineType(type: ColumnType): 'home' | 'local' | 'public' {
+function getTimelineType(type: StandardColumnType): 'home' | 'local' | 'public' {
   if (type === 'federated') return 'public'
   if (type === 'local') return 'local'
   return 'home'
 }
 
-function getBannerKey(type: ColumnType): string {
+function getBannerKey(type: StandardColumnType): string {
   return `siliconbeest_banner_dismissed_${type}`
 }
 
-function getBannerText(type: ColumnType): string {
+function getBannerText(type: StandardColumnType): string {
   const map: Record<string, string> = {
     local: t('timeline.local_banner'),
     federated: t('timeline.federated_banner'),

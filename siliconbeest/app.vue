@@ -10,9 +10,8 @@ import LegacyModal from '@/legacy/components/common/Modal.vue';
 import LegacyStatusComposer from '@/legacy/components/status/StatusComposer.vue';
 import {
   isOldDesignPath,
-  stripOldPrefix,
   isAuroraDesignPath,
-  stripAuroraPrefix,
+  toDeckPath,
 } from '@/utils/designVersion';
 
 const auth = useAuthStore();
@@ -23,7 +22,7 @@ const route = useRoute();
 
 // Classic design lives under /old/*; keep its global overlays on the old look.
 const isOldDesign = computed(() => isOldDesignPath(route.path));
-const newDesignUrl = computed(() => stripOldPrefix(route.fullPath));
+const newDesignUrl = computed(() => toDeckPath(route.fullPath));
 
 // Canonical routes render the Deck design. The dk-app class on <body>
 // activates the Deck token/skin layer (deck.css) everywhere on those
@@ -50,7 +49,7 @@ function dismissBanner() {
 
 // Aurora design lives under /aurora/*; offer the way back to Deck.
 const isAuroraDesign = computed(() => isAuroraDesignPath(route.path));
-const deckDesignUrl = computed(() => stripAuroraPrefix(route.fullPath));
+const deckDesignUrl = computed(() => toDeckPath(route.fullPath));
 
 const AURORA_BANNER_DISMISSED_KEY = 'siliconbeest_aurora_banner_dismissed';
 const auroraBannerDismissed = ref(

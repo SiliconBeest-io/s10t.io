@@ -14,6 +14,7 @@ import { useInstanceStore } from '@/stores/instance'
 import { useNow } from '@/composables/useNow'
 import Avatar from '@/components/common/Avatar.vue'
 import StatusContent from '@/components/status/StatusContent.vue'
+import StatusTranslation from '@/components/status/StatusTranslation.vue'
 import DeckStatusActions from './DeckStatusActions.vue'
 import MediaGallery from '@/components/status/MediaGallery.vue'
 import PreviewCard from '@/components/status/PreviewCard.vue'
@@ -428,15 +429,21 @@ async function handleDelete() {
           class="dk-dim-text mt-1.5 whitespace-pre-line text-sm leading-relaxed"
           :class="{ 'line-clamp-4': !displayStatus.article_summary }"
         >{{ expanded ? displayStatus.article_summary : articlePreview }}</p>
-      <div v-if="showArticleBody" class="mt-2.5" style="font-size: var(--dk-fs)">
-        <StatusContent
-          :content="displayStatus.content"
-          :spoiler-text="displayStatus.spoiler_text"
-          :sensitive="displayStatus.sensitive"
-          :emojis="displayStatus.emojis"
-          :hide-quote-inline="!!displayStatus.quote"
-        />
-      </div>
+      <StatusTranslation
+        v-if="showArticleBody"
+        :status="displayStatus"
+        variant="deck"
+      >
+        <div class="mt-2.5" style="font-size: var(--dk-fs)">
+          <StatusContent
+            :content="displayStatus.content"
+            :spoiler-text="displayStatus.spoiler_text"
+            :sensitive="displayStatus.sensitive"
+            :emojis="displayStatus.emojis"
+            :hide-quote-inline="!!displayStatus.quote"
+          />
+        </div>
+      </StatusTranslation>
 
       <!-- Poll -->
       <StatusPoll

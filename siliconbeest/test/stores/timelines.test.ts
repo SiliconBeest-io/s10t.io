@@ -13,6 +13,9 @@ vi.mock('@/utils/newPostSound', () => soundMocks);
 // Mock API calls
 vi.mock('@/api/mastodon/timelines', () => ({
   getHomeTimeline: vi.fn(),
+  getRecommendedTimeline: vi.fn(),
+  getRecommendedTimelinePage: vi.fn(),
+  getSocialTimeline: vi.fn(),
   getPublicTimeline: vi.fn(),
   getTagTimeline: vi.fn(),
 }));
@@ -64,6 +67,203 @@ describe('Timelines Store', () => {
       expect(otherTag.statusIds).toEqual([]);
       // Original tag timeline should be intact
       expect(store.getTimeline('tag', 'rust').statusIds).toEqual(['100']);
+    });
+  });
+
+  describe('recommended timeline', () => {
+    it('follows the opaque Link cursor without deriving a max_id', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      const { parseLinkHeader } = await import('@/api/client');
+      const firstPage = {
+        data: [{ id: 'ranked-1', account: { id: 'author-1' }, reblog: null }],
+        headers: { get: () => 'first-link' },
+      } as never;
+      const secondPage = {
+        data: [{ id: 'ranked-2', account: { id: 'author-2' }, reblog: null }],
+        headers: { get: () => null },
+      } as never;
+      const nextPage = '/api/v1/timelines/recommended?cursor=opaque%2Bcursor&limit=20';
+      vi.mocked(timelineApi.getRecommendedTimeline).mockResolvedValue(firstPage);
+      vi.mocked(timelineApi.getRecommendedTimelinePage).mockResolvedValue(secondPage);
+      vi.mocked(parseLinkHeader)
+        .mockReturnValueOnce({ next: nextPage })
+        .mockReturnValueOnce({});
+
+      const store = useTimelinesStore();
+      await store.fetchTimeline('recommended', { token: 'token' });
+      await store.fetchMore('recommended', { token: 'token' });
+
+      expect(timelineApi.getRecommendedTimeline).toHaveBeenCalledWith({
+        token: 'token',
+      });
+      expect(timelineApi.getRecommendedTimelinePage).toHaveBeenCalledWith(nextPage, 'token');
+      expect(store.getTimeline('recommended').statusIds).toEqual(['ranked-1', 'ranked-2']);
+      expect(store.getTimeline('recommended').hasMore).toBe(false);
+      expect(store.streamingClients.size).toBe(0);
+    });
+
+    it('stops retrying when an opaque recommendation cursor fails', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      vi.mocked(timelineApi.getRecommendedTimelinePage)
+        .mockRejectedValue(new Error('recommendation snapshot expired'));
+
+      const store = useTimelinesStore();
+      const timeline = store.getTimeline('recommended');
+      timeline.nextPage = '/api/v1/timelines/recommended?cursor=expired';
+      timeline.hasMore = true;
+
+      await store.fetchMore('recommended', { token: 'token' });
+
+      expect(timeline.error).toBe('recommendation snapshot expired');
+      expect(timeline.hasMore).toBe(false);
+      expect(timeline.nextPage).toBeUndefined();
+      expect(timeline.loadingMore).toBe(false);
+
+      await store.fetchMore('recommended', { token: 'token' });
+      expect(timelineApi.getRecommendedTimelinePage).toHaveBeenCalledOnce();
+    });
+
+    it('clears the old snapshot and requests a newly generated one', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      vi.mocked(timelineApi.getRecommendedTimeline).mockResolvedValue({
+        data: [{ id: 'fresh-1', account: { id: 'author-1' }, reblog: null }],
+        headers: { get: () => null },
+      } as never);
+
+      const store = useTimelinesStore();
+      const timeline = store.getTimeline('recommended');
+      timeline.statusIds = ['stale-1'];
+      timeline.nextPage = '/api/v1/timelines/recommended?cursor=stale';
+      timeline.error = 'old failure';
+
+      await store.refreshRecommendedTimeline('token');
+
+      expect(timelineApi.getRecommendedTimeline).toHaveBeenCalledWith({
+        token: 'token',
+      });
+      expect(timeline.statusIds).toEqual(['fresh-1']);
+      expect(timeline.nextPage).toBeUndefined();
+      expect(timeline.error).toBeNull();
+    });
+
+    it('does not append an old cursor page after a fresh snapshot starts', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      let resolveOldPage: ((value: unknown) => void) | undefined;
+      const oldPage = new Promise((resolve) => { resolveOldPage = resolve; });
+      vi.mocked(timelineApi.getRecommendedTimelinePage).mockReturnValue(oldPage as never);
+      vi.mocked(timelineApi.getRecommendedTimeline).mockResolvedValue({
+        data: [{ id: 'fresh-only', account: { id: 'fresh-author' }, reblog: null }],
+        headers: { get: () => null },
+      } as never);
+
+      const store = useTimelinesStore();
+      const timeline = store.getTimeline('recommended');
+      timeline.statusIds = ['old-first-page'];
+      timeline.nextPage = '/api/v1/timelines/recommended?cursor=old-snapshot';
+      timeline.hasMore = true;
+
+      const pendingOldPage = store.fetchMore('recommended', { token: 'token' });
+      await Promise.resolve();
+      await store.refreshRecommendedTimeline('token');
+      resolveOldPage?.({
+        data: [{ id: 'old-second-page', account: { id: 'old-author' }, reblog: null }],
+        headers: { get: () => null },
+      });
+      await pendingOldPage;
+
+      expect(timeline.statusIds).toEqual(['fresh-only']);
+      expect(timeline.loadingMore).toBe(false);
+    });
+
+    it('clears loadingMore when an initial request supersedes a cursor request', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      let resolveOldPage: ((value: unknown) => void) | undefined;
+      const oldPage = new Promise((resolve) => { resolveOldPage = resolve; });
+      vi.mocked(timelineApi.getRecommendedTimelinePage).mockReturnValue(oldPage as never);
+      vi.mocked(timelineApi.getRecommendedTimeline).mockResolvedValue({
+        data: [{ id: 'replacement', account: { id: 'author' }, reblog: null }],
+        headers: { get: () => null },
+      } as never);
+
+      const store = useTimelinesStore();
+      const timeline = store.getTimeline('recommended');
+      timeline.nextPage = '/api/v1/timelines/recommended?cursor=old';
+      const pendingOldPage = store.fetchMore('recommended', { token: 'token' });
+      await Promise.resolve();
+      expect(timeline.loadingMore).toBe(true);
+
+      await store.fetchTimeline('recommended', { token: 'token' });
+      expect(timeline.loadingMore).toBe(false);
+      resolveOldPage?.({ data: [], headers: { get: () => null } });
+      await pendingOldPage;
+      expect(timeline.loadingMore).toBe(false);
+      expect(timeline.statusIds).toEqual(['replacement']);
+    });
+
+    it('does not apply an account A response after reset and an account B request', async () => {
+      const timelineApi = await import('@/api/mastodon/timelines');
+      let resolveAccountA: ((value: unknown) => void) | undefined;
+      let resolveAccountB: ((value: unknown) => void) | undefined;
+      const accountAResponse = new Promise((resolve) => { resolveAccountA = resolve; });
+      const accountBResponse = new Promise((resolve) => { resolveAccountB = resolve; });
+      vi.mocked(timelineApi.getRecommendedTimeline)
+        .mockReturnValueOnce(accountAResponse as never)
+        .mockReturnValueOnce(accountBResponse as never);
+
+      const store = useTimelinesStore();
+      const statuses = useStatusesStore();
+      const accountATimeline = store.getTimeline('recommended');
+      accountATimeline.statusIds = ['account-a-existing'];
+      accountATimeline.nextPage = '/api/v1/timelines/recommended?cursor=account-a';
+      const accountARequest = store.fetchTimeline('recommended', { token: 'account-a-token' });
+      await Promise.resolve();
+
+      store.reset();
+      expect(accountATimeline.statusIds).toEqual([]);
+      expect(accountATimeline.nextPage).toBeUndefined();
+      expect(accountATimeline.loading).toBe(false);
+      expect(store.timelines.size).toBe(0);
+
+      const accountBRequest = store.fetchTimeline('recommended', { token: 'account-b-token' });
+      const accountBTimeline = store.getTimeline('recommended');
+      resolveAccountA?.({
+        data: [{ id: 'account-a-private', account: { id: 'account-a' }, reblog: null }],
+        headers: { get: () => null },
+      });
+      await accountARequest;
+
+      expect(accountBTimeline.statusIds).toEqual([]);
+      expect(accountBTimeline.loading).toBe(true);
+      expect(statuses.cache.has('account-a-private')).toBe(false);
+
+      resolveAccountB?.({
+        data: [{ id: 'account-b-private', account: { id: 'account-b' }, reblog: null }],
+        headers: { get: () => null },
+      });
+      await accountBRequest;
+
+      expect(accountBTimeline.statusIds).toEqual(['account-b-private']);
+      expect(accountBTimeline.loading).toBe(false);
+      expect(statuses.cache.has('account-b-private')).toBe(true);
+    });
+
+    it('ignores a queued event from a stream disconnected by reset', async () => {
+      const { StreamingClient } = await import('@/api/streaming');
+      const store = useTimelinesStore();
+      store.connectStream('account-a-token', 'user', 'home');
+      const callbacks = vi.mocked(StreamingClient).mock.calls.at(-1)![2] as {
+        onUpdate: (status: Status) => void;
+      };
+
+      store.reset();
+      callbacks.onUpdate({
+        id: 'account-a-private-stream-event',
+        account: { id: 'account-a' },
+      } as Status);
+
+      expect(store.streamingClients.size).toBe(0);
+      expect(store.timelines.has('home')).toBe(false);
+      expect(useStatusesStore().cache.has('account-a-private-stream-event')).toBe(false);
     });
   });
 

@@ -143,6 +143,8 @@
     "language": "投稿の言語",
     "uploading": "メディアをアップロード中...",
     "alt_text": "代替テキスト（画像の説明）",
+    "alt_generating": "ALTテキストを生成中…",
+    "alt_generated_notice": "自動生成されたALTテキストは正確でない場合があります。確認し、必要に応じて修正してください。",
     "alt_placeholder": "視覚障害のあるユーザーのために画像の内容を説明してください...",
     "cw_placeholder": "コンテンツ警告",
     "replying_to": "{name}への返信",
@@ -249,7 +251,14 @@
     "empty_hint": "誰かをフォローするか、公開タイムラインを確認してみましょう。",
     "new_posts": "{count}件の新しい投稿",
     "local_banner": "ローカルタイムラインは、このサーバーの全ユーザーの公開投稿を表示します。",
-    "federated_banner": "連合タイムラインは、このサーバーが接続している他のサーバーの公開投稿を表示します。"
+    "federated_banner": "連合タイムラインは、このサーバーが接続している他のサーバーの公開投稿を表示します。",
+    "recommended": "おすすめ",
+    "ai_recommended_nav": "AIおすすめ",
+    "feed_selector": "タイムラインを選択",
+    "ai_recommended": "AIが生成したおすすめフィード",
+    "refresh_recommended": "おすすめを更新",
+    "refreshing_recommended": "更新中...",
+    "recommended_failed": "AIのおすすめを生成できませんでした。"
   },
   "status": {
     "reply": "返信",
@@ -309,7 +318,12 @@
     "reblogs_count": "ブースト{count}件",
     "engagement_empty": "表示するアカウントはありません。",
     "engagement_load_error": "アカウント一覧を読み込めませんでした。",
-    "engagement_login_required": "反応したアカウントを表示するにはログインしてください。"
+    "engagement_login_required": "反応したアカウントを表示するにはログインしてください。",
+    "translate": "翻訳",
+    "translating": "翻訳中...",
+    "show_original": "原文を表示",
+    "translation_failed": "翻訳できませんでした。もう一度お試しください。",
+    "translation_disclosure": "AI翻訳は正確でない場合があります。使用モデル: {model}"
   },
   "notification": {
     "title": "通知",
@@ -969,6 +983,17 @@
     "smtp_test_success": "テストメールを送信しました。",
     "smtp_test_fail": "テストメールの送信に失敗しました。SMTP設定を確認してください。",
     "saved": "設定が保存されました。",
+    "workers_ai": {
+      "title": "Workers AI",
+      "description": "オプションのAI機能を個別に有効または無効にします。無効な機能はユーザーに表示されません。",
+      "unavailable": "Workers AIを利用できません。WORKERS_AI_ENABLEDを有効にしてAIバインディングをデプロイしてから設定してください。",
+      "recommendation": "AIおすすめタイムライン",
+      "recommendation_help": "公開投稿とホームフィードに表示可能な投稿をパーソナライズして順位付けします。",
+      "translation": "AI投稿翻訳",
+      "translation_help": "対応する公開投稿と未収載投稿をユーザーが翻訳できるようにします。",
+      "image_description": "AIによるALT自動生成",
+      "image_description_help": "説明なしで対応画像がアップロードされたときにALTテキストを自動生成します。"
+    },
     "web_push": "Webプッシュ通知",
     "web_push_description": "ユーザーのブラウザプッシュ通知を有効にします。サーバーでVAPIDキーの設定が必要です。",
     "web_push_enabled": "Webプッシュ通知を有効にする",

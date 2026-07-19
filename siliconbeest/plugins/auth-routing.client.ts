@@ -9,6 +9,8 @@ import {
 
 const AUTH_ONLY_PREFIXES = [
   '/home',
+  '/recommended',
+  '/timelines/recommended',
   '/notifications',
   '/conversations',
   '/bookmarks',

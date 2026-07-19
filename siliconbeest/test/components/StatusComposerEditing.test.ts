@@ -101,6 +101,47 @@ describe('StatusComposer edit mode', () => {
     expect(wrapper.get<HTMLTextAreaElement>('textarea[placeholder="What\'s on your mind?"]').element.value).toBe('')
   })
 
+  it('does not show the generated ALT notice for media already attached to an edit', () => {
+    const compose = useComposeStore()
+    compose.setEditing({
+      ...editableArticle(),
+      object_type: 'Note',
+      title: '',
+      article_summary: '',
+      media_attachments: [{
+        id: 'existing-media',
+        type: 'image',
+        url: 'https://cdn.example/existing.png',
+        preview_url: null,
+        remote_url: null,
+        meta: null,
+        description: 'Existing generated description.',
+        description_generation_status: 'complete',
+        blurhash: null,
+      }],
+    })
+
+    const wrapper = mount(StatusComposer, {
+      global: { plugins: [createTestI18n()] },
+    })
+
+    expect(wrapper.find('[data-testid="generated-alt-notice"]').exists()).toBe(false)
+  })
+
+  it('does not treat existing Article image Markdown as a new generated ALT', () => {
+    const compose = useComposeStore()
+    compose.setEditing({
+      ...editableArticle(),
+      text: '![Existing reviewed ALT](https://cdn.example/existing-article.png)',
+    })
+
+    const wrapper = mount(StatusComposer, {
+      global: { plugins: [createTestI18n()] },
+    })
+
+    expect(wrapper.find('[data-testid="generated-alt-notice"]').exists()).toBe(false)
+  })
+
   it('loads Article edits into an already-mounted legacy composer', async () => {
     const compose = useComposeStore()
     const wrapper = mount(LegacyStatusComposer, {

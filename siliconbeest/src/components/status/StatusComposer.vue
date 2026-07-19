@@ -19,6 +19,7 @@ import { search as apiSearch } from '@/api/mastodon/search'
 import { useAuthStore } from '@/stores/auth'
 import EmojiPicker from '@/components/common/EmojiPicker.vue'
 import { articleMediaMarkdown } from '@/utils/markdownMedia'
+import { updateMedia } from '@/api/mastodon/media'
 import type { MediaAttachment } from '@/types/mastodon'
 
 const { t } = useI18n()
@@ -214,7 +215,7 @@ function insertAtCursor(text: string) {
   })
 }
 
-function insertArticleMedia(media: MediaAttachment, fileName?: string) {
+function insertArticleMedia(media: MediaAttachment, fileName?: string): string {
   const ta = textareaRef.value
   const start = ta?.selectionStart ?? content.value.length
   const end = ta?.selectionEnd ?? content.value.length
@@ -222,7 +223,8 @@ function insertArticleMedia(media: MediaAttachment, fileName?: string) {
   const after = content.value.substring(end)
   const prefix = before.length > 0 && !before.endsWith('\n') ? '\n\n' : ''
   const suffix = after.length > 0 && !after.startsWith('\n') ? '\n\n' : ''
-  const markdown = `${prefix}${articleMediaMarkdown(media, fileName)}${suffix}`
+  const mediaMarkdown = articleMediaMarkdown(media, fileName)
+  const markdown = `${prefix}${mediaMarkdown}${suffix}`
   content.value = before + markdown + after
   nextTick(() => {
     if (!ta) return
@@ -231,13 +233,65 @@ function insertArticleMedia(media: MediaAttachment, fileName?: string) {
     ta.selectionEnd = pos
     ta.focus()
   })
-  compose.removeMedia(media.id)
+  compose.removeMedia(media.id, false)
+  return mediaMarkdown
+}
+
+const generatedArticleMediaMarkdown = new Map<string, string>()
+
+function trackGeneratedArticleDescription(
+  result: Promise<MediaAttachment | null>,
+  insertedMarkdown: string,
+  fileName?: string,
+) {
+  void result.then((resolvedMedia) => {
+    if (!resolvedMedia?.description) return
+    const generatedMarkdown = articleMediaMarkdown(resolvedMedia, fileName)
+    if (generatedMarkdown === insertedMarkdown) {
+      generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+      return
+    }
+
+    // Replace only the exact Markdown originally inserted by the composer.
+    // If the author edited its label or URL while AI was running, the
+    // original no longer matches and their manual Markdown always wins.
+    const insertionIndex = content.value.indexOf(insertedMarkdown)
+    if (insertionIndex < 0) {
+      compose.markMediaDescriptionReviewed(resolvedMedia.id)
+      return
+    }
+    content.value = content.value.slice(0, insertionIndex)
+      + generatedMarkdown
+      + content.value.slice(insertionIndex + insertedMarkdown.length)
+    generatedArticleMediaMarkdown.set(resolvedMedia.id, generatedMarkdown)
+  })
+}
+
+function reviewEditedGeneratedArticleAlt() {
+  for (const [mediaId, generatedMarkdown] of generatedArticleMediaMarkdown) {
+    if (!content.value.includes(generatedMarkdown)) {
+      compose.markMediaDescriptionReviewed(mediaId)
+      generatedArticleMediaMarkdown.delete(mediaId)
+    }
+  }
 }
 
 async function addComposerMedia(file: File) {
   const media = await compose.addMedia(file)
   if (media && objectType.value === 'Article') {
-    insertArticleMedia(media, file.name)
+    const descriptionResult = media.description_generation_status === 'pending'
+      ? compose.waitForMediaDescription(media.id)
+      : null
+    const insertedMarkdown = insertArticleMedia(media, file.name)
+
+    if (descriptionResult) {
+      trackGeneratedArticleDescription(descriptionResult, insertedMarkdown, file.name)
+    } else if (
+      media.description_generation_status === 'complete'
+      && media.description
+    ) {
+      generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+    }
   }
 }
 
@@ -265,6 +319,7 @@ function closeAutocomplete() {
 }
 
 function onTextareaInput() {
+  reviewEditedGeneratedArticleAlt()
   detectAutocomplete()
 }
 
@@ -536,6 +591,7 @@ function finishDraftSession() {
   }
   drafts.startFresh()
   compose.reset()
+  generatedArticleMediaMarkdown.clear()
   content.value = ''
   objectType.value = 'Note'
   articleTitle.value = ''
@@ -567,6 +623,7 @@ async function loadDraft(id: string) {
 
   isHydratingDraft.value = true
   compose.reset()
+  generatedArticleMediaMarkdown.clear()
   drafts.select(id)
   content.value = draft.content
   objectType.value = draft.objectType
@@ -661,6 +718,7 @@ function loadEditingDraft() {
 
 watch(() => compose.editingId, (editingId) => {
   if (editingId) {
+    generatedArticleMediaMarkdown.clear()
     loadEditingDraft()
   } else {
     content.value = ''
@@ -687,7 +745,18 @@ async function selectObjectType(type: 'Note' | 'Article') {
     if (compose.showPoll) togglePoll()
     showCw.value = false
     for (const media of [...compose.mediaAttachments]) {
-      insertArticleMedia(media)
+      const descriptionResult = media.description_generation_status === 'pending'
+        ? compose.waitForMediaDescription(media.id)
+        : null
+      const insertedMarkdown = insertArticleMedia(media)
+      if (descriptionResult) {
+        trackGeneratedArticleDescription(descriptionResult, insertedMarkdown)
+      } else if (
+        media.description_generation_status === 'complete'
+        && media.description
+      ) {
+        generatedArticleMediaMarkdown.set(media.id, insertedMarkdown)
+      }
       await nextTick()
     }
   }
@@ -721,30 +790,66 @@ async function onFileSelect(event: Event) {
 }
 
 // ── ALT text editor ─────────────────────────────────────────────────
-const altEditMedia = ref<any>(null)
+const altEditMedia = ref<MediaAttachment | null>(null)
 const altEditText = ref('')
+const altEditDirty = ref(false)
+const altSaving = ref(false)
 
-function openAltEditor(media: any) {
+function openAltEditor(media: MediaAttachment) {
+  if (altSaving.value) return
   altEditMedia.value = media
   altEditText.value = media.description || ''
+  altEditDirty.value = false
+}
+
+function onAltInput() {
+  if (!altEditMedia.value || altEditDirty.value) return
+  altEditDirty.value = true
+  compose.markMediaDescriptionEdited(altEditMedia.value.id)
+}
+
+function closeAltEditor() {
+  if (altSaving.value) return
+  if (altEditMedia.value && altEditDirty.value) {
+    compose.resumeMediaDescriptionPolling(altEditMedia.value.id)
+  }
+  altEditMedia.value = null
+  altEditDirty.value = false
 }
 
 async function saveAlt() {
-  if (!altEditMedia.value || !auth.token) return
+  if (!altEditMedia.value || !auth.token || altSaving.value) return
+  const media = altEditMedia.value
+  const mediaId = media.id
+  altEditDirty.value = true
+  altSaving.value = true
+  compose.markMediaDescriptionEdited(mediaId)
   try {
-    // Update via API
-    const res = await fetch(`/api/v1/media/${altEditMedia.value.id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description: altEditText.value }),
-    })
-    if (res.ok) {
-      // Update local state
-      altEditMedia.value.description = altEditText.value
+    const { data } = await updateMedia(
+      mediaId,
+      { description: altEditText.value },
+      auth.token,
+    )
+    Object.assign(media, data)
+    compose.markMediaDescriptionReviewed(mediaId)
+    if (altEditMedia.value === media) {
+      altEditMedia.value = null
+      altEditDirty.value = false
     }
-  } catch { /* ignore */ }
-  altEditMedia.value = null
+  } catch {
+    // Keep the editor and the author's text open so a transient failure can
+    // be retried without allowing a polling response to replace their input.
+  } finally {
+    altSaving.value = false
+  }
 }
+
+watch(
+  () => altEditMedia.value?.description,
+  (description) => {
+    if (!altEditDirty.value) altEditText.value = description || ''
+  },
+)
 
 /** Handle paste events — if clipboard contains images, upload them */
 async function onPaste(event: ClipboardEvent) {
@@ -797,6 +902,7 @@ function submit() {
 }
 
 watch(() => compose.publishedTick, () => {
+  generatedArticleMediaMarkdown.clear()
   content.value = ''
   objectType.value = 'Note'
   articleTitle.value = ''
@@ -1096,9 +1202,23 @@ watch(() => compose.publishedTick, () => {
           type="button"
           @click="openAltEditor(media)"
           class="absolute bottom-1 left-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide backdrop-blur-sm transition-opacity"
-          :class="media.description ? 'bg-brand-600/90 text-white opacity-95' : 'bg-slate-950/60 text-white opacity-0 group-hover:opacity-100'"
+          :class="media.description_generation_status === 'pending'
+            ? 'bg-slate-950/75 text-white opacity-100'
+            : media.description
+              ? 'bg-brand-600/90 text-white opacity-95'
+              : 'bg-slate-950/60 text-white opacity-0 group-hover:opacity-100'"
+          :aria-live="media.description_generation_status === 'pending' ? 'polite' : undefined"
+          data-testid="media-alt-button"
         >
-          ALT
+          <span
+            v-if="media.description_generation_status === 'pending'"
+            class="inline-flex items-center gap-1"
+            data-testid="media-alt-generating"
+          >
+            <span class="h-2 w-2 animate-spin rounded-full border border-white/50 border-t-white" />
+            {{ t('compose.alt_generating') }}
+          </span>
+          <template v-else>ALT</template>
         </button>
         <!-- Remove button -->
         <button
@@ -1111,6 +1231,14 @@ watch(() => compose.publishedTick, () => {
         </button>
       </div>
     </div>
+
+    <p
+      v-if="compose.hasUnreviewedGeneratedAltText"
+      class="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400"
+      data-testid="generated-alt-notice"
+    >
+      {{ t('compose.alt_generated_notice') }}
+    </p>
 
     <!-- Quote preview -->
     <div
@@ -1139,11 +1267,11 @@ watch(() => compose.publishedTick, () => {
     </div>
 
     <!-- ALT text editor modal -->
-    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm" @click.self="altEditMedia = null">
-      <div class="sb-card mx-4 w-full max-w-md p-5">
+    <div v-if="altEditMedia" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm" @click.self="closeAltEditor">
+      <div class="sb-card mx-4 w-full max-w-md p-5" :aria-busy="altSaving">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="sb-heading text-sm">{{ t('compose.alt_text') }}</h3>
-          <button type="button" @click="altEditMedia = null" class="rounded-lg p-1 text-slate-400 transition-colors hover:bg-surface-2 hover:text-slate-600 dark:hover:bg-white/10 dark:hover:text-slate-300">✕</button>
+          <button type="button" @click="closeAltEditor" :disabled="altSaving" data-testid="media-alt-close" class="rounded-lg p-1 text-slate-400 transition-colors hover:bg-surface-2 hover:text-slate-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-white/10 dark:hover:text-slate-300">✕</button>
         </div>
         <img
           v-if="altEditMedia.type === 'image' || altEditMedia.type === 'gifv'"
@@ -1152,6 +1280,8 @@ watch(() => compose.publishedTick, () => {
         />
         <textarea
           v-model="altEditText"
+          @input="onAltInput"
+          :disabled="altSaving"
           :placeholder="t('compose.alt_placeholder')"
           rows="3"
           class="sb-input resize-none"
@@ -1162,7 +1292,8 @@ watch(() => compose.publishedTick, () => {
           <button
             type="button"
             @click="saveAlt"
-            class="sb-btn sb-btn-primary sb-btn-sm"
+            :disabled="altSaving"
+            class="sb-btn sb-btn-primary sb-btn-sm disabled:cursor-wait disabled:opacity-60"
           >
             {{ t('common.save') }}
           </button>

@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useStatusesStore } from '@/stores/statuses'
 import { useInstanceStore } from '@/stores/instance'
 import DeckPageShell from '@/deck/layout/DeckPageShell.vue'
-import StatusCard from '@/components/status/StatusCard.vue'
+import DeckStatusCard from '@/deck/components/DeckStatusCard.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 const { t } = useI18n()
@@ -125,11 +125,11 @@ watch(() => route.params.statusId, (newId) => {
 
       <div v-else-if="status" class="mx-auto w-full max-w-2xl animate-fade-in px-4 py-4">
         <!-- Ancestors (quiet) -->
-        <StatusCard v-for="s in ancestors" :key="s.id" :status="s" @navigate="handleNavigate" @deleted="handleDeleted" />
+        <DeckStatusCard v-for="s in ancestors" :key="s.id" :status="s" @navigate="handleNavigate" @deleted="handleDeleted" />
 
         <!-- Main status (elevated focal card) -->
         <div class="sb-card my-3 animate-rise-in shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
-          <StatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
+          <DeckStatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
 
         <!-- Descendants (threaded with indentation, quiet) -->
@@ -139,7 +139,7 @@ watch(() => route.params.statusId, (newId) => {
           :style="{ marginLeft: `${item.depth * 16}px` }"
           :class="item.depth > 0 ? 'border-l-2 border-outline dark:border-outline-dark' : ''"
         >
-          <StatusCard :status="item.status" @navigate="handleNavigate" @deleted="handleDeleted" />
+          <DeckStatusCard :status="item.status" @navigate="handleNavigate" @deleted="handleDeleted" />
         </div>
       </div>
 

@@ -21,6 +21,27 @@ export function getSocialTimeline(opts: PaginationOpts & { token: string }) {
   return apiFetch<Status[]>(`/v1/timelines/social${qs}`, { token: opts.token });
 }
 
+export function getRecommendedTimeline(
+  opts: PaginationOpts & { token: string },
+) {
+  const qs = buildQueryString({
+    limit: opts.limit,
+  });
+  return apiFetch<Status[]>(`/v1/timelines/recommended${qs}`, {
+    method: 'POST',
+    token: opts.token,
+  });
+}
+
+/** Follow the opaque cursor URL returned by the recommended timeline Link header. */
+export function getRecommendedTimelinePage(nextPath: string, token: string) {
+  const path = nextPath.startsWith('/api/') ? nextPath.slice('/api'.length) : nextPath;
+  if (!path.startsWith('/v1/timelines/recommended?')) {
+    throw new Error('Invalid recommended timeline page');
+  }
+  return apiFetch<Status[]>(path, { method: 'POST', token });
+}
+
 export function getPublicTimeline(
   opts?: PaginationOpts & { local?: boolean; remote?: boolean; only_media?: boolean },
 ) {

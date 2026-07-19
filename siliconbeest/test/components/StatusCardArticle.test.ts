@@ -7,6 +7,7 @@ import type { Status } from '@/types/mastodon';
 import StatusCard from '@/components/status/StatusCard.vue';
 import DeckStatusCard from '@/deck/components/DeckStatusCard.vue';
 import LegacyStatusCard from '@/legacy/components/status/StatusCard.vue';
+import StatusTranslation from '@/components/status/StatusTranslation.vue';
 import { createTestI18n } from '../helpers';
 
 function makeArticle(summary = ''): Status {
@@ -129,7 +130,8 @@ describe.each(variants)('$name Article cards', ({ component }) => {
   it('shows the full body only when the Article card is expanded', () => {
     const wrapper = mountCard(component, makeArticle('Summary'), true);
 
-    expect(wrapper.find('status-content-stub').exists()).toBe(true);
+    const translation = wrapper.getComponent(StatusTranslation);
+    expect(translation.find('status-content-stub').exists()).toBe(true);
     expect(wrapper.find('[data-testid="read-full-article"]').exists()).toBe(false);
   });
 

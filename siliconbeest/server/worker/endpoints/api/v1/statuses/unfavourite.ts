@@ -11,6 +11,8 @@ import { Like, Undo } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { unfavouriteStatus } from '../../../../services/status';
 import { canViewStatusById } from '../../../../services/permissions';
+import { removeRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -34,6 +36,18 @@ app.post('/:id/unfavourite', authRequired, requireScope('write:favourites'), asy
   const canView = await canViewStatusById(statusId, currentAccountId);
   const removed = await unfavouriteStatus(currentAccountId, statusId);
   c.set('contributionApplied', removed);
+  if (removed) {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      removeRecommendationActivity(currentAccountId, 'liked', statusId),
+      {
+        operation: 'remove_recommendation_activity',
+        activityKind: 'liked',
+        accountId: currentAccountId,
+        statusId,
+      },
+    );
+  }
 
   // Federation: deliver Undo(Like)
   if (existing) {

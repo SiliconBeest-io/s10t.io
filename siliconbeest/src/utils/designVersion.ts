@@ -59,3 +59,23 @@ export function toAuroraPath(fullPath: string): string {
   if (isAuroraDesignPath(fullPath)) return fullPath;
   return fullPath === '/' ? AURORA_DESIGN_PREFIX : `${AURORA_DESIGN_PREFIX}${fullPath}`;
 }
+
+/** Map an Aurora/Classic URL to its canonical Deck equivalent. */
+export function toDeckPath(fullPath: string): string {
+  // The banner receives route.fullPath, so design roots can include a query
+  // or hash (`/old?x=1`) that route.path-based predicates intentionally ignore.
+  const canonicalPath = stripAuroraPrefix(stripOldPrefix(fullPath));
+
+  if (canonicalPath.startsWith('/recommended')) {
+    const suffix = canonicalPath.slice('/recommended'.length);
+    if (suffix === '' || suffix === '/') return '/timelines/recommended';
+    if (suffix.startsWith('?') || suffix.startsWith('#')) {
+      return `/timelines/recommended${suffix}`;
+    }
+    if (suffix.startsWith('/?') || suffix.startsWith('/#')) {
+      return `/timelines/recommended${suffix.slice(1)}`;
+    }
+  }
+
+  return canonicalPath;
+}

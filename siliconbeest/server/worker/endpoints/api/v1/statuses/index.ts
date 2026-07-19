@@ -21,6 +21,7 @@ import rebloggedByApp from './rebloggedBy';
 import reactionsApp from './reactions';
 import historyApp from './history';
 import sourceApp from './source';
+import translateApp from './translate';
 
 const statuses = new Hono<{ Variables: AppVariables }>();
 
@@ -85,5 +86,8 @@ statuses.route('/', historyApp);
 
 // GET /api/v1/statuses/:id/source
 statuses.route('/', sourceApp);
+
+// POST /api/v1/statuses/:id/translate
+statuses.route('/', translateApp);
 
 export default statuses;

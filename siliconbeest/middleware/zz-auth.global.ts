@@ -10,7 +10,9 @@ const AUTH_TOKEN_COOKIE = 'siliconbeest_token';
 
 const AUTH_ONLY_PREFIXES = [
   '/home',
+  '/recommended',
   '/timelines/home',
+  '/timelines/recommended',
   '/timelines/social',
   '/notifications',
   '/conversations',

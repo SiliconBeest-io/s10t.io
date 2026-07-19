@@ -6,6 +6,10 @@ import { requireScopeForMethod } from '../../../../middleware/scopeCheck';
 import { getAllSettings, setSettings } from '../../../../services/instance';
 import { CONTRIBUTION_EVENTS, contributionSettingKey } from '../../../../services/contribution';
 import { updateInvitationSettings } from '../../../../services/invitationCredits';
+import {
+	WORKERS_AI_FEATURE_SETTING_KEYS,
+	cacheWorkersAiFeatureFlags,
+} from '../../../../services/workersAiFeatures';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -47,6 +51,11 @@ app.patch('/', async (c) => {
 			return c.json({ error: `${key} must be 0 or 1` }, 422);
 		}
 	}
+	for (const key of Object.values(WORKERS_AI_FEATURE_SETTING_KEYS)) {
+		if (body[key] !== undefined && body[key] !== '0' && body[key] !== '1') {
+			return c.json({ error: `${key} must be 0 or 1` }, 422);
+		}
+	}
 	if (body.invite_credit_max_per_account !== undefined
 		&& !isSafeSettingInteger(body.invite_credit_max_per_account, 0)) {
 		return c.json({ error: 'invite_credit_max_per_account must be an integer between 0 and 1000000000' }, 422);
@@ -82,6 +91,9 @@ app.patch('/', async (c) => {
 
 	// Return the full settings after update
 	const settings = await getAllSettings();
+	if (Object.values(WORKERS_AI_FEATURE_SETTING_KEYS).some((key) => body[key] !== undefined)) {
+		await cacheWorkersAiFeatureFlags(settings);
+	}
 	return c.json(settings);
 });
 

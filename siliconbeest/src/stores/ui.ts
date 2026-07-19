@@ -7,7 +7,7 @@ import {
 } from '@/api/mastodon/preferences';
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ColumnType =
+export type StandardColumnType =
   | 'home'
   | 'social'
   | 'local'
@@ -15,14 +15,16 @@ export type ColumnType =
   | 'notifications'
   | 'search'
   | 'follow_requests';
+export type ColumnType = 'recommended' | StandardColumnType;
 
 const THEME_KEY = 'siliconbeest_theme';
 const MOBILE_COLUMN_KEY = 'siliconbeest_mobile_column';
 const DEFAULT_COLUMNS: ColumnType[] = [];
 /** Column types the Aurora design's mobile deck can render. */
-export const ALL_COLUMNS: ColumnType[] = ['home', 'local', 'federated', 'notifications'];
+export const ALL_COLUMNS: StandardColumnType[] = ['home', 'local', 'federated', 'notifications'];
 /** Every column type (superset — the deck design supports them all). */
 const VALID_MOBILE_COLUMNS: ColumnType[] = [
+  'recommended',
   'home',
   'social',
   'local',

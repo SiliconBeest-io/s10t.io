@@ -28,6 +28,14 @@ SiliconBeest is a **GitHub Template Repository**. Deploy your own Fediverse inst
 
 ---
 
+## Documentation
+
+- Deployment: [English](docs/deploy/README.md) | [한국어](docs/deploy/README.ko.md)
+- Architecture: [English](docs/ARCHITECTURE_EN.md) | [한국어](docs/ARCHITECTURE_KO.md)
+- Optional Workers AI: [English](docs/WORKERS_AI.md) | [한국어](docs/WORKERS_AI.ko.md)
+
+---
+
 ## Features
 
 ### Mastodon API Compatibility

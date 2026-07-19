@@ -9,6 +9,7 @@ import { SUPPORTED_LOCALES, setDisplayLocale } from '@/i18n'
 import { ref, computed, onMounted } from 'vue'
 import { apiFetch } from '@/api/client'
 import { withCurrentDesign } from '@/utils/safeRedirect'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 import Avatar from '../common/Avatar.vue'
 
 const { t, locale } = useI18n()
@@ -17,9 +18,13 @@ const auth = useAuthStore()
 const ui = useUiStore()
 const instanceStore = useInstanceStore()
 const notifStore = useNotificationsStore()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
-const navItems = [
+const navItems = computed(() => [
   { key: 'home', path: '/home', icon: '🏠' },
+  ...(recommendedAvailable.value
+    ? [{ key: 'recommended', path: '/recommended', icon: '✨' }]
+    : []),
   { key: 'local_timeline', path: '/explore/local', icon: '👥' },
   { key: 'federated_timeline', path: '/explore/public', icon: '🌐' },
   { key: 'notifications', path: '/notifications', icon: '🔔' },
@@ -29,7 +34,7 @@ const navItems = [
   { key: 'lists', path: '/lists', icon: '📋' },
   { key: 'followed_tags', path: '/followed_tags', icon: '#️⃣' },
   { key: 'directory', path: '/directory', icon: '📖' },
-]
+])
 
 const myProfilePath = computed(() => {
   const acct = auth.currentUser?.acct || auth.currentUser?.username
@@ -82,9 +87,10 @@ function handleLocaleChange(event: Event) {
             :to="designedPath(item.path)"
             class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-lg font-medium transition-colors hover:bg-gray-100 dark:hover:bg-gray-800 no-underline text-gray-900 dark:text-gray-100"
             active-class="bg-gray-100 dark:bg-gray-800 font-bold"
+            :data-recommended-nav="item.key === 'recommended' ? '' : undefined"
           >
             <span class="text-xl w-7 text-center" aria-hidden="true">{{ item.icon }}</span>
-            <span>{{ t(`nav.${item.key}`) }}</span>
+            <span>{{ t(item.key === 'recommended' ? 'timeline.ai_recommended_nav' : `nav.${item.key}`) }}</span>
             <span
               v-if="item.key === 'notifications' && notifStore.unreadCount > 0"
               class="ml-auto bg-red-500 text-white text-xs font-bold min-w-[20px] h-5 flex items-center justify-center px-1.5 rounded-full"

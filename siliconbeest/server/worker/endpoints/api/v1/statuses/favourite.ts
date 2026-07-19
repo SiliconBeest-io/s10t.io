@@ -13,6 +13,8 @@ import { Like } from '@fedify/fedify/vocab';
 import { generateUlid } from '../../../../utils/ulid';
 import { favouriteStatus } from '../../../../services/status';
 import { assertStatusInteractable } from '../../../../services/permissions';
+import { recordRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 const app = new Hono<HonoEnv>();
 
@@ -31,6 +33,17 @@ app.post('/:id/favourite', authRequired, requireScope('write:favourites'), async
   c.set('contributionApplied', created);
 
   if (created) {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      recordRecommendationActivity(currentAccountId, 'liked', statusId),
+      {
+        operation: 'record_recommendation_activity',
+        activityKind: 'liked',
+        accountId: currentAccountId,
+        statusId,
+      },
+    );
+
     // Create notification for the status author (don't notify yourself)
     const statusAuthorId = row.account_id as string;
     if (statusAuthorId !== currentAccountId) {

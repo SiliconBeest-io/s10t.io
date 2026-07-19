@@ -143,6 +143,8 @@
     "language": "帖文语言",
     "uploading": "正在上传媒体...",
     "alt_text": "替代文字（图片描述）",
+    "alt_generating": "正在生成 ALT 文本…",
+    "alt_generated_notice": "自动生成的 ALT 文本可能不准确。请检查并在需要时进行修改。",
     "alt_placeholder": "为视障用户描述这张图片的内容...",
     "cw_placeholder": "内容警告",
     "replying_to": "回复 {name}",
@@ -249,7 +251,14 @@
     "empty_hint": "关注一些用户或查看公共时间线以开始。",
     "new_posts": "{count} 条新帖文",
     "local_banner": "本站时间线显示本服务器所有用户的公开帖文。",
-    "federated_banner": "跨站时间线显示与本服务器互联的其他服务器的公开帖文。"
+    "federated_banner": "跨站时间线显示与本服务器互联的其他服务器的公开帖文。",
+    "recommended": "推荐",
+    "ai_recommended_nav": "AI 推荐",
+    "feed_selector": "选择时间线",
+    "ai_recommended": "AI 生成的推荐流",
+    "refresh_recommended": "刷新推荐",
+    "refreshing_recommended": "正在刷新...",
+    "recommended_failed": "无法生成 AI 推荐。"
   },
   "status": {
     "reply": "回复",
@@ -309,7 +318,12 @@
     "reblogs_count": "{count} 次转发",
     "engagement_empty": "没有可显示的账户。",
     "engagement_load_error": "无法加载账户列表。",
-    "engagement_login_required": "登录后即可查看谁与此帖文互动。"
+    "engagement_login_required": "登录后即可查看谁与此帖文互动。",
+    "translate": "翻译",
+    "translating": "翻译中...",
+    "show_original": "显示原文",
+    "translation_failed": "翻译失败，请重试。",
+    "translation_disclosure": "AI 翻译可能不准确。所用模型：{model}"
   },
   "notification": {
     "title": "通知",
@@ -969,6 +983,17 @@
     "smtp_test_success": "测试邮件已发送。",
     "smtp_test_fail": "测试邮件发送失败。请检查 SMTP 设置。",
     "saved": "设置已保存。",
+    "workers_ai": {
+      "title": "Workers AI",
+      "description": "可分别启用或停用每项可选 AI 功能。已停用的功能不会向用户显示。",
+      "unavailable": "Workers AI 当前不可用。请启用 WORKERS_AI_ENABLED 并部署 AI 绑定后再更改这些选项。",
+      "recommendation": "AI 推荐时间线",
+      "recommendation_help": "对符合条件的公开帖文和可进入首页信息流的帖文进行个性化排序。",
+      "translation": "AI 帖文翻译",
+      "translation_help": "允许用户翻译受支持的公开及不公开列出的帖文。",
+      "image_description": "自动生成 AI ALT 文本",
+      "image_description_help": "上传未填写描述的受支持图片时自动生成 ALT 文本。"
+    },
     "web_push": "浏览器推送通知",
     "web_push_description": "为用户启用浏览器推送通知。需要在服务器上配置 VAPID 密钥。",
     "web_push_enabled": "启用浏览器推送通知",

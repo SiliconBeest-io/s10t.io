@@ -4,6 +4,8 @@ import type { Status } from '@/types/mastodon';
 import { parseLinkHeader } from '@/api/client';
 import {
   getHomeTimeline,
+  getRecommendedTimeline,
+  getRecommendedTimelinePage,
   getSocialTimeline,
   getPublicTimeline,
   getTagTimeline,
@@ -13,7 +15,7 @@ import { playNewPostSound } from '@/utils/newPostSound';
 import { useStatusesStore } from './statuses';
 import { useAccountsStore } from './accounts';
 
-export type TimelineType = 'home' | 'social' | 'public' | 'local' | 'tag';
+export type TimelineType = 'home' | 'recommended' | 'social' | 'public' | 'local' | 'tag';
 export type AudibleTimelineScopeOwner = string | symbol;
 
 interface TimelineState {
@@ -22,6 +24,7 @@ interface TimelineState {
   loadingMore: boolean;
   hasMore: boolean;
   maxId?: string;
+  nextPage?: string;
   error: string | null;
   newStatusIds: string[];
 }
@@ -32,6 +35,8 @@ function createEmptyTimeline(): TimelineState {
     loading: false,
     loadingMore: false,
     hasMore: true,
+    maxId: undefined,
+    nextPage: undefined,
     error: null,
     newStatusIds: [],
   };
@@ -39,6 +44,13 @@ function createEmptyTimeline(): TimelineState {
 
 export const useTimelinesStore = defineStore('timelines', () => {
   const timelines = ref<Map<string, TimelineState>>(new Map());
+  // Initial loads supersede any older cursor request for the same feed. This
+  // prevents an old recommendation snapshot from being appended after refresh.
+  const requestGenerations = new Map<string, number>();
+  // Unlike the per-feed generations, this value never resets. Account changes
+  // can therefore invalidate an old request even when the next account starts
+  // the same feed at generation 1 again.
+  let lifecycleGeneration = 0;
   // Multiple streaming connections — one per stream type
   const streamingClients = ref<Map<string, StreamingClient>>(new Map());
   // Streams the user toggled off (LIVE toggle) — connectStream respects this
@@ -84,6 +96,15 @@ export const useTimelinesStore = defineStore('timelines', () => {
     return timelines.value.get(key)!;
   }
 
+  function isCurrentRequest(
+    key: string,
+    requestGeneration: number,
+    requestLifecycleGeneration: number,
+  ): boolean {
+    return lifecycleGeneration === requestLifecycleGeneration
+      && (requestGenerations.get(key) ?? 0) === requestGeneration;
+  }
+
   function cacheStatusesFromResponse(statuses: Status[]) {
     const statusStore = useStatusesStore();
     const accountStore = useAccountsStore();
@@ -104,6 +125,13 @@ export const useTimelinesStore = defineStore('timelines', () => {
     const key = getTimelineKey(type, opts?.tag);
     const timeline = getTimeline(type, opts?.tag);
     if (timeline.loading) return;
+    const requestGeneration = (requestGenerations.get(key) ?? 0) + 1;
+    requestGenerations.set(key, requestGeneration);
+    const requestLifecycleGeneration = lifecycleGeneration;
+    // The new initial request supersedes any cursor request already in flight.
+    // Clear its flag here because the stale request's finally block must not
+    // mutate state owned by this generation.
+    timeline.loadingMore = false;
     timeline.loading = true;
     timeline.error = null;
 
@@ -112,6 +140,11 @@ export const useTimelinesStore = defineStore('timelines', () => {
       switch (type) {
         case 'home':
           response = await getHomeTimeline({ token: opts?.token! });
+          break;
+        case 'recommended':
+          response = await getRecommendedTimeline({
+            token: opts?.token!,
+          });
           break;
         case 'social':
           response = await getSocialTimeline({ token: opts?.token! });
@@ -127,12 +160,15 @@ export const useTimelinesStore = defineStore('timelines', () => {
           break;
       }
 
+      if (!isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) return;
+
       cacheStatusesFromResponse(response.data);
       timeline.statusIds = response.data.map((s) => s.id);
 
       const links = parseLinkHeader(response.headers.get('Link'));
       timeline.hasMore = !!links.next;
-      if (response.data.length > 0) {
+      timeline.nextPage = links.next;
+      if (type !== 'recommended' && response.data.length > 0) {
         timeline.maxId = response.data[response.data.length - 1]!.id;
       }
 
@@ -156,19 +192,34 @@ export const useTimelinesStore = defineStore('timelines', () => {
         }
       }
     } catch (e) {
-      timeline.error = (e as Error).message;
+      if (isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) {
+        timeline.error = (e as Error).message;
+      }
     } finally {
-      timeline.loading = false;
+      if (isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) {
+        timeline.loading = false;
+      }
     }
+  }
+
+  /** Clear cursor/results and ask the server for a newly generated recommendation snapshot. */
+  async function refreshRecommendedTimeline(token: string) {
+    const timeline = getTimeline('recommended');
+    if (timeline.loading) return;
+    Object.assign(timeline, createEmptyTimeline());
+    await fetchTimeline('recommended', { token });
   }
 
   async function fetchMore(
     type: TimelineType,
     opts?: { tag?: string; token?: string },
   ) {
+    const key = getTimelineKey(type, opts?.tag);
     const timeline = getTimeline(type, opts?.tag);
     if (timeline.loadingMore || !timeline.hasMore) return;
 
+    const requestGeneration = requestGenerations.get(key) ?? 0;
+    const requestLifecycleGeneration = lifecycleGeneration;
     timeline.loadingMore = true;
     timeline.error = null;
 
@@ -179,6 +230,13 @@ export const useTimelinesStore = defineStore('timelines', () => {
       switch (type) {
         case 'home':
           response = await getHomeTimeline({ ...paginationOpts, token: opts?.token! });
+          break;
+        case 'recommended':
+          if (!timeline.nextPage) {
+            timeline.hasMore = false;
+            return;
+          }
+          response = await getRecommendedTimelinePage(timeline.nextPage, opts?.token!);
           break;
         case 'social':
           response = await getSocialTimeline({ ...paginationOpts, token: opts?.token! });
@@ -194,18 +252,33 @@ export const useTimelinesStore = defineStore('timelines', () => {
           break;
       }
 
+      if (!isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) return;
+
       cacheStatusesFromResponse(response.data);
       timeline.statusIds.push(...response.data.map((s) => s.id));
 
       const links = parseLinkHeader(response.headers.get('Link'));
       timeline.hasMore = !!links.next;
-      if (response.data.length > 0) {
+      timeline.nextPage = links.next;
+      if (type !== 'recommended' && response.data.length > 0) {
         timeline.maxId = response.data[response.data.length - 1]!.id;
       }
     } catch (e) {
-      timeline.error = (e as Error).message;
+      if (isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) {
+        timeline.error = (e as Error).message;
+        // Recommendation pagination uses an opaque, server-owned snapshot.
+        // Once that cursor is rejected it cannot be repaired client-side, so
+        // stop automatic/infinite-scroll retries until a manual refresh starts
+        // a new snapshot.
+        if (type === 'recommended') {
+          timeline.hasMore = false;
+          timeline.nextPage = undefined;
+        }
+      }
     } finally {
-      timeline.loadingMore = false;
+      if (isCurrentRequest(key, requestGeneration, requestLifecycleGeneration)) {
+        timeline.loadingMore = false;
+      }
     }
   }
 
@@ -296,9 +369,15 @@ export const useTimelinesStore = defineStore('timelines', () => {
 
     const statusStore = useStatusesStore();
     const accountStore = useAccountsStore();
+    const streamLifecycleGeneration = lifecycleGeneration;
 
     const client = new StreamingClient(token, stream, {
       onUpdate(status: Status) {
+        if (
+          lifecycleGeneration !== streamLifecycleGeneration
+          || streamingClients.value.get(stream) !== client
+        ) return;
+
         statusStore.cacheStatus(status);
         accountStore.cacheAccount(status.account);
         if (status.reblog) {
@@ -319,9 +398,19 @@ export const useTimelinesStore = defineStore('timelines', () => {
         }
       },
       onDelete(statusId: string) {
+        if (
+          lifecycleGeneration !== streamLifecycleGeneration
+          || streamingClients.value.get(stream) !== client
+        ) return;
+
         removeStatus(statusId);
       },
       onStatusUpdate(status: Status) {
+        if (
+          lifecycleGeneration !== streamLifecycleGeneration
+          || streamingClients.value.get(stream) !== client
+        ) return;
+
         statusStore.cacheStatus(status);
         accountStore.cacheAccount(status.account);
         if (status.reblog) {
@@ -329,9 +418,19 @@ export const useTimelinesStore = defineStore('timelines', () => {
         }
       },
       onReaction(statusId: string) {
+        if (
+          lifecycleGeneration !== streamLifecycleGeneration
+          || streamingClients.value.get(stream) !== client
+        ) return;
+
         statusStore.pingReaction(statusId);
       },
       onEmojiUpdate(emojis) {
+        if (
+          lifecycleGeneration !== streamLifecycleGeneration
+          || streamingClients.value.get(stream) !== client
+        ) return;
+
         // Cache new emojis and re-render affected statuses
         if (!emojiCache.value) emojiCache.value = new Map();
         for (const emoji of emojis) {
@@ -361,12 +460,32 @@ export const useTimelinesStore = defineStore('timelines', () => {
     }
   }
 
+  /**
+   * Drop every account-scoped timeline value and invalidate outstanding work.
+   * Existing state objects are emptied before the map is replaced so mounted
+   * consumers holding an old reference cannot keep rendering private results.
+   */
+  function reset() {
+    lifecycleGeneration += 1;
+    disconnectStream();
+
+    for (const timeline of timelines.value.values()) {
+      Object.assign(timeline, createEmptyTimeline());
+    }
+    timelines.value = new Map();
+    requestGenerations.clear();
+    pausedStreams.value = new Set();
+    emojiCache.value = null;
+  }
+
   return {
     timelines,
     streamingClients,
     pausedStreams,
+    reset,
     getTimeline,
     fetchTimeline,
+    refreshRecommendedTimeline,
     fetchMore,
     prependStatus,
     showNewStatuses,

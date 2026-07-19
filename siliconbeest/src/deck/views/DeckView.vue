@@ -10,6 +10,7 @@ import DeckColumn from '../components/DeckColumn.vue'
 import DeckNotificationsColumn from '../components/DeckNotificationsColumn.vue'
 import DeckSearchColumn from '../components/DeckSearchColumn.vue'
 import DeckFollowRequestsColumn from '../components/DeckFollowRequestsColumn.vue'
+import DeckRecommendedColumn from '../components/DeckRecommendedColumn.vue'
 import { useDeckColumns } from '../composables/useDeckColumns'
 
 const { t } = useI18n()
@@ -44,6 +45,7 @@ function onDeckWheel(event: WheelEvent) {
 }
 
 const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
+  recommended: 'timeline.ai_recommended_nav',
   home: 'deck.col_home',
   social: 'deck.col_social',
   local: 'deck.col_local',
@@ -59,14 +61,23 @@ const MOBILE_LABEL_KEYS: Record<ColumnType, string> = {
 // shares it, and it persists across visits.
 const mobileColumns = configRows
 const activeMobile = computed<ColumnType>(() =>
-  mobileColumns.value.includes(ui.mobileColumn) ? ui.mobileColumn : (mobileColumns.value[0] ?? 'home'),
+  mobileColumns.value.includes(ui.mobileColumn)
+    ? ui.mobileColumn
+    : mobileColumns.value.includes('home')
+      ? 'home'
+      : (mobileColumns.value[0] ?? 'home'),
 )
 
 const SOUND_SCOPE = 'deck-home'
 
 function toTimelineType(column: ColumnType): TimelineType | null {
   if (column === 'federated') return 'public'
-  if (column === 'home' || column === 'social' || column === 'local') return column
+  if (
+    column === 'recommended'
+    || column === 'home'
+    || column === 'social'
+    || column === 'local'
+  ) return column
   return null
 }
 
@@ -111,7 +122,8 @@ watch(activeMobile, async (col) => {
       @wheel="onDeckWheel"
     >
       <template v-for="key in columns" :key="key">
-        <DeckNotificationsColumn v-if="key === 'notifications'" />
+        <DeckRecommendedColumn v-if="key === 'recommended'" />
+        <DeckNotificationsColumn v-else-if="key === 'notifications'" />
         <DeckSearchColumn v-else-if="key === 'search'" />
         <DeckFollowRequestsColumn v-else-if="key === 'follow_requests'" />
         <DeckColumn v-else :type="key" />
@@ -155,7 +167,8 @@ watch(activeMobile, async (col) => {
           class="h-full min-h-0"
         >
           <template v-if="visitedMobile.has(key)">
-            <DeckNotificationsColumn v-if="key === 'notifications'" fluid />
+            <DeckRecommendedColumn v-if="key === 'recommended'" fluid />
+            <DeckNotificationsColumn v-else-if="key === 'notifications'" fluid />
             <DeckSearchColumn v-else-if="key === 'search'" fluid />
             <DeckFollowRequestsColumn v-else-if="key === 'follow_requests'" fluid />
             <DeckColumn v-else :type="key" fluid />

@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue';
 import type { StatusVisibility, MediaAttachment, Status, QuotePolicy } from '@/types/mastodon';
 import { createStatus, editStatus, getStatusSource } from '@/api/mastodon/statuses';
 import { updateCredentials } from '@/api/mastodon/accounts';
-import { uploadMedia } from '@/api/mastodon/media';
+import { pollMediaDescription, uploadMedia } from '@/api/mastodon/media';
 import { useAuthStore } from './auth';
 import { useStatusesStore } from './statuses';
 import { useTimelinesStore } from './timelines';
@@ -54,6 +54,12 @@ export const useComposeStore = defineStore('compose', () => {
   const mediaAttachments = ref<MediaAttachment[]>([]);
   const uploading = ref(false);
   const publishing = ref(false);
+  const activeMediaDescriptionPolls = new Map<string, {
+    controller: AbortController;
+    promise: Promise<MediaAttachment | null>;
+  }>();
+  const manuallyEditedMediaDescriptions = new Set<string>();
+  const unreviewedGeneratedMediaDescriptionIds = ref<string[]>([]);
   // Incremented on each successful publish — composers watch this to clear
   // their local drafts only once the post has really gone out
   const publishedTick = ref(0);
@@ -79,6 +85,10 @@ export const useComposeStore = defineStore('compose', () => {
   );
 
   function reset() {
+    for (const poll of activeMediaDescriptionPolls.values()) poll.controller.abort();
+    activeMediaDescriptionPolls.clear();
+    manuallyEditedMediaDescriptions.clear();
+    unreviewedGeneratedMediaDescriptionIds.value = [];
     text.value = '';
     objectType.value = 'Note';
     title.value = '';
@@ -197,13 +207,126 @@ export const useComposeStore = defineStore('compose', () => {
     try {
       const { data } = await uploadMedia(file, { token: auth.token });
       mediaAttachments.value.push(data);
+      if (data.description_generation_status === 'pending') {
+        void startMediaDescriptionPolling(data, auth.token);
+      } else if (
+        data.description_generation_status === 'complete'
+        && data.description
+      ) {
+        markGeneratedMediaDescriptionForReview(data.id);
+      }
       return data;
     } finally {
       uploading.value = false;
     }
   }
 
-  function removeMedia(id: string) {
+  const hasUnreviewedGeneratedAltText = computed(
+    () => unreviewedGeneratedMediaDescriptionIds.value.length > 0,
+  );
+
+  function markGeneratedMediaDescriptionForReview(id: string) {
+    if (!unreviewedGeneratedMediaDescriptionIds.value.includes(id)) {
+      unreviewedGeneratedMediaDescriptionIds.value.push(id);
+    }
+  }
+
+  function markMediaDescriptionReviewed(id: string) {
+    unreviewedGeneratedMediaDescriptionIds.value =
+      unreviewedGeneratedMediaDescriptionIds.value.filter((mediaId) => mediaId !== id);
+  }
+
+  function setLocalMediaDescriptionStatus(
+    media: MediaAttachment,
+    status: NonNullable<MediaAttachment['description_generation_status']>,
+  ) {
+    media.description_generation_status = status;
+    const attached = mediaAttachments.value.find((item) => item.id === media.id);
+    if (attached && attached !== media) attached.description_generation_status = status;
+  }
+
+  function startMediaDescriptionPolling(
+    media: MediaAttachment,
+    token: string,
+  ): Promise<MediaAttachment | null> {
+    const existing = activeMediaDescriptionPolls.get(media.id);
+    if (existing) return existing.promise;
+
+    const controller = new AbortController();
+    const promise = pollMediaDescription(media.id, token, { signal: controller.signal })
+      .then((latest) => {
+        if (
+          controller.signal.aborted
+          || manuallyEditedMediaDescriptions.has(media.id)
+          || !latest
+        ) {
+          return null;
+        }
+
+        const resolved = latest.description_generation_status === 'pending'
+          ? { ...latest, description_generation_status: 'failed' as const }
+          : latest;
+        Object.assign(media, resolved);
+        const attached = mediaAttachments.value.find((item) => item.id === media.id);
+        if (attached && attached !== media) Object.assign(attached, resolved);
+        if (
+          resolved.description_generation_status === 'complete'
+          && resolved.description
+        ) {
+          markGeneratedMediaDescriptionForReview(media.id);
+        }
+        return resolved;
+      })
+      .catch(() => {
+        if (
+          !controller.signal.aborted
+          && !manuallyEditedMediaDescriptions.has(media.id)
+        ) {
+          setLocalMediaDescriptionStatus(media, 'failed');
+        }
+        return null;
+      })
+      .finally(() => {
+        if (activeMediaDescriptionPolls.get(media.id)?.controller === controller) {
+          activeMediaDescriptionPolls.delete(media.id);
+        }
+      });
+
+    activeMediaDescriptionPolls.set(media.id, { controller, promise });
+    return promise;
+  }
+
+  function waitForMediaDescription(id: string): Promise<MediaAttachment | null> {
+    const active = activeMediaDescriptionPolls.get(id);
+    if (active) return active.promise;
+    return Promise.resolve(mediaAttachments.value.find((media) => media.id === id) ?? null);
+  }
+
+  function markMediaDescriptionEdited(id: string) {
+    manuallyEditedMediaDescriptions.add(id);
+    activeMediaDescriptionPolls.get(id)?.controller.abort();
+    activeMediaDescriptionPolls.delete(id);
+  }
+
+  function resumeMediaDescriptionPolling(id: string) {
+    const auth = useAuthStore();
+    const media = mediaAttachments.value.find((item) => item.id === id);
+    manuallyEditedMediaDescriptions.delete(id);
+    if (
+      auth.token
+      && media?.description_generation_status === 'pending'
+    ) {
+      void startMediaDescriptionPolling(media, auth.token);
+    }
+  }
+
+  function removeMedia(id: string, cancelDescriptionPolling = true) {
+    if (cancelDescriptionPolling) {
+      activeMediaDescriptionPolls.get(id)?.controller.abort();
+      activeMediaDescriptionPolls.delete(id);
+      manuallyEditedMediaDescriptions.delete(id);
+      markMediaDescriptionReviewed(id);
+    }
     mediaAttachments.value = mediaAttachments.value.filter((m) => m.id !== id);
   }
 
@@ -302,6 +425,7 @@ export const useComposeStore = defineStore('compose', () => {
     remaining,
     characterLimit,
     canPublish,
+    hasUnreviewedGeneratedAltText,
     reset,
     setReplyTo,
     setQuote,
@@ -309,6 +433,10 @@ export const useComposeStore = defineStore('compose', () => {
     setEditing,
     beginEditing,
     addMedia,
+    waitForMediaDescription,
+    markMediaDescriptionEdited,
+    markMediaDescriptionReviewed,
+    resumeMediaDescriptionPolling,
     removeMedia,
     publish,
   };

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useNotificationsStore } from '@/stores/notifications'
 import { withCurrentDesign } from '@/utils/safeRedirect'
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -13,6 +14,7 @@ const ui = useUiStore()
 const notifStore = useNotificationsStore()
 const router = useRouter()
 const route = useRoute()
+const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 
 const menuOpen = ref(false)
 const navigating = ref(false)
@@ -89,6 +91,15 @@ onBeforeRouteLeave(() => {
         <button @click="navigateTo(profilePath)" class="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <span class="text-lg">👤</span>
           <span>{{ t('nav.profile') }}</span>
+        </button>
+        <button
+          v-if="recommendedAvailable"
+          data-recommended-nav
+          class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+          @click="navigateTo('/recommended')"
+        >
+          <span class="text-lg" aria-hidden="true">✨</span>
+          <span>{{ t('timeline.ai_recommended_nav') }}</span>
         </button>
         <button @click="navigateTo('/explore/local')" class="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-left text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
           <span class="text-lg">👥</span>

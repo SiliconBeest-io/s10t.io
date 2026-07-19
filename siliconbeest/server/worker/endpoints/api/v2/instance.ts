@@ -6,6 +6,12 @@ import { MASTODON_V2_VERSION } from '../../../version';
 import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
 import { getRepositoryUrl } from '../../../utils/repository';
 import { serializeAccount } from '../../../utils/mastodonSerializer';
+import { isWorkersAiEnabled } from '../../../services/workersAi';
+import {
+  WORKERS_AI_FEATURE_SETTING_KEYS,
+  hydrateWorkersAiFeatureFlagsCache,
+  parseWorkersAiFeatureSettings,
+} from '../../../services/workersAiFeatures';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -18,6 +24,7 @@ app.get('/', async (c) => {
     'site_contact_email', 'site_contact_username', 'site_landing_markdown',
     'terms_of_service', 'privacy_policy', 'accent_color',
     'require_email_verification',
+    ...Object.values(WORKERS_AI_FEATURE_SETTING_KEYS),
   ]).catch((): Record<string, string> => ({}));
 
   // Turnstile settings (cached in KV)
@@ -25,6 +32,9 @@ app.get('/', async (c) => {
 
   const title = await getInstanceTitle().catch(() => env.INSTANCE_TITLE);
   const registrationMode = dbSettings.registration_mode || env.REGISTRATION_MODE;
+  const workersAiEnabled = isWorkersAiEnabled(env);
+  const workersAiFeatures = parseWorkersAiFeatureSettings(dbSettings);
+  const workersAiFeatureCacheReady = await hydrateWorkersAiFeatureFlagsCache(dbSettings);
 
   // Usage stats + rules (parallel)
   const [stats, ruleRows] = await Promise.all([
@@ -94,7 +104,18 @@ app.get('/', async (c) => {
         max_expiration: 2629746,
       },
       translation: {
-        enabled: false,
+        enabled: workersAiEnabled
+          && workersAiFeatureCacheReady
+          && workersAiFeatures.translation,
+      },
+      ai: {
+        enabled: workersAiEnabled,
+        recommended_timeline: workersAiEnabled
+          && workersAiFeatureCacheReady
+          && workersAiFeatures.recommendation,
+        image_description: workersAiEnabled
+          && workersAiFeatureCacheReady
+          && workersAiFeatures.imageDescription,
       },
       turnstile: {
         enabled: turnstile.enabled && !!turnstile.siteKey,

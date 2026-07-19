@@ -1,5 +1,6 @@
 import { computed } from 'vue';
 import { useUiStore, type ColumnType } from '@/stores/ui';
+import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature';
 
 /**
  * Deck column configuration — which columns the multi-column deck shows and
@@ -11,6 +12,7 @@ export type DeckColumnType = ColumnType;
 
 /** Every column type the deck can host, in default order. */
 export const DECK_COLUMN_TYPES: ColumnType[] = [
+  'recommended',
   'home',
   'social',
   'local',
@@ -22,16 +24,26 @@ export const DECK_COLUMN_TYPES: ColumnType[] = [
 
 export function useDeckColumns() {
   const ui = useUiStore();
+  const { available: recommendedAvailable } = useRecommendedTimelineFeature();
+
+  const availableColumnTypes = computed<ColumnType[]>(() =>
+    DECK_COLUMN_TYPES.filter(
+      (type) => type !== 'recommended' || recommendedAvailable.value,
+    ),
+  );
 
   /** Enabled columns in display order (deduped, unknown values dropped). */
   const columns = computed<ColumnType[]>(() =>
-    ui.columns.filter((c, i) => DECK_COLUMN_TYPES.includes(c) && ui.columns.indexOf(c) === i),
+    ui.columns.filter(
+      (column, index) =>
+        availableColumnTypes.value.includes(column) && ui.columns.indexOf(column) === index,
+    ),
   );
 
   /** All column types: enabled ones first (in order), then disabled ones. */
   const configRows = computed<ColumnType[]>(() => [
     ...columns.value,
-    ...DECK_COLUMN_TYPES.filter((t) => !columns.value.includes(t)),
+    ...availableColumnTypes.value.filter((type) => !columns.value.includes(type)),
   ]);
 
   function isEnabled(type: ColumnType): boolean {
@@ -40,6 +52,7 @@ export function useDeckColumns() {
 
   /** Add a column (at the end) or remove it, preserving the rest's order. */
   function toggle(type: ColumnType) {
+    if (!availableColumnTypes.value.includes(type)) return;
     if (isEnabled(type)) {
       ui.setColumns(columns.value.filter((c) => c !== type));
     } else {

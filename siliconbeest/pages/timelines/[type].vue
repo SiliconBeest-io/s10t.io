@@ -3,7 +3,7 @@ import DeckTimelineView from '@/deck/views/DeckTimelineView.vue';
 
 definePageMeta({
   name: 'timeline',
-  validate: (route) => ['home', 'social', 'local', 'federated'].includes(String(route.params.type)),
+  validate: (route) => ['home', 'recommended', 'social', 'local', 'federated'].includes(String(route.params.type)),
 });
 </script>
 

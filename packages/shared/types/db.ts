@@ -213,7 +213,8 @@ export type MediaAttachmentRow = {
   readonly file_size: number;
   readonly thumbnail_key: string | null;
   readonly remote_url: string | null;
-  readonly description: string;
+  /** NULL is used transiently while automatic ALT generation is pending. */
+  readonly description: string | null;
   readonly blurhash: string | null;
   readonly width: number | null;
   readonly height: number | null;
@@ -272,6 +273,15 @@ export type FavouriteRow = {
   readonly status_id: string;
   readonly uri: string | null;
   readonly created_at: string;
+};
+
+export type RecommendationActivityKind = 'posted' | 'reposted' | 'liked';
+
+export type RecommendationActivityRow = {
+  readonly account_id: string;
+  readonly activity_kind: RecommendationActivityKind;
+  readonly status_id: string;
+  readonly occurred_at: string;
 };
 
 export type BlockRow = {

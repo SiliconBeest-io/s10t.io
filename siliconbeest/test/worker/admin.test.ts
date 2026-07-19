@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test';
+import { env, SELF } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applyMigration, createTestUser, authHeaders } from './helpers';
 
@@ -90,6 +90,86 @@ describe('Admin API', () => {
       });
       // Should be 403 if the endpoint exists, or 404 if not
       expect([403, 404]).toContain(res.status);
+    });
+
+    it('stores the three Workers AI switches independently without a migration seed', async () => {
+      const before = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        headers: authHeaders(admin.token),
+      });
+      expect(before.status).toBe(200);
+      expect(await before.json<Record<string, string>>()).not.toHaveProperty(
+        'workers_ai_recommendation_enabled',
+      );
+
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({
+          workers_ai_recommendation_enabled: '1',
+          workers_ai_translation_enabled: '0',
+          workers_ai_image_description_enabled: '1',
+        }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json<Record<string, string>>()).resolves.toMatchObject({
+        workers_ai_recommendation_enabled: '1',
+        workers_ai_translation_enabled: '0',
+        workers_ai_image_description_enabled: '1',
+      });
+
+      const instanceResponse = await SELF.fetch(`${BASE}/api/v2/instance`);
+      const instance = await instanceResponse.json<{
+        configuration: {
+          translation: { enabled: boolean };
+          ai: {
+            enabled: boolean;
+            recommended_timeline: boolean;
+            image_description: boolean;
+          };
+        };
+      }>();
+      expect(instance.configuration.translation.enabled).toBe(false);
+      expect(instance.configuration.ai).toEqual({
+        enabled: false,
+        recommended_timeline: false,
+        image_description: false,
+      });
+
+      const bindings = env as unknown as Record<string, unknown>;
+      const previousEnabled = bindings.WORKERS_AI_ENABLED;
+      const previousAi = bindings.AI;
+      const hadEnabled = Object.prototype.hasOwnProperty.call(bindings, 'WORKERS_AI_ENABLED');
+      const hadAi = Object.prototype.hasOwnProperty.call(bindings, 'AI');
+      bindings.WORKERS_AI_ENABLED = true;
+      bindings.AI = { run: async () => ({}) };
+      try {
+        const enabledResponse = await SELF.fetch(`${BASE}/api/v2/instance`);
+        const enabledInstance = await enabledResponse.json<typeof instance>();
+        expect(enabledInstance.configuration.translation.enabled).toBe(false);
+        expect(enabledInstance.configuration.ai).toEqual({
+          enabled: true,
+          recommended_timeline: true,
+          image_description: true,
+        });
+      } finally {
+        if (hadEnabled) bindings.WORKERS_AI_ENABLED = previousEnabled;
+        else Reflect.deleteProperty(bindings, 'WORKERS_AI_ENABLED');
+        if (hadAi) bindings.AI = previousAi;
+        else Reflect.deleteProperty(bindings, 'AI');
+      }
+    });
+
+    it.each([
+      'workers_ai_recommendation_enabled',
+      'workers_ai_translation_enabled',
+      'workers_ai_image_description_enabled',
+    ])('rejects malformed %s values', async (key) => {
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({ [key]: 'true' }),
+      });
+      expect(response.status).toBe(422);
     });
   });
 });

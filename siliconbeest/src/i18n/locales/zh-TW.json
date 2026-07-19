@@ -143,6 +143,8 @@
     "language": "貼文語言",
     "uploading": "上傳媒體中...",
     "alt_text": "替代文字（圖片描述）",
+    "alt_generating": "正在產生 ALT 文字…",
+    "alt_generated_notice": "自動產生的 ALT 文字可能不準確。請檢查並在需要時修改。",
     "alt_placeholder": "為視障使用者描述這張圖片的內容...",
     "cw_placeholder": "內容警告",
     "replying_to": "回覆 {name}",
@@ -249,7 +251,14 @@
     "empty_hint": "追蹤一些人或查看公開時間軸來開始吧。",
     "new_posts": "{count} 則新貼文",
     "local_banner": "本站時間軸顯示本伺服器所有使用者的公開貼文。",
-    "federated_banner": "聯邦時間軸顯示與本伺服器互聯的其他伺服器的公開貼文。"
+    "federated_banner": "聯邦時間軸顯示與本伺服器互聯的其他伺服器的公開貼文。",
+    "recommended": "推薦",
+    "ai_recommended_nav": "AI 推薦",
+    "feed_selector": "選擇時間軸",
+    "ai_recommended": "AI 產生的推薦動態",
+    "refresh_recommended": "重新整理推薦",
+    "refreshing_recommended": "正在重新整理...",
+    "recommended_failed": "無法產生 AI 推薦。"
   },
   "status": {
     "reply": "回覆",
@@ -309,7 +318,12 @@
     "reblogs_count": "{count} 次轉發",
     "engagement_empty": "沒有可顯示的帳號。",
     "engagement_load_error": "無法載入帳號列表。",
-    "engagement_login_required": "登入後即可查看誰與此貼文互動。"
+    "engagement_login_required": "登入後即可查看誰與此貼文互動。",
+    "translate": "翻譯",
+    "translating": "翻譯中...",
+    "show_original": "顯示原文",
+    "translation_failed": "翻譯失敗，請再試一次。",
+    "translation_disclosure": "AI 翻譯可能不準確。使用模型：{model}"
   },
   "notification": {
     "title": "通知",
@@ -969,6 +983,17 @@
     "smtp_test_success": "測試郵件已寄出。",
     "smtp_test_fail": "測試郵件寄送失敗。請檢查 SMTP 設定。",
     "saved": "設定已儲存。",
+    "workers_ai": {
+      "title": "Workers AI",
+      "description": "可分別啟用或停用每項選用 AI 功能。已停用的功能不會向使用者顯示。",
+      "unavailable": "Workers AI 目前無法使用。請啟用 WORKERS_AI_ENABLED 並部署 AI 綁定後再變更這些選項。",
+      "recommendation": "AI 推薦時間軸",
+      "recommendation_help": "將符合條件的公開貼文與可進入首頁動態的貼文進行個人化排序。",
+      "translation": "AI 貼文翻譯",
+      "translation_help": "允許使用者翻譯支援的公開及未列出貼文。",
+      "image_description": "自動產生 AI ALT 文字",
+      "image_description_help": "上傳未填寫描述的支援圖片時自動產生 ALT 文字。"
+    },
     "web_push": "網頁推播通知",
     "web_push_description": "為使用者啟用瀏覽器推播通知。需要在伺服器上設定 VAPID 金鑰。",
     "web_push_enabled": "啟用網頁推播通知",

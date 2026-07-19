@@ -59,6 +59,17 @@ describe('UI Store', () => {
       });
     });
 
+    it('preserves the optional recommended deck column in server preferences', () => {
+      const store = useUiStore();
+
+      store.hydrateFromServer('server-token', {
+        'ui:columns': '["recommended","home"]',
+        'ui:show_trending': null,
+      });
+
+      expect(store.columns).toEqual(['recommended', 'home']);
+    });
+
     it.each([
       ['missing response', null],
       ['null preference', { 'ui:columns': null, 'ui:show_trending': null }],

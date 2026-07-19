@@ -11,6 +11,11 @@ import { generateUlid } from '../../../../utils/ulid';
 import { deleteStatus } from '../../../../services/status';
 import { sendStreamEventToDurableObject } from '../../../../services/streaming';
 import { canBroadcastStatusToPublicStreams } from '../../../../../../../packages/shared/permissions';
+import {
+  removeRecommendationActivitiesForStatus,
+  removeRecommendationActivity,
+} from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -22,6 +27,19 @@ app.delete('/:id', authRequired, requireScope('write:statuses'), async (c) => {
   const domain = env.INSTANCE_DOMAIN;
 
   const { status: row } = await deleteStatus(statusId, currentAccountId);
+  const cleanupTask = row.reblog_of_id
+    ? removeRecommendationActivity(currentAccountId, 'reposted', row.reblog_of_id)
+    : removeRecommendationActivitiesForStatus(statusId);
+  await scheduleBackgroundTask(
+    () => c.executionCtx,
+    cleanupTask,
+    {
+      operation: 'remove_recommendation_activity',
+      activityKind: row.reblog_of_id ? 'reposted' : 'status_deleted',
+      accountId: currentAccountId,
+      statusId: row.reblog_of_id ?? statusId,
+    },
+  );
 
   // Federation: deliver Delete(Note) to followers if status is local
   if (row.local === 1) {
