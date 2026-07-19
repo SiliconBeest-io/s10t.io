@@ -127,11 +127,14 @@ describe('Search API', () => {
         object: {
           type: 'Article',
           id: articleUri,
-          nameMap: { en: 'A long-form title', ko: '장문 제목' },
+          name: 'A long-form title',
+          nameMap: { en: 'A long-form title', 'ko-Hang-KR': '장문 제목' },
           attributedTo: remoteActorUri,
           to: 'as:Public',
-          contentMap: { en: '<h1>Long-form post</h1><p>Article body</p>', ko: '<h1>장문</h1><p>본문</p>' },
-          summaryMap: { en: 'A compact summary', ko: '짧은 요약' },
+          content: '<h1>Long-form post</h1><p>Article body</p>',
+          contentMap: { en: '<h1>Long-form post</h1><p>Article body</p>', 'ko-Hang-KR': '<h1>장문</h1><p>본문</p>' },
+          summary: 'A compact summary',
+          summaryMap: { en: 'A compact summary', 'ko-Hang-KR': '짧은 요약' },
           url: [
             'https://article-author.example/2026/07/long-form-post',
             { type: 'Link', href: 'https://article-author.example/ko/long-form-post', hreflang: 'ko' },
@@ -142,8 +145,23 @@ describe('Search API', () => {
       }, user.accountId, { fanout: false, notify: false });
 
       const stored = await env.DB.prepare(
-        'SELECT id, object_type, title, text, content, content_warning, language, url, visibility FROM statuses WHERE uri = ?1 LIMIT 1',
-      ).bind(articleUri).first<{ id: string; object_type: string; title: string; text: string; content: string; content_warning: string; language: string; url: string; visibility: string }>();
+        `SELECT id, object_type, title, title_map, text, content, content_map,
+                content_warning, content_warning_map, language, url, visibility
+         FROM statuses WHERE uri = ?1 LIMIT 1`,
+      ).bind(articleUri).first<{
+        id: string;
+        object_type: string;
+        title: string;
+        title_map: string | null;
+        text: string;
+        content: string;
+        content_map: string | null;
+        content_warning: string;
+        content_warning_map: string | null;
+        language: string;
+        url: string;
+        visibility: string;
+      }>();
       expect(stored).toMatchObject({
         object_type: 'Article',
         title: 'A long-form title',
@@ -154,27 +172,39 @@ describe('Search API', () => {
         url: 'https://article-author.example/2026/07/long-form-post',
         visibility: 'public',
       });
+      expect(JSON.parse(stored!.title_map!)).toMatchObject({ 'ko-hang-kr': '장문 제목' });
+      expect(JSON.parse(stored!.content_map!)).toMatchObject({ 'ko-hang-kr': '<h1>장문</h1><p>본문</p>' });
+      expect(JSON.parse(stored!.content_warning_map!)).toMatchObject({ 'ko-hang-kr': '짧은 요약' });
 
+      await env.DB.prepare('UPDATE users SET locale = ?1 WHERE id = ?2')
+        .bind('ko', user.userId)
+        .run();
       const articleResponse = await SELF.fetch(`${BASE}/api/v1/statuses/${stored!.id}`, {
         headers: authHeaders(user.token),
       });
       expect(articleResponse.status).toBe(200);
       const articleStatus = await articleResponse.json<Record<string, unknown>>();
       expect(articleStatus.object_type).toBe('Article');
-      expect(articleStatus.title).toBe('A long-form title');
-      expect(articleStatus.article_summary).toBe('A compact summary');
+      expect(articleStatus.title).toBe('장문 제목');
+      expect(articleStatus.content).toBe('<h1>장문</h1><p>본문</p>');
+      expect(articleStatus.article_summary).toBe('짧은 요약');
+      expect(articleStatus.language).toBe('ko-hang-kr');
       expect(articleStatus.spoiler_text).toBe('');
 
       const permalinkResponse = await SELF.fetch(
         `${BASE}/api/v2/search?q=${encodeURIComponent(stored!.url)}&type=statuses`,
+        { headers: { 'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.5' } },
       );
       expect(permalinkResponse.status).toBe(200);
       const permalinkSearch = await permalinkResponse.json<{
-        statuses: Array<{ id: string; object_type: string }>;
+        statuses: Array<{ id: string; object_type: string; title: string; content: string; language: string }>;
       }>();
       expect(permalinkSearch.statuses).toContainEqual(expect.objectContaining({
         id: stored!.id,
         object_type: 'Article',
+        title: '장문 제목',
+        content: '<h1>장문</h1><p>본문</p>',
+        language: 'ko-hang-kr',
       }));
     });
 

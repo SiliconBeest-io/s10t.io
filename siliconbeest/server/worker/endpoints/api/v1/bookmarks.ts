@@ -40,6 +40,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 app.get('/', authRequired, requireScope('read:bookmarks'), async (c) => {
   const account = c.get('currentAccount')!;
+  const preferredLanguages = c.get('preferredLanguages');
 
   const pag = parsePaginationParams({
     max_id: c.req.query('max_id'),
@@ -112,6 +113,7 @@ app.get('/', authRequired, requireScope('read:bookmarks'), async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
     const statusWithPagination = status as typeof status & { _pagination_id: string };
     statusWithPagination._pagination_id = row.b_id;

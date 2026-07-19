@@ -43,6 +43,7 @@ function joinedAccountRow(row: TimelineStatusRow): AccountRow {
 export async function serializeOriginalTimelineRows(
   rows: readonly TimelineStatusRow[],
   currentAccountId: string | null,
+  preferredLanguages: readonly string[] = [],
 ): Promise<MastodonStatus[]> {
   const statusIds = rows.map((row) => row.id);
   const enrichments = await enrichStatuses(
@@ -69,6 +70,7 @@ export async function serializeOriginalTimelineRows(
       emojis: enrichment?.emojis,
       quotePolicyAllows: enrichment?.quotePolicyAllows,
       quotePolicyReason: enrichment?.quotePolicyReason,
+      preferredLanguages,
     });
   });
 }

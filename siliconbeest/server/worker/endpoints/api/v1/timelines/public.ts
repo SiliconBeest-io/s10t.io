@@ -27,6 +27,7 @@ app.get('/', authOptional, async (c) => {
   });
 
   const currentAccount = c.get('currentAccount');
+  const preferredLanguages = c.get('preferredLanguages');
 
   const allRows = await getPublicTimeline({
     maxId: pag.maxId,
@@ -110,6 +111,7 @@ app.get('/', authOptional, async (c) => {
         emojis: origE?.emojis,
         quotePolicyAllows: origE?.quotePolicyAllows,
         quotePolicyReason: origE?.quotePolicyReason,
+        preferredLanguages,
       }));
     }
   }
@@ -141,6 +143,7 @@ app.get('/', authOptional, async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
     if (row.reblog_of_id) {
       s.reblog = reblogMap.get(row.reblog_of_id) ?? null;

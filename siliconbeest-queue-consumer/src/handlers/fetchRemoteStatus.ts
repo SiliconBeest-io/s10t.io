@@ -17,6 +17,7 @@ import {
   canStoreFetchedRemoteActor,
   canStoreFetchedRemoteStatus,
 } from '../../../packages/shared/permissions';
+import { serializeNaturalLanguageMap } from '../../../packages/shared/utils/naturalLanguage';
 
 export async function handleFetchRemoteStatus(
   msg: FetchRemoteStatusMessage,
@@ -242,6 +243,11 @@ export async function handleFetchRemoteStatus(
   const inReplyTo = (objectDoc.inReplyTo as string) || null;
   const sensitive = (objectDoc.sensitive as boolean) || false;
   const language = extractLanguage(objectDoc);
+  const titleMap = normalizedObjectType === 'Article'
+    ? serializeNaturalLanguageMap(objectDoc.nameMap)
+    : null;
+  const contentMap = serializeNaturalLanguageMap(objectDoc.contentMap);
+  const contentWarningMap = serializeNaturalLanguageMap(objectDoc.summaryMap);
 
   // Determine visibility from addressing
   const visibility = determineVisibility(objectDoc);
@@ -260,10 +266,11 @@ export async function handleFetchRemoteStatus(
   // Insert into statuses table
   const insertResult = await env.DB.prepare(
     `INSERT OR IGNORE INTO statuses (
-       id, account_id, uri, url, object_type, title, text, content, content_warning,
+       id, account_id, uri, url, object_type, title, title_map, text, content, content_map,
+       content_warning, content_warning_map,
        visibility, language, in_reply_to_id, sensitive,
        local, quote_policy, emoji_tags, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, datetime('now'))`,
   )
     .bind(
       statusId,
@@ -272,9 +279,12 @@ export async function handleFetchRemoteStatus(
       url,
       normalizedObjectType,
       title,
+      titleMap,
       sourceText,
       content,
+      contentMap,
       contentWarning,
+      contentWarningMap,
       visibility,
       language,
       inReplyTo,

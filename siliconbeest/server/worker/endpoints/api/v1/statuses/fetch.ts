@@ -12,6 +12,7 @@ import {
   canSurfaceStatusToViewer,
   getSurfaceableReblogOriginalId,
 } from '../../../../services/permissions';
+import { localizeStatusFields } from '../../../../../../../packages/shared/utils/naturalLanguage';
 
 type HonoEnv = { Variables: AppVariables };
 
@@ -28,7 +29,13 @@ function parseAccountEmojiTags(
   return parseCustomEmojiTagsJson(emojiTagsJson, instanceDomain);
 }
 
-function serializeStatus(row: Record<string, unknown>, domain: string, currentAccountId?: string, accountEmojis?: any[]) {
+function serializeStatus(
+  row: Record<string, unknown>,
+  domain: string,
+  currentAccountId?: string,
+  accountEmojis?: any[],
+  preferredLanguages: readonly string[] = [],
+) {
   const acct = row.account_domain
     ? `${row.account_username}@${row.account_domain}`
     : (row.account_username as string);
@@ -41,18 +48,19 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
         domain,
       );
 
+  const localized = localizeStatusFields(row, preferredLanguages);
   return {
     id: row.id as string,
     object_type: row.poll_id ? 'Question' : row.object_type === 'Article' ? 'Article' : 'Note',
-    title: (row.title as string) || '',
-    article_summary: row.object_type === 'Article' ? (row.content_warning as string) || '' : '',
+    title: localized.title,
+    article_summary: row.object_type === 'Article' ? localized.contentWarning : '',
     created_at: toISO(row.created_at),
     in_reply_to_id: (row.in_reply_to_id as string) || null,
     in_reply_to_account_id: (row.in_reply_to_account_id as string) || null,
     sensitive: !!(row.sensitive),
-    spoiler_text: row.object_type === 'Article' ? '' : (row.content_warning as string) || '',
+    spoiler_text: row.object_type === 'Article' ? '' : localized.contentWarning,
     visibility: (row.visibility as string) || 'public',
-    language: (row.language as string) || 'en',
+    language: localized.language || 'en',
     uri: row.uri as string,
     url: (row.url as string) || null,
     replies_count: (row.replies_count as number) || 0,
@@ -63,7 +71,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string, currentAc
     muted: false,
     bookmarked: false,
     pinned: !!row.pinned,
-    content: (row.content as string) || '',
+    content: localized.content,
     filtered: [] as Record<string, unknown>[],
     reblog: null,
     quote: null as import('../../../../types/mastodon').Status | null,
@@ -115,11 +123,12 @@ async function serializeStatusEnriched(
   domain: string,
   currentAccountId?: string | null,
   cache?: KVNamespace,
+  preferredLanguages: readonly string[] = [],
 ) {
   const statusId = row.id as string;
   const enrichments = await enrichStatuses(domain, [statusId], currentAccountId, cache);
   const e = enrichments.get(statusId);
-  const status = serializeStatus(row, domain, undefined, e?.accountEmojis);
+  const status = serializeStatus(row, domain, undefined, e?.accountEmojis, preferredLanguages);
   if (e) {
     status.media_attachments = e.mediaAttachments ?? [];
     status.favourited = e.favourited ?? false;
@@ -157,6 +166,7 @@ app.get('/:id', authOptional, requireScope('read:statuses'), async (c) => {
   const statusId = c.req.param('id');
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
   const domain = env.INSTANCE_DOMAIN;
+  const preferredLanguages = c.get('preferredLanguages');
 
   const row = await env.DB.prepare(
     `${STATUS_JOIN_SQL} WHERE s.id = ?1 AND s.deleted_at IS NULL`,
@@ -170,6 +180,7 @@ app.get('/:id', authOptional, requireScope('read:statuses'), async (c) => {
     domain,
     currentAccountId,
     env.CACHE,
+    preferredLanguages,
   );
   if (row.reblog_of_id === null) return c.json(status);
   if (typeof row.reblog_of_id !== 'string' || row.reblog_of_id.length === 0) {
@@ -197,6 +208,7 @@ app.get('/:id', authOptional, requireScope('read:statuses'), async (c) => {
     domain,
     currentAccountId,
     env.CACHE,
+    preferredLanguages,
   );
   return c.json({ ...status, reblog: original });
 });

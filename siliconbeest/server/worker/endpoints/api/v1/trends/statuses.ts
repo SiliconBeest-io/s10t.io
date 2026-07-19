@@ -19,6 +19,7 @@ app.get('/', authOptional, async (c) => {
   const offsetRaw = parseInt(c.req.query('offset') ?? '0', 10);
   const offset = Math.max(offsetRaw, 0);
   const currentAccount = c.get('currentAccount');
+  const preferredLanguages = c.get('preferredLanguages');
   const relationship = buildStatusRelationshipSqlPredicate(
     'status',
     currentAccount?.id ?? null,
@@ -82,6 +83,7 @@ app.get('/', authOptional, async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
   });
 

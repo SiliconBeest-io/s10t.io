@@ -17,6 +17,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
   const account = c.get('currentAccount')!;
+  const preferredLanguages = c.get('preferredLanguages');
   const pag = parsePaginationParams({
     max_id: c.req.query('max_id'),
     since_id: c.req.query('since_id'),
@@ -101,6 +102,7 @@ app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
         emojis: origE?.emojis,
         quotePolicyAllows: origE?.quotePolicyAllows,
         quotePolicyReason: origE?.quotePolicyReason,
+        preferredLanguages,
       });
       reblogMap.set(rr.id as string, origSerialized);
     }
@@ -133,6 +135,7 @@ app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
     // Fill reblog object if this is a boost
     if (row.reblog_of_id) {

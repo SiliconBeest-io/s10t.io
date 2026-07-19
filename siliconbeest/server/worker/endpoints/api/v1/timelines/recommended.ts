@@ -94,7 +94,11 @@ app.on(['GET', 'POST'], '/', authRequired, requireScope('read:statuses'), async 
       });
     }
 
-    const statuses = await serializeOriginalTimelineRows(page.rows, account.id);
+    const statuses = await serializeOriginalTimelineRows(
+      page.rows,
+      account.id,
+      c.get('preferredLanguages'),
+    );
     const headers: Record<string, string> = {
       'Cache-Control': 'private, no-store',
       Vary: 'Authorization',

@@ -19,6 +19,7 @@ const app = new Hono<HonoEnv>();
 // GET /api/v1/conversations — list DM conversations
 app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
   const currentAccount = c.get('currentAccount')!;
+  const preferredLanguages = c.get('preferredLanguages');
   const domain = env.INSTANCE_DOMAIN;
 
   const pag = parsePaginationParams({
@@ -87,6 +88,7 @@ app.get('/', authRequired, requireScope('read:statuses'), async (c) => {
         };
         lastStatus = serializeStatus(statusRow as StatusRow, {
           account: serializeAccount(accountRow, { instanceDomain: env.INSTANCE_DOMAIN }),
+          preferredLanguages,
         });
       }
     }

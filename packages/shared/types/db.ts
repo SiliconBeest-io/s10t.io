@@ -166,13 +166,16 @@ export type StatusRow = {
   readonly object_type: 'Note' | 'Article';
   /** ActivityStreams name, used as the title of an Article. */
   readonly title: string;
+  readonly title_map: string | null;
   readonly account_id: string;
   readonly in_reply_to_id: string | null;
   readonly in_reply_to_account_id: string | null;
   readonly reblog_of_id: string | null;
   readonly text: string;
   readonly content: string;
+  readonly content_map: string | null;
   readonly content_warning: string;
+  readonly content_warning_map: string | null;
   readonly visibility: string;
   readonly sensitive: number;
   readonly language: string;

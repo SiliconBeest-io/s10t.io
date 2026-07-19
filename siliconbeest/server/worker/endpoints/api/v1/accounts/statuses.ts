@@ -13,26 +13,32 @@ import {
   buildStatusRelationshipSqlPredicate,
   buildStatusVisibilitySqlPredicate,
 } from '../../../../services/permissions';
+import { localizeStatusFields } from '../../../../../../../packages/shared/utils/naturalLanguage';
 
 type HonoEnv = { Variables: AppVariables };
 
-function serializeStatus(row: Record<string, unknown>, domain: string) {
+function serializeStatus(
+  row: Record<string, unknown>,
+  domain: string,
+  preferredLanguages: readonly string[] = [],
+) {
   const acct = row.account_domain
     ? `${row.account_username}@${row.account_domain}`
     : (row.account_username as string);
 
+  const localized = localizeStatusFields(row, preferredLanguages);
   return {
     id: row.id as string,
     object_type: row.poll_id ? 'Question' : row.object_type === 'Article' ? 'Article' : 'Note',
-    title: (row.title as string) || '',
-    article_summary: row.object_type === 'Article' ? (row.content_warning as string) || '' : '',
+    title: localized.title,
+    article_summary: row.object_type === 'Article' ? localized.contentWarning : '',
     created_at: row.created_at as string,
     in_reply_to_id: (row.in_reply_to_id as string) || null,
     in_reply_to_account_id: (row.in_reply_to_account_id as string) || null,
     sensitive: !!(row.sensitive),
-    spoiler_text: row.object_type === 'Article' ? '' : (row.content_warning as string) || '',
+    spoiler_text: row.object_type === 'Article' ? '' : localized.contentWarning,
     visibility: (row.visibility as string) || 'public',
-    language: (row.language as string) || 'en',
+    language: localized.language || 'en',
     uri: row.uri as string,
     url: (row.url as string) || null,
     replies_count: (row.replies_count as number) || 0,
@@ -43,7 +49,7 @@ function serializeStatus(row: Record<string, unknown>, domain: string) {
     muted: false,
     bookmarked: false,
     pinned: !!row.pinned,
-    content: (row.content as string) || '',
+    content: localized.content,
     reblog: null,
     quote: null as import('../../../../types/mastodon').Status | null,
     quote_policy: row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public',
@@ -108,6 +114,7 @@ app.get('/:id/statuses', authOptional, requireScope('read:statuses'), async (c) 
   const pinned = query.pinned === 'true';
 
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
+  const preferredLanguages = c.get('preferredLanguages');
   const permissionNow = new Date().toISOString();
 
   const conditions: string[] = ['s.account_id = ?', 's.deleted_at IS NULL'];
@@ -222,7 +229,7 @@ app.get('/:id/statuses', authOptional, requireScope('read:statuses'), async (c) 
     : enrichments;
 
   const statuses = (results as Record<string, unknown>[]).map((r) => {
-    const s = serializeStatus(r, domain);
+    const s = serializeStatus(r, domain, preferredLanguages);
     const e = (reblogOfIds.length > 0 ? allEnrichments : enrichments).get(r.id as string);
     if (e) {
       s.media_attachments = e.mediaAttachments ?? [];
@@ -240,7 +247,7 @@ app.get('/:id/statuses', authOptional, requireScope('read:statuses'), async (c) 
     if (reblogOfId) {
       const origRow = reblogMap.get(reblogOfId);
       if (origRow) {
-        const origStatus = serializeStatus(origRow, domain);
+        const origStatus = serializeStatus(origRow, domain, preferredLanguages);
         const origE = allEnrichments.get(reblogOfId);
         if (origE) {
           origStatus.media_attachments = origE.mediaAttachments ?? [];

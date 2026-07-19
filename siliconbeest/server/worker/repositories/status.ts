@@ -7,13 +7,16 @@ export type Status = {
 	url: string | null;
 	object_type: 'Note' | 'Article';
 	title: string;
+	title_map: string | null;
 	account_id: string;
 	in_reply_to_id: string | null;
 	in_reply_to_account_id: string | null;
 	reblog_of_id: string | null;
 	text: string;
 	content: string;
+	content_map: string | null;
 	content_warning: string;
+	content_warning_map: string | null;
 	visibility: string;
 	sensitive: number;
 	language: string;
@@ -44,12 +47,15 @@ export type CreateStatusInput = {
 	url?: string | null;
 	object_type?: 'Note' | 'Article';
 	title?: string;
+	title_map?: string | null;
 	in_reply_to_id?: string | null;
 	in_reply_to_account_id?: string | null;
 	reblog_of_id?: string | null;
 	text?: string;
 	content?: string;
+	content_map?: string | null;
 	content_warning?: string;
+	content_warning_map?: string | null;
 	visibility?: string;
 	sensitive?: number;
 	language?: string;
@@ -132,13 +138,16 @@ export const create = async (input: CreateStatusInput): Promise<Status> => {
 		url: input.url ?? null,
 		object_type: input.object_type ?? 'Note',
 		title: input.title ?? '',
+		title_map: input.title_map ?? null,
 		account_id: input.account_id,
 		in_reply_to_id: input.in_reply_to_id ?? null,
 		in_reply_to_account_id: input.in_reply_to_account_id ?? null,
 		reblog_of_id: input.reblog_of_id ?? null,
 		text: input.text ?? '',
 		content: input.content ?? '',
+		content_map: input.content_map ?? null,
 		content_warning: input.content_warning ?? '',
+		content_warning_map: input.content_warning_map ?? null,
 		visibility: input.visibility ?? 'public',
 		sensitive: input.sensitive ?? 0,
 		language: input.language ?? 'en',
@@ -166,21 +175,21 @@ export const create = async (input: CreateStatusInput): Promise<Status> => {
 	await env.DB
 		.prepare(
 			`INSERT INTO statuses (
-				id, uri, url, object_type, title, account_id,
+				id, uri, url, object_type, title, title_map, account_id,
 				in_reply_to_id, in_reply_to_account_id, reblog_of_id,
-				text, content, content_warning, visibility,
+				text, content, content_map, content_warning, content_warning_map, visibility,
 				sensitive, language, conversation_id, reply,
 				replies_count, reblogs_count, favourites_count,
 					local, federated_at, edited_at, deleted_at, poll_id,
 					quote_id, quote_authorization_uri, quote_approval_status, quote_request_uri, quote_policy,
 					quote_policy_automatic_approvals, quote_policy_manual_approvals,
 					created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 			)
 		.bind(
-			status.id, status.uri, status.url, status.object_type, status.title, status.account_id,
+			status.id, status.uri, status.url, status.object_type, status.title, status.title_map, status.account_id,
 			status.in_reply_to_id, status.in_reply_to_account_id, status.reblog_of_id,
-			status.text, status.content, status.content_warning, status.visibility,
+			status.text, status.content, status.content_map, status.content_warning, status.content_warning_map, status.visibility,
 			status.sensitive, status.language, status.conversation_id, status.reply,
 				status.replies_count, status.reblogs_count, status.favourites_count,
 				status.local, status.federated_at, status.edited_at, status.deleted_at,

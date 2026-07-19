@@ -1,11 +1,20 @@
 import { createMiddleware } from 'hono/factory';
 import type { AppVariables } from '../types';
-import { resolveToken, type ResolvedToken } from '../services/auth';
+import { resolveToken } from '../services/auth';
 import { sha256 } from '../utils/crypto';
 import { getAuthTokenFromCookie } from '../utils/authCookie';
 import { hasStaffCapability } from '../../../../packages/shared/permissions';
+import { getPreferredRequestLanguages } from '../utils/requestLanguages';
 
 type MiddlewareEnv = { Variables: AppVariables };
+
+function setPreferredLanguages(c: Parameters<ReturnType<typeof createMiddleware<MiddlewareEnv>>>[0]) {
+  c.set('preferredLanguages', getPreferredRequestLanguages({
+    cookie: c.req.header('Cookie'),
+    userLocale: c.get('currentUser')?.locale,
+    acceptLanguage: c.req.header('Accept-Language'),
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,6 +60,7 @@ export const authOptional = createMiddleware<MiddlewareEnv>(async (c, next) => {
     }
   }
 
+  setPreferredLanguages(c);
   await next();
 });
 
@@ -85,6 +95,7 @@ export const authRequired = createMiddleware<MiddlewareEnv>(async (c, next) => {
   c.set('tokenScopes', payload.scopes);
   c.set('tokenId', payload.tokenId);
 
+  setPreferredLanguages(c);
   await next();
 });
 

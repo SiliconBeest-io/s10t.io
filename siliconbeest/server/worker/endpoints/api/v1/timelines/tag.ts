@@ -36,6 +36,7 @@ app.get('/:tag', authOptional, async (c) => {
   const statuses = await serializeOriginalTimelineRows(
     allRows,
     currentAccount?.id ?? null,
+    c.get('preferredLanguages'),
   );
 
   if (pag.minId) statuses.reverse();

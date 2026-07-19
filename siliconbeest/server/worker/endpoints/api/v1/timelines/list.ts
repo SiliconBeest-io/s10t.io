@@ -14,6 +14,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 app.get('/:listId', authRequired, requireScope('read:lists'), async (c) => {
   const listId = c.req.param('listId');
   const account = c.get('currentAccount')!;
+  const preferredLanguages = c.get('preferredLanguages');
 
   const pag = parsePaginationParams({
     max_id: c.req.query('max_id'),
@@ -59,6 +60,7 @@ app.get('/:listId', authRequired, requireScope('read:lists'), async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
   });
 

@@ -13,6 +13,7 @@ export type AppVariables = {
     readonly id: string;
     readonly account_id: string;
     readonly email: string;
+    readonly locale: string;
     readonly role: string;
   } | null;
   currentAccount: {
@@ -24,6 +25,8 @@ export type AppVariables = {
   tokenScopes: string | null;
   /** The oauth_access_tokens row ID for the current bearer token. */
   tokenId: string | null;
+  /** Viewer language preferences for ActivityStreams natural-language maps. */
+  preferredLanguages: readonly string[];
   requestId: string;
   /** Set by idempotent mutation handlers when the request changed state. */
   contributionApplied?: boolean;

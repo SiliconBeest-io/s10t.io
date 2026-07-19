@@ -32,6 +32,7 @@ import type {
   Emoji,
   StatusMention,
 } from '../types/mastodon';
+import { localizeStatusFields } from '../utils/naturalLanguage';
 
 import type {
   AccountRow,
@@ -197,21 +198,23 @@ export function serializeStatus(
     emojis?: Emoji[];
     quotePolicyAllows?: boolean;
     quotePolicyReason?: string | null;
+    preferredLanguages?: readonly string[];
   },
 ): MastodonStatus {
   const quotePolicy = row.quote_policy === 'followers' || row.quote_policy === 'nobody' ? row.quote_policy : 'public';
+  const localized = localizeStatusFields(row, opts.preferredLanguages ?? []);
   return {
     id: row.id,
     uri: row.uri,
     url: row.url ?? null,
     object_type: row.poll_id ? 'Question' : row.object_type === 'Article' ? 'Article' : 'Note',
-    title: row.title || '',
-    article_summary: row.object_type === 'Article' ? row.content_warning || '' : '',
+    title: localized.title,
+    article_summary: row.object_type === 'Article' ? localized.contentWarning : '',
     account: opts.account,
-    content: row.content || '',
+    content: localized.content,
     visibility: row.visibility as MastodonStatus['visibility'],
     sensitive: bool(row.sensitive),
-    spoiler_text: row.object_type === 'Article' ? '' : row.content_warning || '',
+    spoiler_text: row.object_type === 'Article' ? '' : localized.contentWarning,
     media_attachments: opts.mediaAttachments ?? [],
     created_at: ensureISO8601WithMs(row.created_at),
     edited_at: isoOrNull(row.edited_at),
@@ -229,7 +232,7 @@ export function serializeStatus(
     quote_policy_reason: opts.quotePolicyReason ?? null,
     poll: opts.poll ?? null,
     card: opts.card ?? null,
-    language: row.language || null,
+    language: localized.language,
     text: row.text || null,
     favourited: opts.favourited ?? false,
     reblogged: opts.reblogged ?? false,

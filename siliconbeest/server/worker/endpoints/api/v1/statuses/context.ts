@@ -16,6 +16,7 @@ app.get('/:id/context', authOptional, requireScope('read:statuses'), async (c) =
   const domain = env.INSTANCE_DOMAIN;
 
   const currentAccountId = c.get('currentUser')?.account_id ?? null;
+  const preferredLanguages = c.get('preferredLanguages');
 
   const { ancestors, descendants } = await getContext(statusId, currentAccountId);
 
@@ -26,7 +27,7 @@ app.get('/:id/context', authOptional, requireScope('read:statuses'), async (c) =
 
   function enrichAndSerialize(r: Record<string, unknown>) {
     const e = enrichments.get(r.id as string);
-    const s = serializeStatus(r, domain, undefined, e?.accountEmojis);
+    const s = serializeStatus(r, domain, undefined, e?.accountEmojis, preferredLanguages);
     if (e) {
       s.media_attachments = e.mediaAttachments ?? [];
       s.favourited = e.favourited ?? false;

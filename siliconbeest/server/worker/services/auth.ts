@@ -102,7 +102,7 @@ export async function validateRegistrationCredentials(
 
 export interface ResolvedToken {
 	tokenId: string;
-	user: { id: string; account_id: string; email: string; role: string };
+	user: { id: string; account_id: string; email: string; locale: string; role: string };
 	account: { id: string; username: string; domain: string | null };
 	scopes: string;
 }
@@ -333,7 +333,7 @@ export async function resolveToken(
 		// Verify the account is not suspended/disabled (prevents stale-cache abuse)
 		const check = await env.DB
 			.prepare(
-				`SELECT u.disabled, u.approved, a.suspended_at, a.memorial
+				`SELECT u.disabled, u.approved, u.locale, a.suspended_at, a.memorial
 				 FROM users u JOIN accounts a ON a.id = u.account_id
 				 WHERE u.id = ? LIMIT 1`,
 			)
@@ -343,6 +343,7 @@ export async function resolveToken(
 				approved: number | null;
 				suspended_at: string | null;
 				memorial: number | null;
+				locale: string;
 			}>();
 		if (!check || !canUseAccount(
 			check.disabled,
@@ -353,6 +354,7 @@ export async function resolveToken(
 			await env.CACHE.delete(cacheKey);
 			return null;
 		}
+		payload.user.locale = check.locale;
 		return payload;
 	}
 
@@ -361,6 +363,7 @@ export async function resolveToken(
 		   t.id   AS token_id,
 		   u.id   AS user_id,
 		   u.email,
+		   u.locale,
 		   u.role,
 		   a.id       AS account_id,
 		   a.username,
@@ -393,6 +396,7 @@ export async function resolveToken(
 			id: row.user_id as string,
 			account_id: row.account_id as string,
 			email: row.email as string,
+			locale: row.locale as string,
 			role: row.role as string,
 		},
 		account: {

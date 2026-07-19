@@ -15,6 +15,7 @@ import { env } from 'cloudflare:workers';
 import { parseQuotePolicyDetailsFromInteractionPolicy } from '../../../../../packages/shared/utils/quotePolicy';
 import { areActivityPubUrisEquivalent } from '../../../../../packages/shared/permissions';
 import { canProcessIncomingActorUpdate } from '../../services/permissions';
+import { serializeNaturalLanguageMap } from '../../../../../packages/shared/utils/naturalLanguage';
 
 function firstString(value: unknown): string {
 	if (typeof value === 'string') return value;
@@ -145,6 +146,14 @@ class UpdateProcessor extends BaseProcessor {
 				content: sanitizedContent,
 				content_warning: sanitizedSummary,
 				language: firstLanguage(obj.contentMap) ?? status.language,
+				title_map: obj.type === 'Article'
+					? serializeNaturalLanguageMap(obj.nameMap, sanitizePlainText)
+					: null,
+				content_map: serializeNaturalLanguageMap(
+					obj.contentMap,
+					obj.type === 'Article' ? sanitizeArticleHtml : sanitizeHtml,
+				),
+				content_warning_map: serializeNaturalLanguageMap(obj.summaryMap, sanitizeHtml),
 				sensitive: obj.sensitive ? 1 : 0,
 				edited_at: now,
 			};

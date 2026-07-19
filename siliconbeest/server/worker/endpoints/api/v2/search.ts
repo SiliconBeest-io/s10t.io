@@ -28,6 +28,8 @@ import {
   hasOAuthScope,
 } from '../../../../../../packages/shared/permissions';
 import { withCloudflareCnameFallback } from '../../../federation/documentLoader';
+import { serializeNaturalLanguageMap } from '../../../../../../packages/shared/utils/naturalLanguage';
+import { sanitizeArticleHtml, sanitizeHtml, sanitizePlainText } from '../../../utils/sanitize';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -327,11 +329,23 @@ async function resolveRemoteStatusFromUrl(
   const existingStatus = existingByObjectId ?? existing;
   if (existingStatus) {
     if (!remoteVisible) return null;
+    const objectType = object.type === 'Article' ? 'Article' : 'Note';
+    const titleMap = objectType === 'Article'
+      ? serializeNaturalLanguageMap(object.nameMap, sanitizePlainText)
+      : null;
+    const contentMap = serializeNaturalLanguageMap(
+      object.contentMap,
+      objectType === 'Article' ? sanitizeArticleHtml : sanitizeHtml,
+    );
+    const contentWarningMap = serializeNaturalLanguageMap(object.summaryMap, sanitizeHtml);
     if (
       visibility !== existingStatus.visibility
       || quotePolicy !== existingStatus.quote_policy
       || automaticApprovalsJson !== existingStatus.quote_policy_automatic_approvals
       || manualApprovalsJson !== existingStatus.quote_policy_manual_approvals
+      || titleMap !== null
+      || contentMap !== null
+      || contentWarningMap !== null
     ) {
       await env.DB.prepare(
         `UPDATE statuses
@@ -339,9 +353,22 @@ async function resolveRemoteStatusFromUrl(
              quote_policy = ?2,
              quote_policy_automatic_approvals = ?3,
              quote_policy_manual_approvals = ?4,
-             updated_at = ?5
-         WHERE id = ?6`,
-      ).bind(visibility, quotePolicy, automaticApprovalsJson, manualApprovalsJson, new Date().toISOString(), existingStatus.id).run();
+             title_map = COALESCE(?5, title_map),
+             content_map = COALESCE(?6, content_map),
+             content_warning_map = COALESCE(?7, content_warning_map),
+             updated_at = ?8
+         WHERE id = ?9`,
+      ).bind(
+        visibility,
+        quotePolicy,
+        automaticApprovalsJson,
+        manualApprovalsJson,
+        titleMap,
+        contentMap,
+        contentWarningMap,
+        new Date().toISOString(),
+        existingStatus.id,
+      ).run();
     }
     return await canViewStatusById(existingStatus.id, viewer?.id ?? null) ? existingStatus.id : null;
   }
@@ -377,6 +404,7 @@ app.get('/', authOptional, async (c) => {
   const offset = Math.max(offsetRaw, 0);
   const domain = env.INSTANCE_DOMAIN;
   const currentAccount = c.get('currentAccount');
+  const preferredLanguages = c.get('preferredLanguages');
 
   // Mastodon permits anonymous account/hashtag search and locally-known
   // exact-URL status lookup. Network resolution, offset pagination, and
@@ -766,6 +794,7 @@ app.get('/', authOptional, async (c) => {
         emojis: e?.emojis,
         quotePolicyAllows: e?.quotePolicyAllows,
         quotePolicyReason: e?.quotePolicyReason,
+        preferredLanguages,
       });
     };
 

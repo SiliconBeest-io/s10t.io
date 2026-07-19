@@ -24,6 +24,7 @@ import {
 	canProcessFederatedStatusInteraction,
 	canSurfaceStatusToViewer,
 } from '../../services/permissions';
+import { serializeNaturalLanguageMap } from '../../../../../packages/shared/utils/naturalLanguage';
 
 interface CreateProcessorOptions {
 	fanout?: boolean;
@@ -217,6 +218,17 @@ class CreateProcessor extends BaseProcessor {
 			? sanitizePlainText(firstString(note.name) || firstString(note.nameMap))
 			: '';
 		const language = firstLanguage((apNote as Record<string, unknown>).contentMap) ?? 'en';
+		const titleMap = objectType === 'Article'
+			? serializeNaturalLanguageMap(note.nameMap, sanitizePlainText)
+			: null;
+		const contentMap = serializeNaturalLanguageMap(
+			(apNote as Record<string, unknown>).contentMap,
+			objectType === 'Article' ? sanitizeArticleHtml : sanitizeHtml,
+		);
+		const contentWarningMap = serializeNaturalLanguageMap(
+			(apNote as Record<string, unknown>).summaryMap,
+			sanitizeHtml,
+		);
 		const statusUrl = firstUrl(note.url) ?? note.id;
 
 		// FEP-044f + fallback implementations: Resolve quote post URI
@@ -288,8 +300,9 @@ class CreateProcessor extends BaseProcessor {
 				  text, content, content_warning, visibility, sensitive, language,
 				  conversation_id, local, reply, quote_id, quote_authorization_uri, quote_approval_status,
 				  quote_policy, quote_policy_automatic_approvals, quote_policy_manual_approvals,
+				  title_map, content_map, content_warning_map,
 				  emoji_tags, created_at, updated_at)
-				 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)`,
+				 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)`,
 			)
 			.bind(
 				statusId, note.id,
@@ -298,7 +311,8 @@ class CreateProcessor extends BaseProcessor {
 				sourceText, noteContent, contentWarning, visibility,
 				note.sensitive ? 1 : 0, language, conversationId,
 				inReplyToId ? 1 : 0, quoteId, quoteAuthorizationUri, quoteApprovalStatus,
-				quotePolicy, automaticApprovalsJson, manualApprovalsJson, emojiTagsJson,
+				quotePolicy, automaticApprovalsJson, manualApprovalsJson,
+				titleMap, contentMap, contentWarningMap, emojiTagsJson,
 				note.published ? new Date(note.published).toISOString() : now, now,
 			)
 				.run();

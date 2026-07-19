@@ -40,6 +40,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 app.get('/', authRequired, requireScope('read:favourites'), async (c) => {
   const account = c.get('currentAccount')!;
+  const preferredLanguages = c.get('preferredLanguages');
 
   const pag = parsePaginationParams({
     max_id: c.req.query('max_id'),
@@ -112,6 +113,7 @@ app.get('/', authRequired, requireScope('read:favourites'), async (c) => {
       emojis: e?.emojis,
       quotePolicyAllows: e?.quotePolicyAllows,
       quotePolicyReason: e?.quotePolicyReason,
+      preferredLanguages,
     });
     // Keep status.id as the status ID (Mastodon API spec)
     // Use f_id internally for pagination Link headers
