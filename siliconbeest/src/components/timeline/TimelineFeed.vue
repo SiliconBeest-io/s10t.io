@@ -1,20 +1,44 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status } from '@/types/mastodon'
 import InfiniteScroll from '../common/InfiniteScroll.vue'
 import StatusCard from '../status/StatusCard.vue'
+import AdvertisementCard from '../advertisement/AdvertisementCard.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useAdvertisementsStore } from '@/stores/advertisements'
+import { mixAdvertisements } from '@/utils/advertisementFeed'
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   statuses: Status[]
   loading?: boolean
   done?: boolean
   hasNewPosts?: boolean
   newPostsCount?: number
   autoInsert?: boolean
-}>()
+  timelineKey?: string
+  showAdvertisements?: boolean
+}>(), {
+  timelineKey: 'timeline',
+})
+
+const auth = useAuthStore()
+const advertisementsStore = useAdvertisementsStore()
+const feedItems = computed(() => mixAdvertisements(
+  props.statuses,
+  props.showAdvertisements ? advertisementsStore.advertisements : [],
+  props.timelineKey,
+))
+
+watch(
+  () => auth.token,
+  (token) => {
+    if (props.showAdvertisements) void advertisementsStore.load(token ?? undefined)
+  },
+  { immediate: true },
+)
 
 const emit = defineEmits<{
   'load-more': []
@@ -38,12 +62,22 @@ const emit = defineEmits<{
     </button>
 
     <InfiniteScroll :loading="loading" :done="done" @load-more="emit('load-more')">
-      <StatusCard
-        v-for="status in statuses"
-        :key="status.id"
-        :status="status"
-        @navigate="(s: Status) => emit('navigate', s)"
-      />
+      <template v-for="item in feedItems" :key="item.key">
+        <StatusCard
+          v-if="item.kind === 'status'"
+          :status="item.status"
+          @navigate="(s: Status) => emit('navigate', s)"
+        />
+        <AdvertisementCard v-else :advertisement="item.advertisement">
+          <template #status>
+            <StatusCard
+              v-if="item.advertisement.status"
+              :status="item.advertisement.status"
+              @navigate="(s: Status) => emit('navigate', s)"
+            />
+          </template>
+        </AdvertisementCard>
+      </template>
 
       <!-- Empty state -->
       <div v-if="!loading && statuses.length === 0" class="sb-empty px-6">

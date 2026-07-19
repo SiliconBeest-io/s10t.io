@@ -103,6 +103,8 @@ watch(
 
       <TimelineFeed
         :statuses="statuses"
+        timeline-key="home"
+        show-advertisements
         :loading="timeline.loading || timeline.loadingMore"
         :done="!timeline.hasMore"
         :has-new-posts="hasNewPosts && !isAtTop"

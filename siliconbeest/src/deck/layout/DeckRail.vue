@@ -26,7 +26,8 @@ const { available: recommendedAvailable } = useRecommendedTimelineFeature()
 const instanceIcon = '/thumbnail.png'
 const { columns, configRows, isEnabled, toggle, move, reorder } = useDeckColumns()
 
-// Short labels — the rail buttons are 58px wide, long labels overflow
+// Labels remain compact, but the desktop rail is wide enough to place them
+// beside their icons (Misskey-style) instead of stacking them vertically.
 const COLUMN_META: Record<ColumnType, { emoji: string; labelKey: string }> = {
   recommended: { emoji: '✨', labelKey: 'timeline.ai_recommended_nav' },
   home: { emoji: '🏠', labelKey: 'deck.nav_home' },
@@ -143,14 +144,14 @@ function isRouteActive(path: string): boolean {
 
 <template>
   <nav
-    class="dk-hairline-r min-h-0 w-[78px] flex-none flex-col items-center gap-1.5 px-2.5 py-3.5"
+    class="dk-side-rail dk-hairline-r min-h-0 w-[156px] flex-none flex-col items-stretch gap-1 px-2 py-2.5"
     :class="showColumnConfig || showMore || showAccount
       ? 'overflow-visible'
       : 'overflow-x-hidden overflow-y-auto overscroll-y-contain'"
     :aria-label="t('nav.main_navigation')"
   >
     <!-- Deck (multi-column) + column configuration -->
-    <div class="relative flex flex-col items-center">
+    <div class="relative flex w-full flex-col items-stretch">
       <router-link
         to="/home"
         class="dk-rail-item no-underline"
@@ -236,7 +237,7 @@ function isRouteActive(path: string): boolean {
       </div>
     </div>
 
-    <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
+    <div class="dk-hairline-b my-1 w-full" aria-hidden="true" />
     <span class="dk-rail-caption" aria-hidden="true">{{ t('deck.section_timelines') }}</span>
 
     <!-- Single timelines: Home | AI recommendations | Local | Social | Federated -->
@@ -261,7 +262,7 @@ function isRouteActive(path: string): boolean {
       <span class="dk-rail-label">{{ t(entry.labelKey) }}</span>
     </router-link>
 
-    <div class="dk-hairline-b my-1 w-10" aria-hidden="true" />
+    <div class="dk-hairline-b my-1 w-full" aria-hidden="true" />
 
     <!-- Announcements -->
     <router-link
@@ -304,7 +305,7 @@ function isRouteActive(path: string): boolean {
     </router-link>
 
     <!-- More menu -->
-    <div class="relative">
+    <div class="relative w-full">
       <button
         type="button"
         class="dk-rail-item"

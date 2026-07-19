@@ -9,6 +9,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useInstanceStore } from '@/stores/instance'
 import InfiniteScroll from '@/components/common/InfiniteScroll.vue'
 import DeckStatusCard from './DeckStatusCard.vue'
+import AdvertisementCard from '@/components/advertisement/AdvertisementCard.vue'
+import { useAdvertisementsStore } from '@/stores/advertisements'
+import { mixAdvertisements } from '@/utils/advertisementFeed'
 
 type DeckTimelineColumnType = 'home' | 'social' | 'local' | 'federated'
 
@@ -18,6 +21,7 @@ const timelinesStore = useTimelinesStore()
 const statusesStore = useStatusesStore()
 const auth = useAuthStore()
 const instanceStore = useInstanceStore()
+const advertisementsStore = useAdvertisementsStore()
 
 const props = withDefaults(defineProps<{
   type: DeckTimelineColumnType
@@ -49,6 +53,11 @@ const statuses = computed(() => {
     .map((id) => statusesStore.getCached(id))
     .filter((s): s is Status => !!s)
 })
+const feedItems = computed(() => mixAdvertisements(
+  statuses.value,
+  advertisementsStore.advertisements,
+  `deck:${meta.value.timelineType}`,
+))
 
 const hasNewPosts = computed(() => timeline.value.newStatusIds.length > 0)
 const livePaused = computed(() => meta.value.streamKeys.some((k) => timelinesStore.isStreamPaused(k)))
@@ -93,7 +102,8 @@ async function loadMore() {
 
 watch(
   () => auth.token,
-  () => {
+  (token) => {
+    void advertisementsStore.load(token ?? undefined)
     void loadTimeline()
   },
   { immediate: true },
@@ -170,12 +180,26 @@ function navigate(status: Status) {
 
       <InfiniteScroll :loading="timeline.loading || timeline.loadingMore" :done="!timeline.hasMore" @load-more="loadMore">
         <div class="flex flex-col" style="gap: var(--dk-gap)">
-          <DeckStatusCard
-            v-for="status in statuses"
-            :key="status.id"
-            :status="status"
-            @navigate="navigate"
-          />
+          <template v-for="item in feedItems" :key="item.key">
+            <DeckStatusCard
+              v-if="item.kind === 'status'"
+              :status="item.status"
+              @navigate="navigate"
+            />
+            <AdvertisementCard
+              v-else
+              :advertisement="item.advertisement"
+              variant="deck"
+            >
+              <template #status>
+                <DeckStatusCard
+                  v-if="item.advertisement.status"
+                  :status="item.advertisement.status"
+                  @navigate="navigate"
+                />
+              </template>
+            </AdvertisementCard>
+          </template>
 
           <div v-if="!timeline.loading && statuses.length === 0" class="dk-card dk-dim-text px-5 py-8 text-center text-[13.5px]">
             <p class="dk-text mb-1 font-semibold">{{ t('timeline.empty') }}</p>

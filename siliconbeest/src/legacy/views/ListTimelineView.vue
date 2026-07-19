@@ -7,9 +7,8 @@ import { useStatusesStore } from '@/stores/statuses'
 import { apiFetch, parseLinkHeader } from '@/api/client'
 import type { Status } from '@/types/mastodon'
 import AppShell from '@/legacy/components/layout/AppShell.vue'
-import StatusCard from '@/legacy/components/status/StatusCard.vue'
 import LoadingSpinner from '@/legacy/components/common/LoadingSpinner.vue'
-import InfiniteScroll from '@/legacy/components/common/InfiniteScroll.vue'
+import TimelineFeed from '@/legacy/components/timeline/TimelineFeed.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -149,9 +148,15 @@ watch(() => route.params.id, () => { if (route.params.id) loadList() })
           <p class="text-lg font-medium">{{ t('lists.empty_timeline') }}</p>
           <p class="text-sm mt-1">{{ t('lists.empty_timeline_hint') }}</p>
         </div>
-        <InfiniteScroll v-else :loading="loadingMore" :done="done" @load-more="loadMore">
-          <StatusCard v-for="s in statuses" :key="s.id" :status="s" />
-        </InfiniteScroll>
+        <TimelineFeed
+          v-else
+          :statuses="statuses"
+          :loading="loadingMore"
+          :done="done"
+          :timeline-key="`list:${route.params.id}`"
+          show-advertisements
+          @load-more="loadMore"
+        />
       </template>
 
       <!-- Members tab -->

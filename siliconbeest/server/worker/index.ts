@@ -86,6 +86,7 @@ import setup from './endpoints/api/v1/setup';
 import registration from './endpoints/api/v1/registration';
 import invites from './endpoints/api/v1/invites';
 import drafts from './endpoints/api/v1/drafts';
+import ads from './endpoints/api/v1/ads';
 
 // -- Auth --
 import passwords from './endpoints/api/v1/auth/passwords';
@@ -301,6 +302,7 @@ app.route('/api/v1/preferences', preferences);
 app.route('/api/v1/custom_emojis', customEmojis);
 app.route('/api/v1/markers', markers);
 app.route('/api/v1/drafts', drafts);
+app.route('/api/v1/ads', ads);
 
 app.route('/api/v1/statuses', statuses);
 app.route('/api/v1/streaming', streaming);

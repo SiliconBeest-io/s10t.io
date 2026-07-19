@@ -9,12 +9,16 @@ import { useAuthStore } from '@/stores/auth'
 import { useRecommendedTimelineFeature } from '@/composables/useRecommendedTimelineFeature'
 import InfiniteScroll from '@/components/common/InfiniteScroll.vue'
 import DeckStatusCard from './DeckStatusCard.vue'
+import AdvertisementCard from '@/components/advertisement/AdvertisementCard.vue'
+import { useAdvertisementsStore } from '@/stores/advertisements'
+import { mixAdvertisements } from '@/utils/advertisementFeed'
 
 const { t } = useI18n()
 const router = useRouter()
 const timelinesStore = useTimelinesStore()
 const statusesStore = useStatusesStore()
 const auth = useAuthStore()
+const advertisementsStore = useAdvertisementsStore()
 const { available } = useRecommendedTimelineFeature()
 
 withDefaults(defineProps<{
@@ -27,6 +31,11 @@ const timeline = computed(() => timelinesStore.getTimeline('recommended'))
 const statuses = computed(() => timeline.value.statusIds
   .map(id => statusesStore.getCached(id))
   .filter((status): status is Status => !!status))
+const feedItems = computed(() => mixAdvertisements(
+  statuses.value,
+  advertisementsStore.advertisements,
+  'deck:recommended',
+))
 
 async function refreshRecommended() {
   if (!auth.token || !available.value) return
@@ -45,6 +54,7 @@ function navigate(status: Status) {
 watch(
   [() => auth.token, available],
   ([token, enabled], [previousToken, wasEnabled] = [null, false]) => {
+    void advertisementsStore.load(token ?? undefined)
     if (token && enabled && (token !== previousToken || !wasEnabled)) {
       void refreshRecommended()
     }
@@ -102,12 +112,26 @@ watch(
         @load-more="loadMore"
       >
         <div class="flex flex-col" style="gap: var(--dk-gap)">
-          <DeckStatusCard
-            v-for="status in statuses"
-            :key="status.id"
-            :status="status"
-            @navigate="navigate"
-          />
+          <template v-for="item in feedItems" :key="item.key">
+            <DeckStatusCard
+              v-if="item.kind === 'status'"
+              :status="item.status"
+              @navigate="navigate"
+            />
+            <AdvertisementCard
+              v-else
+              :advertisement="item.advertisement"
+              variant="deck"
+            >
+              <template #status>
+                <DeckStatusCard
+                  v-if="item.advertisement.status"
+                  :status="item.advertisement.status"
+                  @navigate="navigate"
+                />
+              </template>
+            </AdvertisementCard>
+          </template>
         </div>
       </InfiniteScroll>
     </div>

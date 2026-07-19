@@ -117,6 +117,8 @@ watch(
 
       <TimelineFeed
         :statuses="statuses"
+        :timeline-key="timelineType"
+        show-advertisements
         :loading="timeline.loading || timeline.loadingMore"
         :done="!timeline.hasMore"
         :has-new-posts="hasNewPosts"

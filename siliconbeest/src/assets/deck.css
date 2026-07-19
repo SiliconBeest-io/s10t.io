@@ -211,6 +211,38 @@
   padding: 1px 5px;
 }
 
+/* Desktop rail: icon and label share a row so a long menu remains visible
+   without scrolling on ordinary laptop-height screens. Mobile keeps the
+   original stacked bottom-navigation treatment above. */
+.dk-side-rail .dk-rail-item {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 9px;
+}
+.dk-side-rail .dk-rail-item:hover {
+  transform: translateX(2px);
+}
+.dk-side-rail .dk-rail-label {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  text-align: left;
+  font-size: 10.5px;
+}
+.dk-side-rail .dk-rail-caption {
+  align-self: flex-start;
+  margin: 1px 8px;
+}
+.dk-side-rail .dk-rail-badge {
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+}
+
 /* Dropdown menus */
 .dk-menu {
   background: var(--dk-surface);

@@ -20,6 +20,7 @@ const allNavItems = [
   { key: 'invitation_credits', path: '/admin/invitation-credits', icon: '🎟️', adminOnly: true },
   { key: 'invitation_audit_logs', path: '/admin/invitation-audit-logs', icon: '📋', adminOnly: true },
   { key: 'announcements', path: '/admin/announcements', icon: '📢', adminOnly: false },
+  { key: 'advertisements', path: '/admin/ads', icon: '📣', adminOnly: true },
   { key: 'rules', path: '/admin/rules', icon: '📜', adminOnly: true },
   { key: 'relays', path: '/admin/relays', icon: '🔗', adminOnly: true },
   { key: 'custom_emojis', path: '/admin/custom-emojis', icon: '😀', adminOnly: true },

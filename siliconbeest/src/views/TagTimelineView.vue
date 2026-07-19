@@ -82,6 +82,8 @@ watch(tag, () => {
 
       <TimelineFeed
         :statuses="statuses"
+        :timeline-key="`tag:${tag}`"
+        show-advertisements
         :loading="timeline.loading || timeline.loadingMore"
         :done="!timeline.hasMore"
         @load-more="loadMore"

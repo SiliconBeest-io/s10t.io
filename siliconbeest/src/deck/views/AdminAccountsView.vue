@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { getAdminAccounts, changeRole, sendAdminEmail } from '@/api/mastodon/admin'
 import { apiFetch } from '@/api/client'
+import type { RegistrationState } from '@/types/registration'
 import DeckAdminLayout from '@/deck/layout/DeckAdminLayout.vue'
 
 const { t } = useI18n()
@@ -18,6 +19,7 @@ interface AdminAccount {
   created_at: string
   disabled: boolean
   approved: boolean
+  registration_state: RegistrationState | null
   silenced: boolean
   suspended: boolean
   confirmed: boolean
@@ -27,7 +29,9 @@ interface AdminAccount {
 const accounts = ref<AdminAccount[]>([])
 const loading = ref(true)
 const error = ref('')
-const filter = ref<'all' | 'local' | 'remote' | 'pending'>('all')
+type AccountFilter = 'all' | 'local' | 'remote' | 'pending' | 'verification'
+
+const filter = ref<AccountFilter>('all')
 const actionMessage = ref('')
 const searchQuery = ref('')
 const hasMore = ref(false)
@@ -48,6 +52,7 @@ function buildParams(extra?: Record<string, string>): Record<string, string> {
   if (filter.value === 'local') params.local = 'true'
   if (filter.value === 'remote') params.remote = 'true'
   if (filter.value === 'pending') params.pending = 'true'
+  if (filter.value === 'verification') params.status = 'verification'
   const q = searchQuery.value.trim()
   if (q) {
     // Search by username and email simultaneously
@@ -126,7 +131,8 @@ async function handleAction(account: AdminAccount, action: string) {
       })
     }
     if (action === 'approve') {
-      account.approved = true
+      account.approved = false
+      account.registration_state = 'awaiting_confirmation'
       if (filter.value === 'pending') {
         accounts.value = accounts.value.filter((a) => a.id !== account.id)
       }
@@ -183,7 +189,7 @@ async function handleSendEmail() {
   }
 }
 
-function changeFilter(f: 'all' | 'local' | 'remote' | 'pending') {
+function changeFilter(f: AccountFilter) {
   filter.value = f
   loadAccounts()
 }
@@ -192,10 +198,24 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString()
 }
 
+function isApprovalPending(account: AdminAccount) {
+  return account.registration_state === 'pending_approval'
+}
+
+function isVerificationPending(account: AdminAccount) {
+  return account.registration_state === 'awaiting_confirmation'
+    || account.registration_state === 'email_verification'
+}
+
+function isRegistrationPending(account: AdminAccount) {
+  return isApprovalPending(account) || isVerificationPending(account)
+}
+
 function statusBadge(account: AdminAccount) {
   if (account.suspended) return { text: t('admin_accounts.status_suspended'), color: 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300' }
   if (account.silenced) return { text: t('admin_accounts.status_silenced'), color: 'bg-orange-50 text-orange-700 dark:bg-orange-950/60 dark:text-orange-300' }
-  if (!account.approved) return { text: t('admin_accounts.status_pending'), color: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' }
+  if (isApprovalPending(account)) return { text: t('admin_accounts.status_pending'), color: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300' }
+  if (isVerificationPending(account)) return { text: t('admin_accounts.status_verification'), color: 'bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300' }
   if (account.disabled) return { text: t('admin_accounts.status_disabled'), color: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' }
   return { text: t('admin_accounts.status_active'), color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300' }
 }
@@ -237,6 +257,7 @@ const inputClass = 'sb-input'
       <button :class="tabClass(filter === 'local')" @click="changeFilter('local')">{{ t('admin_accounts.filter_local') }}</button>
       <button :class="tabClass(filter === 'remote')" @click="changeFilter('remote')">{{ t('admin_accounts.filter_remote') }}</button>
       <button :class="tabClass(filter === 'pending')" @click="changeFilter('pending')">{{ t('admin_accounts.filter_pending') }}</button>
+      <button :class="tabClass(filter === 'verification')" @click="changeFilter('verification')">{{ t('admin_accounts.filter_verification') }}</button>
     </div>
 
     <!-- Messages -->
@@ -275,7 +296,7 @@ const inputClass = 'sb-input'
                   {{ account.username }}
                   <span v-if="account.domain" class="font-normal text-slate-400 dark:text-slate-500">@{{ account.domain }}</span>
                 </div>
-                <div v-if="!account.approved && account.invite_request" class="mt-1 rounded-lg bg-surface-2 px-2 py-1 text-xs text-slate-500 dark:bg-surface-2-dark dark:text-slate-400">
+                <div v-if="isRegistrationPending(account) && account.invite_request" class="mt-1 rounded-lg bg-surface-2 px-2 py-1 text-xs text-slate-500 dark:bg-surface-2-dark dark:text-slate-400">
                   <span class="font-medium text-slate-600 dark:text-slate-300">{{ t('auth.signup_reason') }}</span>
                   {{ account.invite_request }}
                 </div>
@@ -300,8 +321,9 @@ const inputClass = 'sb-input'
               <td class="px-4 py-3 text-slate-600 dark:text-slate-400">{{ formatDate(account.created_at) }}</td>
               <td class="px-4 py-3">
                 <div class="flex flex-wrap gap-1">
-                  <template v-if="!account.approved">
+                  <template v-if="isRegistrationPending(account)">
                     <button
+                      v-if="isApprovalPending(account)"
                       @click="handleAction(account, 'approve')"
                       class="sb-btn sb-btn-sm bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-300 dark:hover:bg-emerald-950/80"
                     >

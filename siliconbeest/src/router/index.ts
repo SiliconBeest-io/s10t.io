@@ -329,6 +329,11 @@ const router = createRouter({
           component: () => import('@/views/AdminAnnouncementsView.vue'),
         },
         {
+          path: 'ads',
+          name: 'admin-ads',
+          component: () => import('@/views/AdminAdsView.vue'),
+        },
+        {
           path: 'rules',
           name: 'admin-rules',
           component: () => import('@/views/AdminRulesView.vue'),

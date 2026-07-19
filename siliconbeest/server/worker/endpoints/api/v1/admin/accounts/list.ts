@@ -14,7 +14,7 @@ app.get('/', async (c) => {
 	const maxId = c.req.query('max_id');
 	const minId = c.req.query('min_id');
 	const origin = c.req.query('origin'); // local | remote
-	const status = c.req.query('status'); // active | pending | disabled | silenced | suspended
+	const status = c.req.query('status'); // active | pending | verification | disabled | silenced | suspended
 	const username = c.req.query('username');
 	const displayName = c.req.query('display_name');
 	const email = c.req.query('email');
@@ -53,6 +53,8 @@ app.get('/', async (c) => {
 		conditions.push('(u.approved IS NULL OR u.approved = 1)');
 	} else if (effectiveStatus === 'pending') {
 		conditions.push("u.registration_state = 'pending_approval'");
+	} else if (effectiveStatus === 'verification') {
+		conditions.push("u.registration_state IN ('awaiting_confirmation', 'email_verification')");
 	} else if (effectiveStatus === 'disabled') {
 		conditions.push('u.disabled = 1');
 	} else if (effectiveStatus === 'silenced') {

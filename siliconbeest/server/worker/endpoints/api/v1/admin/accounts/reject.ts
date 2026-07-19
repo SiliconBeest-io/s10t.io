@@ -17,17 +17,24 @@ const app = new Hono<HonoEnv>();
 app.post('/:id/reject', async (c) => {
 	const id = c.req.param('id');
 
-	const { account, user } = await getAccountWithUser(id);
+	const { user } = await getAccountWithUser(id);
 	const currentUser = c.get('currentUser')!;
 	await assertAccountModeratable(currentUser.role, currentUser.account_id, id);
 
-	if (user.registration_state !== 'pending_approval') {
-		throw new AppError(403, 'This account is not pending approval');
+	if (user.registration_state !== 'pending_approval'
+		&& user.registration_state !== 'awaiting_confirmation'
+		&& user.registration_state !== 'email_verification') {
+		throw new AppError(403, 'This account is not awaiting registration completion');
 	}
 
-	// Atomically delete only while the account is still pending approval. This
-	// prevents a concurrent approval from being overwritten by a stale reject.
-	await deletePendingRegistration(user.id as string, 'pending_approval', 'rejected');
+	// Keep approval/rejection races strict. Verification states may advance
+	// between their two pending phases, but activation is still guarded inside
+	// deletePendingRegistration and can never be overwritten by a stale reject.
+	await deletePendingRegistration(
+		user.id as string,
+		user.registration_state === 'pending_approval' ? 'pending_approval' : undefined,
+		'rejected',
+	);
 
 	// Send the rejection only after deletion succeeds (best-effort).
 	if (user.email) {

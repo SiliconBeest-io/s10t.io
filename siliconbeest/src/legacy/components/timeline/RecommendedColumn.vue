@@ -100,6 +100,8 @@ watch(
       <TimelineFeed
         v-if="!timeline.error || statuses.length > 0"
         :statuses="statuses"
+        timeline-key="recommended"
+        show-advertisements
         :loading="timeline.loading || timeline.loadingMore"
         :done="!timeline.hasMore"
         :has-new-posts="false"
