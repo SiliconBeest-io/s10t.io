@@ -27,7 +27,6 @@ import {
   canStoreFetchedRemoteStatus,
   hasOAuthScope,
 } from '../../../../../../packages/shared/permissions';
-import { withCloudflareCnameFallback } from '../../../federation/documentLoader';
 import { serializeNaturalLanguageMap } from '../../../../../../packages/shared/utils/naturalLanguage';
 import { sanitizeArticleHtml, sanitizeHtml, sanitizePlainText } from '../../../utils/sanitize';
 
@@ -241,9 +240,7 @@ async function resolveRemoteStatusFromUrl(
     return existingVisible ? existing?.id ?? null : null;
   }
 
-  const docLoader = withCloudflareCnameFallback(
-    await ctx.getDocumentLoader({ identifier: signerUsername }),
-  );
+  const docLoader = await ctx.getDocumentLoader({ identifier: signerUsername });
   let remoteObject: unknown;
   try {
     remoteObject = await ctx.lookupObject(normalizedUrl, { documentLoader: docLoader });
