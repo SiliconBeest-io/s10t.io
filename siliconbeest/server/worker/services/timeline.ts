@@ -29,6 +29,8 @@ const ACCOUNT_COLUMNS = `
   a.memorial AS a_memorial, a.moved_to_account_id AS a_moved_to_account_id,
   a.emoji_tags AS a_emoji_tags`;
 
+const RECOMMENDATION_ID_QUERY_BATCH_SIZE = 60;
+
 export interface TimelinePaginationOpts {
   maxId?: string;
   sinceId?: string;
@@ -498,40 +500,58 @@ export async function getVisibleRecommendationStatusesByIds(
     ...boostRelationship.bindings,
   ];
 
-  // One JSON binding keeps the statement below D1's bound-parameter limit and
-  // lets the primary-key/reblog indexes drive both branches. Only eligible IDs
-  // flow out of the CTE, so wide status/account rows are materialized once.
-  const sql = `
-    WITH candidate_ids(id) AS (
-      SELECT CAST(value AS TEXT)
-      FROM json_each(?)
-    ), eligible_ids(id) AS (
-      SELECT s.id
-      FROM candidate_ids candidate
-      JOIN statuses s ON s.id = candidate.id
-      WHERE ${directConditions.join(' AND ')}
-
-      UNION
-
-      SELECT rs.id
-      FROM candidate_ids candidate
-      JOIN statuses rs ON rs.id = candidate.id
-      JOIN statuses s ON s.reblog_of_id = rs.id
-      WHERE ${originalConditions.join(' AND ')}
-        AND ${boostConditions.join(' AND ')}
-    )
-    SELECT rs.*, ${ACCOUNT_COLUMNS}
-    FROM eligible_ids eligible
-    JOIN statuses rs ON rs.id = eligible.id
-    JOIN accounts a ON a.id = rs.account_id
-  `;
-  const { results } = await env.DB.prepare(sql).bind(
-    JSON.stringify(uniqueIds),
-    ...directBinds,
-    ...originalBinds,
-    ...boostBinds,
-  ).all<TimelineStatusRow>();
-  return results ?? [];
+  // Keep candidate IDs as direct PK predicates. A json_each/UNION CTE caused
+  // SQLite to materialize the boost branch before narrowing to candidate IDs,
+  // reading millions of rows for a 60-ID recommendation reservoir. D1 batch
+  // keeps the two indexed statements in one binding round trip without giving
+  // the planner an opportunity to reorder them into a global scan.
+  const visibleById = new Map<string, TimelineStatusRow>();
+  for (
+    let offset = 0;
+    offset < uniqueIds.length;
+    offset += RECOMMENDATION_ID_QUERY_BATCH_SIZE
+  ) {
+    const batchIds = uniqueIds.slice(
+      offset,
+      offset + RECOMMENDATION_ID_QUERY_BATCH_SIZE,
+    );
+    const placeholders = batchIds.map(() => '?').join(', ');
+    const directSql = `
+      SELECT /* recommendation-direct-revalidation */ s.*, ${ACCOUNT_COLUMNS}
+      FROM statuses s
+      JOIN accounts a ON a.id = s.account_id
+      WHERE s.id IN (${placeholders})
+        AND ${directConditions.join(' AND ')}
+    `;
+    const boostSql = `
+      SELECT /* recommendation-boost-revalidation */ rs.*, ${ACCOUNT_COLUMNS}
+      FROM statuses rs
+      JOIN accounts a ON a.id = rs.account_id
+      WHERE rs.id IN (${placeholders})
+        AND ${originalConditions.join(' AND ')}
+        AND EXISTS (
+          SELECT 1
+          FROM statuses s
+          WHERE s.reblog_of_id = rs.id
+            AND ${boostConditions.join(' AND ')}
+        )
+    `;
+    const [directResult, boostResult] = await env.DB.batch<TimelineStatusRow>([
+      env.DB.prepare(directSql).bind(...batchIds, ...directBinds),
+      env.DB.prepare(boostSql).bind(
+        ...batchIds,
+        ...originalBinds,
+        ...boostBinds,
+      ),
+    ]);
+    for (const row of [
+      ...(directResult.results ?? []),
+      ...(boostResult.results ?? []),
+    ]) {
+      visibleById.set(row.id, row);
+    }
+  }
+  return [...visibleById.values()];
 }
 
 // ----------------------------------------------------------------

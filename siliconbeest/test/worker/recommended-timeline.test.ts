@@ -377,11 +377,12 @@ describe('AI recommended timeline', () => {
     expect(modelText).not.toContain('boost original lost relationship permission marker');
   });
 
-  it('revalidates a full recommendation reservoir with one indexed set query', async () => {
+  it('revalidates a default recommendation reservoir in one indexed D1 batch', async () => {
     const prepare = vi.spyOn(env.DB, 'prepare');
+    const batch = vi.spyOn(env.DB, 'batch');
     try {
       const candidateIds = Array.from(
-        { length: 200 },
+        { length: 60 },
         (_, index) => `missing-recommendation-candidate-${index}`,
       );
       await expect(getVisibleRecommendationStatusesByIds(
@@ -389,13 +390,19 @@ describe('AI recommended timeline', () => {
         viewer.accountId,
       )).resolves.toEqual([]);
 
+      expect(batch).toHaveBeenCalledTimes(1);
       const validationQueries = prepare.mock.calls
         .map(([sql]) => sql)
-        .filter((sql) => sql.includes('WITH candidate_ids(id)'));
-      expect(validationQueries).toHaveLength(1);
-      expect(validationQueries[0]).toContain('JOIN statuses s ON s.reblog_of_id = rs.id');
-      expect(validationQueries[0]).not.toContain('WHERE rs.id = s.reblog_of_id');
+        .filter((sql) => sql.includes('recommendation-') && sql.includes('-revalidation'));
+      expect(validationQueries).toHaveLength(2);
+      expect(validationQueries.every((sql) => sql.includes('.id IN ('))).toBe(true);
+      const boostQuery = validationQueries.find((sql) =>
+        sql.includes('recommendation-boost-revalidation'));
+      expect(boostQuery).toContain('s.reblog_of_id = rs.id');
+      expect(boostQuery).not.toContain('WHERE rs.id = s.reblog_of_id');
+      expect(boostQuery).not.toContain('WITH candidate_ids');
     } finally {
+      batch.mockRestore();
       prepare.mockRestore();
     }
 
