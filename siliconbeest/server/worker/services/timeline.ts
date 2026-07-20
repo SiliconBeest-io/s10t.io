@@ -1,4 +1,8 @@
 import { env } from 'cloudflare:workers';
+import {
+  canSurfaceStatus,
+  canViewStatus,
+} from '../../../../packages/shared/permissions';
 import { parsePaginationParams, buildPaginationQuery } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 import { AppError } from '../middleware/errorHandler';
@@ -57,6 +61,49 @@ type StatusTimelineCursor = {
   id: string;
   created_at: string;
 };
+
+type RecommendationSurfaceRow = {
+  readonly surface_id: string;
+  readonly candidate_id: string;
+  readonly surface_created_at: string;
+  readonly source_kind: 'direct' | 'boost';
+};
+
+type RecommendationAuthorFactRow = {
+  readonly id: string;
+  readonly domain: string | null;
+  readonly suspended_at: string | null;
+  readonly silenced_at: string | null;
+};
+
+type RecommendationPermissionStatusRow = {
+  readonly id: string;
+  readonly account_id: string;
+  readonly visibility: string | null;
+  readonly deleted_at: string | null;
+  readonly reblog_of_id: string | null;
+};
+
+type RecommendationFollowFactRow = {
+  readonly target_account_id: string;
+  readonly show_reblogs: number | null;
+};
+
+type RecommendationAccountFactRow = {
+  readonly account_id: string;
+};
+
+type RecommendationMentionFactRow = {
+  readonly status_id: string;
+};
+
+type RecommendationPermissionBatchRow =
+  | TimelineStatusRow
+  | RecommendationPermissionStatusRow
+  | RecommendationAuthorFactRow
+  | RecommendationFollowFactRow
+  | RecommendationAccountFactRow
+  | RecommendationMentionFactRow;
 
 // ----------------------------------------------------------------
 // Relationship/account-state surface filter helper
@@ -362,29 +409,8 @@ export async function getRecommendationCandidateWindow({
   // The caller already requests page size × 4 candidates. Keep only a fixed
   // invalidation/pagination reserve instead of multiplying that pool again.
   const sourceScanLimit = candidateLimit + RECOMMENDATION_SOURCE_BACKUP_ROWS;
-  const now = new Date().toISOString();
-  const directMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
-  const directRelationship = buildStatusRelationshipSqlPredicate(
-    'status',
-    viewerAccountId,
-    now,
-  );
-  const boostMembership = buildHomeTimelineMembershipPredicate(viewerAccountId);
-  const boostRelationship = buildStatusRelationshipSqlPredicate(
-    'status',
-    viewerAccountId,
-    now,
-  );
-  const originalVisibility = buildRecommendationOriginalVisibilityScopePredicate(
-    viewerAccountId,
-  );
-  const originalRelationship = buildStatusRelationshipSqlPredicate(
-    'reblogged_status',
-    viewerAccountId,
-    now,
-  );
-
-  const sql = `
+  const combinedSourceScanLimit = sourceScanLimit * 2;
+  const sourceSql = `
     WITH excluded_ids(id) AS MATERIALIZED (
       SELECT CAST(value AS TEXT)
       FROM json_each(?)
@@ -433,67 +459,215 @@ export async function getRecommendationCandidateWindow({
       SELECT * FROM recent_boost_surfaces
       ORDER BY surface_created_at DESC, surface_id DESC
       LIMIT ?
-    ), candidate_sources(candidate_id, surface_created_at) AS (
-      SELECT surface.candidate_id, surface.surface_created_at
-      FROM recent_surfaces surface
-      JOIN statuses s ON s.id = surface.surface_id
-      WHERE surface.source_kind = 'direct'
-        AND s.reblog_of_id IS NULL
-        AND s.deleted_at IS NULL
-        AND s.visibility != 'direct'
-        AND s.visibility IN ('public', 'unlisted', 'private')
-        AND (s.visibility = 'public' OR ${directMembership.sql})
-        AND ${directRelationship.sql}
-
-      UNION ALL
-
-      SELECT surface.candidate_id, surface.surface_created_at
-      FROM recent_surfaces surface
-      JOIN statuses s ON s.id = surface.surface_id
-      JOIN statuses rs ON rs.id = surface.candidate_id
-      WHERE surface.source_kind = 'boost'
-        AND s.reblog_of_id = surface.candidate_id
-        AND s.deleted_at IS NULL
-        AND s.visibility != 'direct'
-        AND s.visibility IN ('public', 'unlisted', 'private')
-        AND ${boostMembership.sql}
-        AND ${boostRelationship.sql}
-        AND rs.reblog_of_id IS NULL
-        AND rs.deleted_at IS NULL
-        AND rs.visibility != 'direct'
-        AND ${originalVisibility.sql}
-        AND ${originalRelationship.sql}
-    ), recent_ids AS (
-      SELECT source.candidate_id,
-             MAX(source.surface_created_at) AS surface_created_at
-      FROM candidate_sources source
-      GROUP BY source.candidate_id
-      ORDER BY surface_created_at DESC, source.candidate_id DESC
-      LIMIT ?
     )
-    SELECT s.*, ${ACCOUNT_COLUMNS}
-    FROM recent_ids recent
-    JOIN statuses s ON s.id = recent.candidate_id
-    JOIN accounts a ON a.id = s.account_id
-    ORDER BY recent.surface_created_at DESC, recent.candidate_id DESC
+    SELECT surface_id, candidate_id, surface_created_at, source_kind
+    FROM recent_surfaces
+    ORDER BY surface_created_at DESC, surface_id DESC
   `;
   const excludedJson = JSON.stringify([...new Set(excludedIds)]);
-  const { results } = await env.DB.prepare(sql).bind(
+  const { results: sourceResults } = await env.DB.prepare(sourceSql).bind(
     excludedJson,
     upperBound,
     sourceScanLimit,
     upperBound,
     sourceScanLimit,
-    sourceScanLimit,
-    ...directMembership.bindings,
-    ...directRelationship.bindings,
-    ...boostMembership.bindings,
-    ...boostRelationship.bindings,
-    ...originalVisibility.bindings,
-    ...originalRelationship.bindings,
-    candidateLimit,
-  ).all<TimelineStatusRow>();
-  return results ?? [];
+    combinedSourceScanLimit,
+  ).all<RecommendationSurfaceRow>();
+  const surfaces = sourceResults ?? [];
+  if (surfaces.length === 0) return [];
+
+  const requestedStatusIds = [...new Set(surfaces.flatMap((surface) => [
+    surface.surface_id,
+    surface.candidate_id,
+  ]))];
+  const requestedJson = JSON.stringify(requestedStatusIds);
+  const candidateJson = JSON.stringify([
+    ...new Set(surfaces.map((surface) => surface.candidate_id)),
+  ]);
+  const now = new Date().toISOString();
+  const requestedStatusesCte = `
+    WITH requested_ids(id) AS MATERIALIZED (
+      SELECT CAST(value AS TEXT) FROM json_each(?)
+    )`;
+  const candidateAuthorsCte = `${requestedStatusesCte},
+    candidate_authors AS MATERIALIZED (
+      SELECT DISTINCT a.id, a.domain, a.suspended_at, a.silenced_at
+      FROM requested_ids requested
+      JOIN statuses s ON s.id = requested.id
+      JOIN accounts a ON a.id = s.account_id
+    )`;
+
+  // D1 executes these simple indexed lookups in one binding round trip. The
+  // shared permission functions below replace hundreds of correlated
+  // subqueries while retaining the exact visibility and relationship policy.
+  const permissionResults = await env.DB.batch<RecommendationPermissionBatchRow>([
+    env.DB.prepare(
+      `${requestedStatusesCte}
+       SELECT s.*, ${ACCOUNT_COLUMNS}
+       FROM requested_ids requested
+       JOIN statuses s ON s.id = requested.id
+       JOIN accounts a ON a.id = s.account_id`,
+    ).bind(candidateJson),
+    env.DB.prepare(
+      `${requestedStatusesCte}
+       SELECT s.id, s.account_id, s.visibility, s.deleted_at, s.reblog_of_id
+       FROM requested_ids requested
+       JOIN statuses s ON s.id = requested.id`,
+    ).bind(requestedJson),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT id, domain, suspended_at, silenced_at
+       FROM candidate_authors`,
+    ).bind(requestedJson),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT f.target_account_id, f.show_reblogs
+       FROM candidate_authors author
+       JOIN follows f
+         ON f.account_id = ?
+        AND f.target_account_id = author.id`,
+    ).bind(requestedJson, viewerAccountId),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT m.target_account_id AS account_id
+       FROM candidate_authors author
+       JOIN mutes m
+         ON m.account_id = ?
+        AND m.target_account_id = author.id
+       WHERE m.expires_at IS NULL OR m.expires_at > ?`,
+    ).bind(requestedJson, viewerAccountId, now),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT b.target_account_id AS account_id
+       FROM candidate_authors author
+       JOIN blocks b
+         ON b.account_id = ?
+        AND b.target_account_id = author.id`,
+    ).bind(requestedJson, viewerAccountId),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT b.account_id
+       FROM candidate_authors author
+       JOIN blocks b
+         ON b.account_id = author.id
+        AND b.target_account_id = ?`,
+    ).bind(requestedJson, viewerAccountId),
+    env.DB.prepare(
+      `${candidateAuthorsCte}
+       SELECT author.id AS account_id
+       FROM candidate_authors author
+       JOIN user_domain_blocks domain_block
+         ON domain_block.account_id = ?
+        AND author.domain IS NOT NULL
+        AND lower(domain_block.domain) = lower(author.domain)`,
+    ).bind(requestedJson, viewerAccountId),
+    env.DB.prepare(
+      `${requestedStatusesCte}
+       SELECT mention.status_id
+       FROM requested_ids requested
+       JOIN mentions mention
+         ON mention.status_id = requested.id
+        AND mention.account_id = ?`,
+    ).bind(requestedJson, viewerAccountId),
+  ]);
+
+  const candidates = (permissionResults[0]?.results ?? []) as TimelineStatusRow[];
+  const statuses = (permissionResults[1]?.results ?? []) as RecommendationPermissionStatusRow[];
+  const authors = (permissionResults[2]?.results ?? []) as RecommendationAuthorFactRow[];
+  const follows = (permissionResults[3]?.results ?? []) as RecommendationFollowFactRow[];
+  const mutedAuthors = (permissionResults[4]?.results ?? []) as RecommendationAccountFactRow[];
+  const viewerBlockedAuthors = (permissionResults[5]?.results ?? []) as RecommendationAccountFactRow[];
+  const viewerBlockingAuthors = (permissionResults[6]?.results ?? []) as RecommendationAccountFactRow[];
+  const domainBlockedAuthors = (permissionResults[7]?.results ?? []) as RecommendationAccountFactRow[];
+  const mentions = (permissionResults[8]?.results ?? []) as RecommendationMentionFactRow[];
+
+  const candidateByStatusId = new Map(candidates.map((status) => [status.id, status] as const));
+  const statusById = new Map(statuses.map((status) => [status.id, status] as const));
+  const authorById = new Map(authors.map((author) => [author.id, author] as const));
+  const followByAuthorId = new Map(
+    follows.map((follow) => [follow.target_account_id, follow] as const),
+  );
+  const mutedAuthorIds = new Set(mutedAuthors.map((row) => row.account_id));
+  const viewerBlockedAuthorIds = new Set(viewerBlockedAuthors.map((row) => row.account_id));
+  const viewerBlockingAuthorIds = new Set(viewerBlockingAuthors.map((row) => row.account_id));
+  const domainBlockedAuthorIds = new Set(domainBlockedAuthors.map((row) => row.account_id));
+  const mentionedStatusIds = new Set(mentions.map((row) => row.status_id));
+
+  const canSurface = (status: RecommendationPermissionStatusRow): boolean => {
+    const authorId = status.account_id;
+    const author = authorById.get(authorId);
+    if (!author) return false;
+    const viewerFollowsAuthor = followByAuthorId.has(authorId);
+    const statusViewable = canViewStatus({
+      visibility: status.visibility,
+      viewerAccountId,
+      authorAccountId: authorId,
+      viewerFollowsAuthor,
+      viewerIsMentioned: mentionedStatusIds.has(status.id),
+      authorBlocksViewer: viewerBlockingAuthorIds.has(authorId),
+      statusDeleted: status.deleted_at !== null,
+    });
+    return canSurfaceStatus({
+      statusViewable,
+      authorSuspended: author.suspended_at !== null,
+      authorSilenced: author.silenced_at !== null,
+      viewerIsAuthor: viewerAccountId === authorId,
+      viewerFollowsAuthor,
+      viewerMutesAuthor: mutedAuthorIds.has(authorId),
+      viewerBlocksAuthor: viewerBlockedAuthorIds.has(authorId),
+      viewerBlocksAuthorDomain: domainBlockedAuthorIds.has(authorId),
+      authorBlocksViewer: viewerBlockingAuthorIds.has(authorId),
+    });
+  };
+  const isHomeMember = (
+    status: RecommendationPermissionStatusRow,
+    requireReblogConsent: boolean,
+  ): boolean => {
+    if (status.account_id === viewerAccountId) return true;
+    const follow = followByAuthorId.get(status.account_id);
+    if (!follow || status.visibility === 'direct') return false;
+    return !requireReblogConsent || (follow.show_reblogs ?? 1) !== 0;
+  };
+
+  const candidateById = new Map<
+    string,
+    { readonly row: TimelineStatusRow; readonly surfaceCreatedAt: string }
+  >();
+  surfaces.forEach((surface) => {
+    if (candidateById.has(surface.candidate_id)) return;
+    const status = statusById.get(surface.surface_id);
+    const candidate = statusById.get(surface.candidate_id);
+    const candidateRow = candidateByStatusId.get(surface.candidate_id);
+    if (!status || !candidate || !candidateRow) return;
+
+    const directAllowed = surface.source_kind === 'direct'
+      && surface.surface_id === surface.candidate_id
+      && status.reblog_of_id === null
+      && status.visibility !== 'direct'
+      && (status.visibility === 'public' || isHomeMember(status, false))
+      && canSurface(status);
+    const boostAllowed = surface.source_kind === 'boost'
+      && status.reblog_of_id === surface.candidate_id
+      && status.visibility !== 'direct'
+      && isHomeMember(status, true)
+      && canSurface(status)
+      && candidate.reblog_of_id === null
+      && candidate.visibility !== 'direct'
+      && canSurface(candidate);
+    if (!directAllowed && !boostAllowed) return;
+    candidateById.set(surface.candidate_id, {
+      row: candidateRow,
+      surfaceCreatedAt: surface.surface_created_at,
+    });
+  });
+
+  return [...candidateById.entries()]
+    .sort(([leftId, left], [rightId, right]) => (
+      right.surfaceCreatedAt.localeCompare(left.surfaceCreatedAt)
+      || rightId.localeCompare(leftId)
+    ))
+    .slice(0, candidateLimit)
+    .map(([, candidate]) => candidate.row);
 }
 
 /**

@@ -445,15 +445,16 @@ describe('AI recommended timeline', () => {
       expect(candidateQuery).toContain('recent_direct_surfaces(');
       expect(candidateQuery).toContain('recent_boost_surfaces(');
       expect(candidateQuery).toContain('recent_surfaces AS MATERIALIZED');
-      expect(candidateQuery).toContain("WHERE surface.source_kind = 'direct'");
-      expect(candidateQuery).toContain("WHERE surface.source_kind = 'boost'");
+      expect(candidateQuery).toContain(
+        'SELECT surface_id, candidate_id, surface_created_at, source_kind',
+      );
       expect(candidateQuery).toContain('INDEXED BY idx_statuses_recommendation_original_cursor');
       expect(candidateQuery).toContain('INDEXED BY idx_statuses_recommendation_boost_cursor');
       expect(candidateQuery).toContain('WHERE excluded.id = s.id');
       expect(candidateQuery).toContain('WHERE excluded.id = rs.id');
+      expect(candidateQuery).not.toContain('relationship_author');
       expect(candidateQuery).not.toContain('permission_author');
       expect(candidateQuery).not.toContain('permission_author_block');
-      expect(candidateQuery).toContain('recommendation_original_follow');
     } finally {
       prepare.mockRestore();
     }
