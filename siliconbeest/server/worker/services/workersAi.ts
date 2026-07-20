@@ -194,13 +194,65 @@ function requireTranslationInput(text: string): string {
   if (normalized.length === 0) {
     throw new WorkersAiServiceError('invalid_input', 'Translation text is required');
   }
-  if (normalized.length > MAX_WORKERS_AI_TRANSLATION_CHARACTERS) {
-    throw new WorkersAiServiceError(
-      'invalid_input',
-      `Translation text exceeds ${MAX_WORKERS_AI_TRANSLATION_CHARACTERS} characters`,
-    );
-  }
   return normalized;
+}
+
+function splitOversizedParagraph(paragraph: string): readonly string[] {
+  const batches: string[] = [];
+  let remaining = paragraph;
+
+  while (remaining.length > MAX_WORKERS_AI_TRANSLATION_CHARACTERS) {
+    const window = remaining.slice(0, MAX_WORKERS_AI_TRANSLATION_CHARACTERS + 1);
+    const whitespaceBoundary = Math.max(
+      window.lastIndexOf(' '),
+      window.lastIndexOf('\n'),
+      window.lastIndexOf('\t'),
+    );
+    const splitAt = whitespaceBoundary > 0
+      ? whitespaceBoundary
+      : MAX_WORKERS_AI_TRANSLATION_CHARACTERS;
+    batches.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  if (remaining) batches.push(remaining);
+  return batches;
+}
+
+/**
+ * Split translation input at paragraph boundaries without exceeding the model
+ * limit. A single oversized paragraph falls back to whitespace, then a hard
+ * character boundary, so every inference request remains valid.
+ */
+export function splitWorkersAiTranslationText(text: string): readonly string[] {
+  const normalized = requireTranslationInput(text);
+  const batches: string[] = [];
+  let current = '';
+
+  for (const rawParagraph of normalized.split(/\n{2,}/)) {
+    const paragraph = rawParagraph.trim();
+    if (!paragraph) continue;
+
+    if (paragraph.length > MAX_WORKERS_AI_TRANSLATION_CHARACTERS) {
+      if (current) {
+        batches.push(current);
+        current = '';
+      }
+      batches.push(...splitOversizedParagraph(paragraph));
+      continue;
+    }
+
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length > MAX_WORKERS_AI_TRANSLATION_CHARACTERS) {
+      batches.push(current);
+      current = paragraph;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) batches.push(current);
+  return batches;
 }
 
 /** Translate text with the configured m2m100-compatible or IndicTrans2 adapter. */
@@ -210,11 +262,12 @@ export async function translateWithWorkersAi(
   targetLanguage: string,
   bindings: object = env,
 ): Promise<WorkersAiTranslation> {
-  const normalizedText = requireTranslationInput(text);
+  const batches = splitWorkersAiTranslationText(text);
   if (targetLanguage.trim().length === 0) {
     throw new WorkersAiServiceError('invalid_input', 'A target language is required');
   }
   const model = getWorkersAiModels(bindings).translation;
+  const translatedBatches: string[] = [];
 
   if (model === INDIC_TRANSLATION_MODEL) {
     if (normalizeM2mLanguage(sourceLanguage) !== 'en') {
@@ -230,32 +283,38 @@ export async function translateWithWorkersAi(
         `IndicTrans2 does not support target language ${targetLanguage}`,
       );
     }
-    const response = await runWorkersAiModel(model, {
-      text: normalizedText,
-      target_language: target,
-    }, bindings);
-    const translations = response.translations;
-    const translatedText = Array.isArray(translations) && typeof translations[0] === 'string'
-      ? translations[0].trim()
-      : '';
-    if (!translatedText) {
-      throw new WorkersAiServiceError('invalid_response', 'IndicTrans2 returned no translation');
+    for (const batch of batches) {
+      const response = await runWorkersAiModel(model, {
+        text: batch,
+        target_language: target,
+      }, bindings);
+      const translations = response.translations;
+      const translatedText = Array.isArray(translations) && typeof translations[0] === 'string'
+        ? translations[0].trim()
+        : '';
+      if (!translatedText) {
+        throw new WorkersAiServiceError('invalid_response', 'IndicTrans2 returned no translation');
+      }
+      translatedBatches.push(translatedText);
     }
-    return { translatedText, model };
+    return { translatedText: translatedBatches.join('\n\n'), model };
   }
 
-  const response = await runWorkersAiModel(model, {
-    text: normalizedText,
-    source_lang: normalizeM2mLanguage(sourceLanguage),
-    target_lang: normalizeM2mLanguage(targetLanguage),
-  }, bindings);
-  const translatedText = typeof response.translated_text === 'string'
-    ? response.translated_text.trim()
-    : '';
-  if (!translatedText) {
-    throw new WorkersAiServiceError('invalid_response', 'Translation model returned no translation');
+  for (const batch of batches) {
+    const response = await runWorkersAiModel(model, {
+      text: batch,
+      source_lang: normalizeM2mLanguage(sourceLanguage),
+      target_lang: normalizeM2mLanguage(targetLanguage),
+    }, bindings);
+    const translatedText = typeof response.translated_text === 'string'
+      ? response.translated_text.trim()
+      : '';
+    if (!translatedText) {
+      throw new WorkersAiServiceError('invalid_response', 'Translation model returned no translation');
+    }
+    translatedBatches.push(translatedText);
   }
-  return { translatedText, model };
+  return { translatedText: translatedBatches.join('\n\n'), model };
 }
 
 function arrayBufferToDataUri(bytes: ArrayBuffer, mime: string): string {

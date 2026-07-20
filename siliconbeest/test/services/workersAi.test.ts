@@ -9,6 +9,7 @@ import {
   getWorkersAiModels,
   isWorkersAiEnabled,
   runWorkersAiModel,
+  splitWorkersAiTranslationText,
   translateWithWorkersAi,
 } from '../../server/worker/services/workersAi';
 
@@ -96,6 +97,27 @@ describe('optional Workers AI binding', () => {
 });
 
 describe('Workers AI translation adapters', () => {
+  it('splits oversized input at the last paragraph before the character limit', () => {
+    const first = 'a'.repeat(6_000);
+    const second = 'b'.repeat(4_000);
+    const third = 'c'.repeat(5_000);
+
+    expect(splitWorkersAiTranslationText(`${first}\n\n${second}\n\n${third}`))
+      .toEqual([first, `${second}\n\n${third}`]);
+  });
+
+  it('hard-splits a single oversized paragraph so no batch exceeds the limit', () => {
+    const batches = splitWorkersAiTranslationText(
+      '가'.repeat(MAX_WORKERS_AI_TRANSLATION_CHARACTERS * 2 + 1),
+    );
+
+    expect(batches.map((batch) => batch.length)).toEqual([
+      MAX_WORKERS_AI_TRANSLATION_CHARACTERS,
+      MAX_WORKERS_AI_TRANSLATION_CHARACTERS,
+      1,
+    ]);
+  });
+
   it('uses the m2m100-compatible request and response shape', async () => {
     const run = vi.fn(async () => ({ translated_text: '  Hello world  ' }));
     const configuredModel = '@cf/test/future-m2m-compatible-model';
@@ -114,6 +136,26 @@ describe('Workers AI translation adapters', () => {
       source_lang: 'ko',
       target_lang: 'en',
     });
+  });
+
+  it('translates paragraph batches in order and combines their results', async () => {
+    const first = '가'.repeat(6_000);
+    const second = '나'.repeat(4_001);
+    const run = vi.fn(async (_model: string, input: Record<string, unknown>) => ({
+      translated_text: input.text === first ? 'First batch' : 'Second batch',
+    }));
+
+    await expect(translateWithWorkersAi(
+      `${first}\n\n${second}`,
+      'ko',
+      'en',
+      bindings(run),
+    )).resolves.toEqual({
+      translatedText: 'First batch\n\nSecond batch',
+      model: DEFAULT_WORKERS_AI_MODELS.translation,
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls.map(([, input]) => input.text)).toEqual([first, second]);
   });
 
   it('uses the distinct IndicTrans2 request and response shape', async () => {
@@ -155,15 +197,6 @@ describe('Workers AI translation adapters', () => {
 
     await expectServiceError(
       translateWithWorkersAi('', 'ko', 'en', configured),
-      'invalid_input',
-    );
-    await expectServiceError(
-      translateWithWorkersAi(
-        'x'.repeat(MAX_WORKERS_AI_TRANSLATION_CHARACTERS + 1),
-        'ko',
-        'en',
-        configured,
-      ),
       'invalid_input',
     );
     await expectServiceError(

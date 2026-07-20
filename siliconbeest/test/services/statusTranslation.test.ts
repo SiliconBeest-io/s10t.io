@@ -11,6 +11,12 @@ describe('status translation text boundaries', () => {
     )).toBe('Hello & world');
   });
 
+  it('preserves HTML block boundaries as paragraphs for translation batching', () => {
+    expect(statusHtmlToTranslationText(
+      '<p>First line<br>continued</p><blockquote>Second paragraph</blockquote>',
+    )).toBe('First line\ncontinued\n\nSecond paragraph');
+  });
+
   it('renders translated model output as safe status HTML', () => {
     const html = translatedStatusTextToHtml(
       '<script>alert(1)</script> & translated',

@@ -8,7 +8,6 @@ import { requireScope } from '../../../../middleware/scopeCheck';
 import { AppError } from '../../../../middleware/errorHandler';
 import { buildStatusVisibilitySqlPredicate } from '../../../../services/permissions';
 import {
-  MAX_WORKERS_AI_TRANSLATION_CHARACTERS,
   WorkersAiServiceError,
   translateWithWorkersAi,
 } from '../../../../services/workersAi';
@@ -35,7 +34,19 @@ type TranslatableStatusRow = {
 const LANGUAGE_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i;
 
 export function statusHtmlToTranslationText(value: string): string {
-  return decodeHTML(sanitizePlainText(value));
+  const textWithParagraphs = value
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<style[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<br\b[^>]*\/?\s*>/gi, '\n')
+    .replace(/<\/(?:p|div|blockquote|pre|li|h[1-6])\s*>/gi, '\n\n')
+    .replace(/<[a-zA-Z/][^>]*>/g, ' ');
+
+  return decodeHTML(textWithParagraphs)
+    .replace(/[^\S\r\n]+/g, ' ')
+    .replace(/ *\r?\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 export function translatedStatusTextToHtml(value: string, domain: string): string {
@@ -166,14 +177,6 @@ app.on(
     if (!contentText) {
       throw new AppError(422, 'Validation failed', 'The status has no translatable text');
     }
-    if (contentText.length + spoilerText.length > MAX_WORKERS_AI_TRANSLATION_CHARACTERS) {
-      throw new AppError(
-        422,
-        'Validation failed',
-        `Translation text exceeds ${MAX_WORKERS_AI_TRANSLATION_CHARACTERS} characters`,
-      );
-    }
-
     const rateLimit = await consumeWorkersAiRateLimit('translation', currentAccountId);
     if (!rateLimit.allowed) {
       const unavailable = rateLimit.reason === 'unavailable';
