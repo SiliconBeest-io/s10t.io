@@ -388,8 +388,13 @@ export async function getRecommendationCandidateWindow({
     WITH excluded_ids(id) AS MATERIALIZED (
       SELECT CAST(value AS TEXT)
       FROM json_each(?)
-    ), recent_direct_surfaces(surface_id) AS MATERIALIZED (
-      SELECT s.id
+    ), recent_direct_surfaces(
+      surface_id,
+      candidate_id,
+      surface_created_at,
+      source_kind
+    ) AS MATERIALIZED (
+      SELECT s.id, s.id, s.created_at, 'direct'
       FROM statuses s INDEXED BY idx_statuses_recommendation_original_cursor
       WHERE s.created_at <= ?
         AND s.reblog_of_id IS NULL
@@ -402,8 +407,13 @@ export async function getRecommendationCandidateWindow({
         )
       ORDER BY s.created_at DESC, s.id DESC
       LIMIT ?
-    ), recent_boost_surfaces(surface_id) AS MATERIALIZED (
-      SELECT s.id
+    ), recent_boost_surfaces(
+      surface_id,
+      candidate_id,
+      surface_created_at,
+      source_kind
+    ) AS MATERIALIZED (
+      SELECT s.id, rs.id, s.created_at, 'boost'
       FROM statuses s INDEXED BY idx_statuses_recommendation_boost_cursor
       JOIN statuses rs ON rs.id = s.reblog_of_id
       WHERE s.created_at <= ?
@@ -417,11 +427,18 @@ export async function getRecommendationCandidateWindow({
         )
       ORDER BY s.created_at DESC, s.id DESC
       LIMIT ?
+    ), recent_surfaces AS MATERIALIZED (
+      SELECT * FROM recent_direct_surfaces
+      UNION ALL
+      SELECT * FROM recent_boost_surfaces
+      ORDER BY surface_created_at DESC, surface_id DESC
+      LIMIT ?
     ), candidate_sources(candidate_id, surface_created_at) AS (
-      SELECT s.id, s.created_at
-      FROM recent_direct_surfaces surface
+      SELECT surface.candidate_id, surface.surface_created_at
+      FROM recent_surfaces surface
       JOIN statuses s ON s.id = surface.surface_id
-      WHERE s.reblog_of_id IS NULL
+      WHERE surface.source_kind = 'direct'
+        AND s.reblog_of_id IS NULL
         AND s.deleted_at IS NULL
         AND s.visibility != 'direct'
         AND s.visibility IN ('public', 'unlisted', 'private')
@@ -430,11 +447,12 @@ export async function getRecommendationCandidateWindow({
 
       UNION ALL
 
-      SELECT rs.id, s.created_at
-      FROM recent_boost_surfaces surface
+      SELECT surface.candidate_id, surface.surface_created_at
+      FROM recent_surfaces surface
       JOIN statuses s ON s.id = surface.surface_id
-      JOIN statuses rs ON rs.id = s.reblog_of_id
-      WHERE s.reblog_of_id IS NOT NULL
+      JOIN statuses rs ON rs.id = surface.candidate_id
+      WHERE surface.source_kind = 'boost'
+        AND s.reblog_of_id = surface.candidate_id
         AND s.deleted_at IS NULL
         AND s.visibility != 'direct'
         AND s.visibility IN ('public', 'unlisted', 'private')
@@ -465,6 +483,7 @@ export async function getRecommendationCandidateWindow({
     upperBound,
     sourceScanLimit,
     upperBound,
+    sourceScanLimit,
     sourceScanLimit,
     ...directMembership.bindings,
     ...directRelationship.bindings,

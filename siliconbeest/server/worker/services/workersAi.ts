@@ -129,7 +129,13 @@ export async function runWorkersAiModel(
   if (!isRecord(response)) {
     throw new WorkersAiServiceError('invalid_response', 'Workers AI returned an invalid response');
   }
-  return response;
+
+  // Most binding calls return the model payload directly, but some Workers AI
+  // models return the REST-style envelope used by the remote binding as
+  // `{ result: <model payload>, usage: ... }`. Normalize both shapes here so
+  // model adapters do not mistake a successful inference for an empty result.
+  const result = response.result;
+  return isRecord(result) ? result : response;
 }
 
 export function isWorkersAiTranslationEnabled(bindings: object = env): boolean {

@@ -441,9 +441,12 @@ describe('AI recommended timeline', () => {
 
       const candidateQuery = prepare.mock.calls
         .map(([sql]) => sql)
-        .find((sql) => sql.includes('recent_direct_surfaces(surface_id)'));
-      expect(candidateQuery).toContain('recent_direct_surfaces(surface_id) AS MATERIALIZED');
-      expect(candidateQuery).toContain('recent_boost_surfaces(surface_id) AS MATERIALIZED');
+        .find((sql) => sql.includes('recent_direct_surfaces('));
+      expect(candidateQuery).toContain('recent_direct_surfaces(');
+      expect(candidateQuery).toContain('recent_boost_surfaces(');
+      expect(candidateQuery).toContain('recent_surfaces AS MATERIALIZED');
+      expect(candidateQuery).toContain("WHERE surface.source_kind = 'direct'");
+      expect(candidateQuery).toContain("WHERE surface.source_kind = 'boost'");
       expect(candidateQuery).toContain('INDEXED BY idx_statuses_recommendation_original_cursor');
       expect(candidateQuery).toContain('INDEXED BY idx_statuses_recommendation_boost_cursor');
       expect(candidateQuery).toContain('WHERE excluded.id = s.id');

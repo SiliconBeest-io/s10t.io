@@ -73,6 +73,16 @@ describe('optional Workers AI binding', () => {
     expect(run).toHaveBeenCalledWith('@cf/test/ranker', input);
   });
 
+  it('unwraps the REST-style result envelope returned by remote bindings', async () => {
+    const run = vi.fn(async () => ({
+      result: { caption: 'A small cat.' },
+      usage: { total_tokens: 100 },
+    }));
+
+    await expect(runWorkersAiModel('@cf/test/captioner', {}, bindings(run)))
+      .resolves.toEqual({ caption: 'A small cat.' });
+  });
+
   it('fails predictably when disabled or when a model returns a non-object', async () => {
     await expectServiceError(
       runWorkersAiModel('@cf/test/model', {}, { WORKERS_AI_ENABLED: false }),
@@ -200,6 +210,19 @@ describe('Workers AI image caption adapters', () => {
       caption_length: 'short',
       stream: false,
     });
+  });
+
+  it('reads a Moondream caption from the remote binding result envelope', async () => {
+    const run = vi.fn(async () => ({
+      result: { caption: '  A black square.  ' },
+      usage: { total_tokens: 741 },
+    }));
+
+    await expect(generateImageAltText(
+      Uint8Array.from([1, 2, 3]).buffer,
+      'image/png',
+      bindings(run),
+    )).resolves.toBe('A black square.');
   });
 
   it('passes an HTTPS image URL to Moondream without embedding bytes', async () => {
