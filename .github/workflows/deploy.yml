@@ -10,6 +10,10 @@
 #   AUTO_DEPLOY — "true" (default) or "false" (disable auto-deploy on push)
 #   SENTRY_ORG     — Sentry organization slug (required when SENTRY_AUTH_TOKEN secret is set)
 #   SENTRY_PROJECT — Sentry project slug for the main worker (required when SENTRY_AUTH_TOKEN secret is set)
+#   SENTRY_CLIENT_DSN — Sentry DSN for frontend error tracking (unset = frontend Sentry off;
+#                       DSNs are public keys, safe to store as a Variable)
+#   SENTRY_FEEDBACK_ENABLED — "false" (default) or "true" (show the Sentry user-feedback
+#                             widget in the frontend; requires SENTRY_CLIENT_DSN)
 # Optional GitHub Secrets:
 #   SENTRY_AUTH_TOKEN — Sentry auth token for CI source map upload (unset = upload skipped)
 # GitHub Environment Variables (production):
@@ -28,6 +32,12 @@
 #   WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID — positive integer (default "1001")
 #   WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID — positive integer (default "1002")
 #   WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID — positive integer (default "1003")
+#   OBSERVABILITY_LOGS_DESTINATIONS — comma-separated Workers Observability logs destination
+#                                     names from the Cloudflare dashboard, e.g. "sentry-logs"
+#                                     (unset = no log drain)
+#   OBSERVABILITY_TRACES_DESTINATIONS — comma-separated Workers Observability traces destination
+#                                     names from the Cloudflare dashboard, e.g. "sentry-traces"
+#                                     (unset = no trace drain)
 # Use namespace IDs that differ from the preview environment.
 # =============================================================================
 
@@ -85,6 +95,8 @@ jobs:
           V_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID: ${{ vars.WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID }}
           V_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID: ${{ vars.WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID }}
           V_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID: ${{ vars.WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID }}
+          V_OBSERVABILITY_LOGS_DESTINATIONS: ${{ vars.OBSERVABILITY_LOGS_DESTINATIONS }}
+          V_OBSERVABILITY_TRACES_DESTINATIONS: ${{ vars.OBSERVABILITY_TRACES_DESTINATIONS }}
           V_D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
           V_KV_CACHE_ID: ${{ vars.KV_CACHE_ID }}
           V_KV_SESSIONS_ID: ${{ vars.KV_SESSIONS_ID }}
@@ -111,6 +123,8 @@ jobs:
           WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID="${V_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_NAMESPACE_ID:-1001}"
           WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID="${V_WORKERS_AI_TRANSLATION_RATE_LIMIT_NAMESPACE_ID:-1002}"
           WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID="${V_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_NAMESPACE_ID:-1003}"
+          OBSERVABILITY_LOGS_DESTINATIONS="${V_OBSERVABILITY_LOGS_DESTINATIONS}"
+          OBSERVABILITY_TRACES_DESTINATIONS="${V_OBSERVABILITY_TRACES_DESTINATIONS}"
           D1_DATABASE_ID="${V_D1_DATABASE_ID}"
           KV_CACHE_ID="${V_KV_CACHE_ID}"
           KV_SESSIONS_ID="${V_KV_SESSIONS_ID}"
@@ -128,6 +142,8 @@ jobs:
       - name: Build
         run: |
           echo "VITE_INSTANCE_DOMAIN=${{ vars.INSTANCE_DOMAIN }}" > siliconbeest/.env
+          echo "NUXT_PUBLIC_SENTRY_DSN=${{ vars.SENTRY_CLIENT_DSN }}" >> siliconbeest/.env
+          echo "NUXT_PUBLIC_SENTRY_FEEDBACK=${{ vars.SENTRY_FEEDBACK_ENABLED || 'false' }}" >> siliconbeest/.env
           cd siliconbeest && pnpm run build
           ls -la .output/public/
 

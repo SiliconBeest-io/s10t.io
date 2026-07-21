@@ -23,10 +23,14 @@ if (displayLocale !== 'en') {
 // Optional Sentry -- only init if DSN is configured
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
 if (sentryDsn) {
+  const feedbackEnabled = import.meta.env.VITE_SENTRY_FEEDBACK === 'true';
   Sentry.init({
     app,
     dsn: sentryDsn,
-    integrations: [Sentry.browserTracingIntegration({ router })],
+    integrations: [
+      Sentry.browserTracingIntegration({ router }),
+      ...(feedbackEnabled ? [Sentry.feedbackIntegration({ colorScheme: 'system' })] : []),
+    ],
     tracesSampleRate: 0.1,
   });
 }

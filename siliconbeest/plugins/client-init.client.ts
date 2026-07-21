@@ -21,10 +21,14 @@ export default defineNuxtPlugin((nuxtApp) => {
 
   const sentryDsn = config.public.sentryDsn;
   if (sentryDsn) {
+    const feedbackEnabled = String(config.public.sentryFeedback) === 'true';
     Sentry.init({
       app: nuxtApp.vueApp,
       dsn: sentryDsn,
       tracesSampleRate: 0.1,
+      integrations: feedbackEnabled
+        ? [Sentry.feedbackIntegration({ colorScheme: 'system' })]
+        : [],
     });
   }
 

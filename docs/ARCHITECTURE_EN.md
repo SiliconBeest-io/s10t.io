@@ -2413,6 +2413,7 @@ No service bindings. Static asset serving only.
 | `VITE_INSTANCE_DOMAIN` | Yes | Instance domain (for meta tags) |
 | `VITE_VAPID_PUBLIC_KEY` | Yes | VAPID public key (for Web Push subscription) |
 | `VITE_SENTRY_DSN` | No | Sentry DSN for error tracking |
+| `VITE_SENTRY_FEEDBACK` | No | `true` shows the Sentry user-feedback widget (requires `VITE_SENTRY_DSN`) |
 
 ### Instance Settings (D1 `settings` table)
 

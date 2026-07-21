@@ -358,13 +358,16 @@ See the full [scripts documentation](scripts/README.md) for all options and flag
 | `REGISTRATION_MODE` | `open` / `approval` / `closed` | `open` |
 | `SKIP_SIGNATURE_VERIFICATION` | Explicit `true` / `false` override for inbound HTTP signature verification; GitHub Actions reads this from GitHub Environment Variables during deploy | `false` |
 
+> **Observability drains** (optional): to forward the main worker's logs/traces to an OTLP backend such as Sentry, first create Logs/Traces destinations under **Workers & Pages → Observability** in the Cloudflare dashboard, then set `OBSERVABILITY_LOGS_DESTINATIONS` / `OBSERVABILITY_TRACES_DESTINATIONS` (comma-separated destination names) as GitHub Environment Variables — or in `scripts/config.env` for manual deploys. `sync-config.sh` writes them into the `observability.logs` / `observability.traces` blocks of the main worker's `wrangler.jsonc`.
+
 ### Frontend Environment (siliconbeest/.env)
 
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `VITE_INSTANCE_DOMAIN` | Instance domain (for meta tags) | Yes |
 | `VITE_VAPID_PUBLIC_KEY` | VAPID public key (for Web Push) | Yes |
-| `VITE_SENTRY_DSN` | Sentry DSN for error tracking | No |
+| `VITE_SENTRY_DSN` | Sentry DSN for error tracking (CI deploys read the `SENTRY_CLIENT_DSN` GitHub Variable instead) | No |
+| `VITE_SENTRY_FEEDBACK` | `true` shows the Sentry user-feedback widget (requires `VITE_SENTRY_DSN`; CI deploys read the `SENTRY_FEEDBACK_ENABLED` GitHub Variable) | No |
 
 ---
 

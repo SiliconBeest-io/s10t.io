@@ -371,6 +371,42 @@ if [[ -n "$WORKERS_AI_BINDING_BLOCK" ]]; then
   WORKERS_AI_BINDING_BLOCK+=$'\n'
 fi
 
+# --- Optional Workers Observability drains (main worker only) ---
+# Comma-separated destination names created beforehand in the Cloudflare
+# dashboard (Workers & Pages → Observability → Destinations), e.g. Sentry
+# OTLP log/trace drains. Empty = no destinations emitted.
+CURRENT_OBSERVABILITY_LOGS_DESTINATIONS="${OBSERVABILITY_LOGS_DESTINATIONS:-}"
+CURRENT_OBSERVABILITY_TRACES_DESTINATIONS="${OBSERVABILITY_TRACES_DESTINATIONS:-}"
+
+build_destinations_entry() {
+  local variable_name="$1"
+  local raw="$2"
+  local json=""
+  local name
+  DESTINATIONS_ENTRY=""
+  local IFS=','
+  for name in $raw; do
+    name="${name#"${name%%[![:space:]]*}"}"
+    name="${name%"${name##*[![:space:]]}"}"
+    if [[ -z "$name" ]]; then
+      continue
+    fi
+    if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]; then
+      error "$variable_name entries must be alphanumeric destination names (dash/underscore allowed), got: $name"
+      exit 1
+    fi
+    json+="${json:+, }\"${name}\""
+  done
+  if [[ -n "$json" ]]; then
+    DESTINATIONS_ENTRY=$',\n\t    "destinations": ['"$json"']'
+  fi
+}
+
+build_destinations_entry OBSERVABILITY_LOGS_DESTINATIONS "$CURRENT_OBSERVABILITY_LOGS_DESTINATIONS"
+OBSERVABILITY_LOGS_DESTINATIONS_ENTRY="$DESTINATIONS_ENTRY"
+build_destinations_entry OBSERVABILITY_TRACES_DESTINATIONS "$CURRENT_OBSERVABILITY_TRACES_DESTINATIONS"
+OBSERVABILITY_TRACES_DESTINATIONS_ENTRY="$DESTINATIONS_ENTRY"
+
 # Preserve the checked-in main Wrangler formatting byte-for-byte. Keeping the
 # mixed legacy indent in a value avoids introducing whitespace errors here.
 WRANGLER_COMPATIBILITY_FLAGS_INDENT=$'  \t'
@@ -451,6 +487,8 @@ echo "  AI recommend:    ${CURRENT_WORKERS_AI_RECOMMENDATION_MODEL}"
 echo "  AI translation:  ${CURRENT_WORKERS_AI_TRANSLATION_MODEL}"
 echo "  AI image caption: ${CURRENT_WORKERS_AI_IMAGE_CAPTION_MODEL}"
 echo "  AI rate limits:   ${CURRENT_WORKERS_AI_RATE_LIMITS}"
+echo "  Obs logs drains:   ${CURRENT_OBSERVABILITY_LOGS_DESTINATIONS:-none}"
+echo "  Obs traces drains: ${CURRENT_OBSERVABILITY_TRACES_DESTINATIONS:-none}"
 echo "  AI rate-limit levels: ${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT}/${CURRENT_WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS}s, ${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT}/${CURRENT_WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS}s, ${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT}/${CURRENT_WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS}s"
 if [[ "$CURRENT_WORKERS_AI_ENABLED" == "true" \
    && "$CURRENT_WORKERS_AI_RATE_LIMITS" == "true" ]]; then
@@ -504,12 +542,12 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 	    "enabled": true,
 	    "head_sampling_rate": 1,
 	    "persist": true,
-	    "invocation_logs": true
+	    "invocation_logs": true${OBSERVABILITY_LOGS_DESTINATIONS_ENTRY}
 	  },
 	  "traces": {
 	    "enabled": true,
 	    "persist": true,
-	    "head_sampling_rate": 1
+	    "head_sampling_rate": 1${OBSERVABILITY_TRACES_DESTINATIONS_ENTRY}
 	  }
 	},
 ${WRANGLER_COMPATIBILITY_FLAGS_INDENT}"compatibility_flags": ["nodejs_compat"],

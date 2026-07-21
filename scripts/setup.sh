@@ -328,6 +328,7 @@ else
   echo "# VITE_SENTRY_DSN=  # uncomment and set to enable Sentry error tracking" >> "$MAIN_DIR/.env"
   info "Sentry DSN not set — error tracking disabled (can be enabled later in .env)"
 fi
+echo "# VITE_SENTRY_FEEDBACK=true  # uncomment to show the Sentry user-feedback widget (needs VITE_SENTRY_DSN)" >> "$MAIN_DIR/.env"
 success "Vue .env written"
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,8 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       sentryDsn: process.env.NUXT_PUBLIC_SENTRY_DSN || process.env.VITE_SENTRY_DSN || '',
+      // 'true' enables the Sentry user-feedback widget (requires sentryDsn; off by default)
+      sentryFeedback: process.env.NUXT_PUBLIC_SENTRY_FEEDBACK || process.env.VITE_SENTRY_FEEDBACK || '',
       appVersion: getAppVersion(),
       instanceTitle: INSTANCE_TITLE,
     },
