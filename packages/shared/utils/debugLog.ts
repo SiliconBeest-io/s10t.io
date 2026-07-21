@@ -42,6 +42,19 @@ const ULTRA_SENSITIVE_FIELD_NAMES = new Set([
 	'tokenhash',
 	'accesstoken',
 	'refreshtoken',
+	// One-time / reusable credentials that live in innocuously named fields:
+	// email-confirmation & OAuth codes, MFA codes and recovery codes, PKCE
+	// verifiers, and the Web Push subscription auth secret (keys.auth).
+	'auth',
+	'code',
+	'otp',
+	'otpcode',
+	'codeverifier',
+	'onetimecode',
+	'backupcode',
+	'backupcodes',
+	'recoverycode',
+	'recoverycodes',
 ]);
 
 function normalizeFieldName(name: string): string {
@@ -66,9 +79,31 @@ function looksLikeJwk(value: Record<string, unknown>): boolean {
 	return typeof value.kty === 'string';
 }
 
+/**
+ * Redact sensitive query parameters inside URL strings (e.g. the request
+ * URL of `/auth/confirm?token=…` or an OAuth redirect carrying `code=…`),
+ * which field-name redaction cannot see.
+ */
+function redactUrlSecrets(text: string): string {
+	if (!text.includes('?') || !/^https?:\/\//i.test(text)) return text;
+	try {
+		const url = new URL(text);
+		let changed = false;
+		for (const key of [...url.searchParams.keys()]) {
+			if (shouldRedactField(key)) {
+				url.searchParams.set(key, 'REDACTED');
+				changed = true;
+			}
+		}
+		return changed ? url.href : text;
+	} catch {
+		return text;
+	}
+}
+
 function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
 	if (typeof value === 'string') {
-		return value.replace(PEM_PRIVATE_KEY_PATTERN, REDACTED);
+		return redactUrlSecrets(value.replace(PEM_PRIVATE_KEY_PATTERN, REDACTED));
 	}
 
 	if (value === null || typeof value !== 'object') {

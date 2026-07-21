@@ -129,6 +129,48 @@ describe('redactUltraSensitive', () => {
     expect(redacted.self).toBe('[Circular]');
   });
 
+  it('redacts sensitive query parameters inside URL strings', () => {
+    const redacted = redactUltraSensitive({
+      url: 'https://social.example.com/auth/confirm?token=secret-token&next=%2Fhome',
+      location: 'https://app.example/cb?code=oauth-code&state=xyz',
+      plainPath: '/auth/confirm?token=not-a-full-url',
+    }) as Record<string, string>;
+    expect(redacted.url).not.toContain('secret-token');
+    expect(redacted.url).toContain('token=REDACTED');
+    expect(redacted.url).toContain('next=');
+    expect(redacted.location).not.toContain('oauth-code');
+    expect(redacted.location).toContain('state=xyz');
+    // Non-URL strings pass through untouched (field-name rules cover them).
+    expect(redacted.plainPath).toBe('/auth/confirm?token=not-a-full-url');
+  });
+
+  it('redacts one-time credentials in innocuously named fields', () => {
+    const redacted = redactUltraSensitive({
+      code: '123456',
+      otp_code: '654321',
+      code_verifier: 'pkce-verifier',
+      backup_codes: ['aaa', 'bbb'],
+      subscription: { keys: { auth: 'push-auth-secret', p256dh: 'public-key' } },
+    }) as Record<string, unknown> & { subscription: { keys: Record<string, string> } };
+    expect(redacted.code).toBe('[REDACTED]');
+    expect(redacted.otp_code).toBe('[REDACTED]');
+    expect(redacted.code_verifier).toBe('[REDACTED]');
+    expect(redacted.backup_codes).toBe('[REDACTED]');
+    expect(redacted.subscription.keys.auth).toBe('[REDACTED]');
+    expect(redacted.subscription.keys.p256dh).toBe('public-key');
+  });
+
+  it('does not over-match code-like or auth-like field names', () => {
+    const redacted = redactUltraSensitive({
+      shortcode: 'blobcat',
+      statusCode: 404,
+      authorized_fetch: true,
+    }) as Record<string, unknown>;
+    expect(redacted.shortcode).toBe('blobcat');
+    expect(redacted.statusCode).toBe(404);
+    expect(redacted.authorized_fetch).toBe(true);
+  });
+
   it('preserves Map and Set contents instead of logging {}', () => {
     const redacted = redactUltraSensitive({
       map: new Map<string, string>([['password', 'x'], ['actor', 'https://a.example']]),
