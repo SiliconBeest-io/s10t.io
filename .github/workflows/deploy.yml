@@ -153,6 +153,10 @@ jobs:
             echo "SENTRY_AUTH_TOKEN not set — skipping Sentry source map upload"
             exit 0
           fi
+          if [ -z "$SENTRY_ORG" ] || [ -z "$SENTRY_PROJECT" ]; then
+            echo "SENTRY_ORG/SENTRY_PROJECT not set — skipping Sentry source map upload"
+            exit 0
+          fi
           cd siliconbeest && pnpm run sentry:sourcemaps
 
       - name: Deploy main worker
