@@ -185,6 +185,20 @@ describe('withDebugLog', () => {
     expect(line).toContain('[debug][account] explode threw');
     expect(line).toContain('boom');
   });
+
+  it('preserves the receiver when wrapping object methods', () => {
+    mockEnv.DEBUG = true;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const counter = {
+      count: 41,
+      increment: withDebugLog('counter', 'increment', function (this: { count: number }) {
+        this.count += 1;
+        return this.count;
+      }),
+    };
+    expect(counter.increment()).toBe(42);
+    expect(counter.count).toBe(42);
+  });
 });
 
 describe('redactUltraSensitive', () => {

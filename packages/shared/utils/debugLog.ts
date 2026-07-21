@@ -244,12 +244,14 @@ export function withDebugLog<Args extends unknown[], Result>(
 	name: string,
 	fn: (...args: Args) => Result,
 ): (...args: Args) => Result {
-	return (...args: Args): Result => {
-		if (!isDebugEnabled()) return fn(...args);
+	// A function expression (not an arrow) + `fn.apply(this, …)` so wrapping
+	// an object/class method preserves its receiver.
+	return function (this: unknown, ...args: Args): Result {
+		if (!isDebugEnabled()) return fn.apply(this, args);
 		const started = performance.now();
 		const durationMs = () => Math.round(performance.now() - started);
 		try {
-			const result = fn(...args);
+			const result = fn.apply(this, args);
 			if (result instanceof Promise) {
 				return result.then(
 					(value: unknown) => {

@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { env } from 'cloudflare:workers';
+import { DEBUG_LOG_MAX_BODY_LENGTH } from '../../../packages/shared/utils/debugLog';
 import {
   DEBUG_LOG_MAX_ROWS,
   instrumentD1ForDebug,
+  instrumentFetchForDebug,
   instrumentKVForDebug,
   instrumentQueueForDebug,
   instrumentR2ForDebug,
@@ -122,6 +124,22 @@ describe('instrumentD1ForDebug', () => {
     expect(line).toContain('withheld');
   });
 
+  it('caps logged bind params for bulk statements', async () => {
+    mockEnv.DEBUG = true;
+    const spy = spyLog();
+    const { db } = makeFakeDb([]);
+    instrumentD1ForDebug(db, 'DB');
+    const instrumentedDb = db as unknown as InstrumentedDb;
+
+    const values = Array.from({ length: DEBUG_LOG_MAX_ROWS + 5 }, (_, i) => `v-${i}`);
+    await instrumentedDb.prepare('INSERT INTO tags (name) VALUES (?)').bind(...values).run();
+
+    const line = loggedLines(spy)[0];
+    expect(line).toContain('v-0');
+    expect(line).not.toContain(`v-${DEBUG_LOG_MAX_ROWS + 4}`);
+    expect(line).toContain('more params');
+  });
+
   it('unwraps instrumented statements before handing them to batch()', async () => {
     mockEnv.DEBUG = true;
     const spy = spyLog();
@@ -237,6 +255,20 @@ describe('instrumentKVForDebug', () => {
     expect(line).toContain('"expirationTtl":300');
   });
 
+  it('truncates oversized JSON strings instead of parsing them', async () => {
+    mockEnv.DEBUG = true;
+    const spy = spyLog();
+    const kv = makeFakeKv(null);
+    instrumentKVForDebug(kv, 'CACHE');
+
+    const huge = `{"filler":"${'x'.repeat(DEBUG_LOG_MAX_BODY_LENGTH + 100)}"}`;
+    await (kv as InstrumentedKv).put('instance:big', huge);
+
+    const line = loggedLines(spy)[0];
+    // The truncation marker proves the string skipped the JSON.parse path.
+    expect(line).toContain('[truncated; original');
+  });
+
   it('logs list() results with key names', async () => {
     mockEnv.DEBUG = true;
     const spy = spyLog();
@@ -299,6 +331,67 @@ describe('instrumentQueueForDebug', () => {
     expect(line).toContain('[debug][queue.send] QUEUE_FEDERATION.send');
     expect(line).toContain('deliver_activity');
     expect(line).toContain('https://me.example/a/1');
+  });
+});
+
+describe('instrumentFetchForDebug', () => {
+  const realFetch = globalThis.fetch;
+  // Swappable delegate: the wrapper binds the global fetch present at
+  // instrumentation time, so tests swap this instead of globalThis.fetch.
+  let fake: (input: unknown, init?: unknown) => Promise<Response> = () =>
+    Promise.reject(new Error('fake fetch not set'));
+
+  afterAll(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it('logs the raw outbound request and response', async () => {
+    mockEnv.DEBUG = true;
+    const spy = spyLog();
+    fake = async () =>
+      new Response('{"subject":"acct:alice@remote.example"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/jrd+json' },
+      });
+    (globalThis as { fetch: typeof fetch }).fetch = ((input: unknown, init?: unknown) =>
+      fake(input, init)) as typeof fetch;
+    instrumentFetchForDebug();
+
+    const res = await fetch(
+      'https://remote.example/.well-known/webfinger?resource=acct:alice@remote.example',
+      { headers: { Accept: 'application/jrd+json' } },
+    );
+
+    expect(res.status).toBe(200);
+    // The response body stays consumable for the caller.
+    await expect(res.text()).resolves.toContain('acct:alice');
+    const line = loggedLines(spy)[0];
+    expect(line).toContain('[debug][fetch] GET https://remote.example/.well-known/webfinger -> 200');
+    expect(line).toContain('resource=acct');
+    expect(line).toContain('jrd+json');
+    expect(line).toContain('"subject":"acct:alice@remote.example"');
+  });
+
+  it('logs and re-throws network errors', async () => {
+    mockEnv.DEBUG = true;
+    const spy = spyLog();
+    fake = async () => {
+      throw new TypeError('connection refused');
+    };
+
+    await expect(fetch('https://down.example/inbox')).rejects.toThrow('connection refused');
+    const line = loggedLines(spy)[0];
+    expect(line).toContain('GET https://down.example/inbox threw');
+    expect(line).toContain('connection refused');
+  });
+
+  it('passes through without logging when DEBUG is off', async () => {
+    const spy = spyLog();
+    fake = async () => new Response('ok');
+
+    const res = await fetch('https://remote.example/x');
+    await expect(res.text()).resolves.toBe('ok');
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 

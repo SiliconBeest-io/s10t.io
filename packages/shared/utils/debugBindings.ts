@@ -1,5 +1,6 @@
 /**
- * Debug instrumentation for Cloudflare binding objects (D1, KV, R2, Queues).
+ * Debug instrumentation for Cloudflare binding objects (D1, KV, R2, Queues)
+ * and outbound `fetch` to remote servers.
  *
  * Each `instrument*ForDebug` function patches the methods of a live binding
  * object in place so every operation logs the method name, its arguments,
@@ -21,9 +22,14 @@
  * so production isolates never pay for any of this.
  */
 
+import { env } from 'cloudflare:workers';
 import {
+	DEBUG_LOG_MAX_BODY_LENGTH,
 	debugLog,
+	headersToObject,
 	isDebugEnabled,
+	parseBodyForDebugLog,
+	readLimitedBody,
 	shouldRedactField,
 	truncateForDebugLog,
 } from './debugLog';
@@ -129,6 +135,10 @@ function redactKeyArgument(key: unknown): unknown {
  */
 function summarizeStoredValue(value: unknown): unknown {
 	if (typeof value === 'string') {
+		// Oversized strings are truncated as-is: parsing and recursively
+		// redacting a huge JSON document could blow the CPU/memory budget of
+		// a worker isolate, and truncation would break the parse anyway.
+		if (value.length > DEBUG_LOG_MAX_BODY_LENGTH) return truncateForDebugLog(value);
 		const trimmed = value.trimStart();
 		if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
 			try {
@@ -191,14 +201,21 @@ function headlineSql(sql: string): string {
 /**
  * D1 bind parameters are positional, so field-name redaction cannot apply.
  * If the statement references any sensitive-looking identifier the params
- * are withheld wholesale; otherwise they are logged verbatim.
+ * are withheld wholesale; otherwise they are logged verbatim, capped at
+ * DEBUG_LOG_MAX_ROWS so bulk inserts cannot flood a log line.
  */
 function summarizeD1Params(sql: string, params: unknown[] | undefined): unknown {
 	if (!params || params.length === 0) return params;
 	const identifiers = sql.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
-	return identifiers.some((identifier) => shouldRedactField(identifier))
-		? `[${params.length} params withheld: statement references sensitive columns]`
-		: params;
+	if (identifiers.some((identifier) => shouldRedactField(identifier))) {
+		return `[${params.length} params withheld: statement references sensitive columns]`;
+	}
+	return params.length <= DEBUG_LOG_MAX_ROWS
+		? params
+		: [
+				...params.slice(0, DEBUG_LOG_MAX_ROWS),
+				`…and ${params.length - DEBUG_LOG_MAX_ROWS} more params`,
+			];
 }
 
 /** Keep D1Result metadata verbatim but cap the number of logged rows. */
@@ -474,6 +491,127 @@ export function instrumentR2ForDebug(bucket: unknown, bindingName: string): void
 // ----------------------------------------------------------------
 // Queues (producer side)
 // ----------------------------------------------------------------
+
+// ----------------------------------------------------------------
+// Outbound fetch (remote servers: WebFinger, actor fetches, deliveries)
+// ----------------------------------------------------------------
+
+let fetchInstrumented = false;
+
+/** `null` = no DSN configured; computed lazily once per isolate. */
+let cachedSentryHost: string | null | undefined;
+
+/**
+ * The Sentry debug sink reports through `fetch`; logging its own ingest
+ * traffic would feed the logger its own output on every flush.
+ */
+function sentryIngestHost(): string | null {
+	if (cachedSentryHost !== undefined) return cachedSentryHost;
+	const dsn = (env as unknown as Record<string, unknown>).SENTRY_DSN;
+	if (typeof dsn !== 'string' || !dsn) {
+		cachedSentryHost = null;
+		return null;
+	}
+	try {
+		cachedSentryHost = new URL(dsn).host;
+	} catch {
+		cachedSentryHost = null;
+	}
+	return cachedSentryHost;
+}
+
+// Body types that are safe and useful to read for logging. Streaming
+// responses (SSE, media) must never be buffered here.
+function isLoggableBodyType(contentType: string | null): boolean {
+	const type = (contentType ?? '').toLowerCase();
+	if (type.includes('text/event-stream')) return false;
+	return type.includes('json')
+		|| type.includes('application/x-www-form-urlencoded')
+		|| type.includes('xml')
+		|| type.startsWith('text/');
+}
+
+/**
+ * Read a request/response body for logging via a capped clone read, so the
+ * original stream stays consumable and oversized payloads never buffer.
+ */
+async function readFetchBodyForDebug(source: Request | Response): Promise<unknown> {
+	const contentType = source.headers.get('Content-Type');
+	if (!isLoggableBodyType(contentType)) {
+		return source.body ? `<${contentType ?? 'unknown content type'}; body not logged>` : undefined;
+	}
+	try {
+		const text = await readLimitedBody(source.clone().body);
+		if (text.length === 0) return undefined;
+		return parseBodyForDebugLog(text, contentType);
+	} catch (err) {
+		return `<failed to read body: ${err instanceof Error ? err.message : String(err)}>`;
+	}
+}
+
+type FetchLike = (input: unknown, init?: unknown) => Promise<Response>;
+
+/**
+ * Patch `globalThis.fetch` so every outbound HTTP exchange — WebFinger and
+ * actor lookups during remote acct resolution, activity deliveries, OG
+ * fetches, … — logs the raw request (method, URL, headers, parsed body) and
+ * raw response (status, headers, parsed body) in one line. Bodies are read
+ * from capped clones; binary/streaming payloads are described, not dumped.
+ * Ultra-sensitive redaction applies as everywhere else.
+ */
+export function instrumentFetchForDebug(): void {
+	if (fetchInstrumented) return;
+	const globalObj = globalThis as { fetch?: FetchLike };
+	const originalFetch = globalObj.fetch;
+	if (typeof originalFetch !== 'function') return;
+	fetchInstrumented = true;
+	const bound = originalFetch.bind(globalThis);
+	try {
+		globalObj.fetch = async (input: unknown, init?: unknown): Promise<Response> => {
+			if (!isDebugEnabled()) return bound(input, init);
+			// Normalize to a Request for a uniform, cloneable view. A bare
+			// Request input passes through untouched; re-wrapping would
+			// disturb its body.
+			const request = input instanceof Request && init === undefined
+				? input
+				: new Request(input as RequestInfo, init as RequestInit | undefined);
+			const requestHost = new URL(request.url).host;
+			if (requestHost === sentryIngestHost()) return bound(request);
+			// Query strings can carry secrets: keep them out of the message
+			// line (details.url gets URL-level redaction from debugLog).
+			const urlForMessage = request.url.split('?')[0];
+			const requestDetails = {
+				url: request.url,
+				headers: headersToObject(request.headers),
+				body: await readFetchBodyForDebug(request),
+			};
+			const started = performance.now();
+			try {
+				const response = await bound(request);
+				debugLog('fetch', `${request.method} ${urlForMessage} -> ${response.status}`, {
+					durationMs: Math.round(performance.now() - started),
+					request: requestDetails,
+					response: {
+						status: response.status,
+						headers: headersToObject(response.headers),
+						body: await readFetchBodyForDebug(response),
+					},
+				});
+				return response;
+			} catch (err) {
+				debugLog('fetch', `${request.method} ${urlForMessage} threw`, {
+					durationMs: Math.round(performance.now() - started),
+					request: requestDetails,
+					error: err,
+				});
+				throw err;
+			}
+		};
+	} catch (err) {
+		fetchInstrumented = false;
+		console.warn('[debug] could not instrument fetch() for debug logging:', err);
+	}
+}
 
 /**
  * Patch a queue producer binding so send/sendBatch log the enqueued message

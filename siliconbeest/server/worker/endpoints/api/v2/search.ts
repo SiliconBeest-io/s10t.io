@@ -28,6 +28,7 @@ import {
   hasOAuthScope,
 } from '../../../../../../packages/shared/permissions';
 import { serializeNaturalLanguageMap } from '../../../../../../packages/shared/utils/naturalLanguage';
+import { debugLog } from '../../../../../../packages/shared/utils/debugLog';
 import { sanitizeArticleHtml, sanitizeHtml, sanitizePlainText } from '../../../utils/sanitize';
 
 const app = new Hono<{ Variables: AppVariables }>();
@@ -497,6 +498,14 @@ app.get('/', authOptional, async (c) => {
       );
       const profileUrl = profileLink?.href;
       console.log(`[search] WebFinger result:`, actorUri || 'null');
+      // The raw WebFinger HTTP exchange is logged by the fetch
+      // instrumentation; this records the parsed JRD and what we chose.
+      debugLog('account.lookup.remote', `webfinger acct:${normalizedAcct}`, {
+        acct: normalizedAcct,
+        webfinger: wfResult,
+        actorUri: actorUri ?? null,
+        profileUrl: profileUrl ?? null,
+      });
       if (
         actorUri
         && canStoreFetchedRemoteActor({
@@ -551,6 +560,12 @@ app.get('/', authOptional, async (c) => {
             console.warn('[search] No local signer available, skipping remote fetch');
           }
           console.log('[search] actorObject:', actorObject ? `id=${actorObject.id?.href}, isActor=${isActor(actorObject)}` : 'null');
+          debugLog('account.lookup.remote', `actor fetch ${actorUri}`, {
+            actorUri,
+            signerUsername: signerUsername ?? null,
+            resolved: !!actorObject && isActor(actorObject),
+            actorId: actorObject?.id?.href ?? null,
+          });
           if (
             actorObject
             && isActor(actorObject)

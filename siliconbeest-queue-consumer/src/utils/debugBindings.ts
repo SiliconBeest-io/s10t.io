@@ -12,6 +12,7 @@ import { env } from 'cloudflare:workers';
 import { isDebugEnabled } from '../../../packages/shared/utils/debugLog';
 import {
   instrumentD1ForDebug,
+  instrumentFetchForDebug,
   instrumentKVForDebug,
   instrumentQueueForDebug,
   instrumentR2ForDebug,
@@ -32,4 +33,7 @@ export function ensureDebugBindingLogging(): void {
   instrumentR2ForDebug(bindings.MEDIA_BUCKET, 'MEDIA_BUCKET');
   instrumentQueueForDebug(bindings.QUEUE_FEDERATION, 'QUEUE_FEDERATION');
   instrumentQueueForDebug(bindings.QUEUE_INTERNAL, 'QUEUE_INTERNAL');
+  // Raw outbound HTTP: remote account/status fetches and activity
+  // deliveries to remote inboxes.
+  instrumentFetchForDebug();
 }
