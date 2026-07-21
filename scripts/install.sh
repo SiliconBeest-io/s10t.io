@@ -52,12 +52,50 @@ success "Node.js found ($(node -v))"
 WRANGLER="npx wrangler@latest"
 
 info "Checking Cloudflare authentication..."
-if ! $WRANGLER whoami 2>/dev/null | grep -q "Account ID"; then
+WHOAMI_OUTPUT=$($WRANGLER whoami 2>/dev/null || true)
+if ! echo "$WHOAMI_OUTPUT" | grep -q "Account ID"; then
   warn "Not logged in to Cloudflare."
   info "Opening browser for authentication..."
   $WRANGLER login
+  WHOAMI_OUTPUT=$($WRANGLER whoami 2>/dev/null || true)
 fi
 success "Authenticated with Cloudflare"
+
+# Pin the account before any resource commands: several of them capture
+# wrangler's output, which makes wrangler non-interactive — with access to
+# multiple accounts it errors out instead of prompting for one.
+if [[ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  ACCOUNT_NAMES=()
+  ACCOUNT_IDS=()
+  while IFS= read -r ACCOUNT_ROW; do
+    ROW_ID=$(echo "$ACCOUNT_ROW" | grep -oE '[0-9a-f]{32}' | head -1)
+    [[ -z "$ROW_ID" ]] && continue
+    ROW_NAME="${ACCOUNT_ROW#*│}"
+    ROW_NAME="${ROW_NAME%%│*}"
+    ROW_NAME=$(echo "$ROW_NAME" | sed -E 's/^ +| +$//g')
+    ACCOUNT_NAMES+=("$ROW_NAME")
+    ACCOUNT_IDS+=("$ROW_ID")
+  done < <(echo "$WHOAMI_OUTPUT" | grep '│' || true)
+  if [[ ${#ACCOUNT_IDS[@]} -eq 1 ]]; then
+    CLOUDFLARE_ACCOUNT_ID="${ACCOUNT_IDS[0]}"
+  elif [[ ${#ACCOUNT_IDS[@]} -gt 1 ]]; then
+    echo -e "${CYAN}Select the Cloudflare account to install into:${NC}"
+    for i in "${!ACCOUNT_IDS[@]}"; do
+      echo "  $((i + 1))) ${ACCOUNT_NAMES[$i]} (${ACCOUNT_IDS[$i]})"
+    done
+    read -rp "Choose [1]: " ACCOUNT_CHOICE
+    ACCOUNT_CHOICE="${ACCOUNT_CHOICE:-1}"
+    if ! [[ "$ACCOUNT_CHOICE" =~ ^[0-9]+$ ]] || (( ACCOUNT_CHOICE < 1 || ACCOUNT_CHOICE > ${#ACCOUNT_IDS[@]} )); then
+      error "Invalid choice."
+      exit 1
+    fi
+    CLOUDFLARE_ACCOUNT_ID="${ACCOUNT_IDS[$((ACCOUNT_CHOICE - 1))]}"
+  fi
+fi
+if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]; then
+  export CLOUDFLARE_ACCOUNT_ID
+  success "Using Cloudflare account: $CLOUDFLARE_ACCOUNT_ID"
+fi
 
 # ---------------------------------------------------------------------------
 # Collect configuration
@@ -152,10 +190,20 @@ header "Creating Cloudflare Resources"
 info "Creating D1 database: $D1_DATABASE_NAME"
 DB_OUTPUT=$($WRANGLER d1 create "$D1_DATABASE_NAME" 2>&1 || true)
 DB_ID=$(echo "$DB_OUTPUT" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+if [[ -z "$DB_ID" ]]; then
+  # Creation failed — reuse the database if it already exists
+  DB_ID=$($WRANGLER d1 list --json 2>/dev/null | node -e "
+const dbs = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const db = dbs.find((d) => d.name === process.argv[1]);
+if (db) process.stdout.write(db.uuid);
+" "$D1_DATABASE_NAME" 2>/dev/null || true)
+fi
 if [[ -n "$DB_ID" ]]; then
   success "D1: $D1_DATABASE_NAME → $DB_ID"
 else
-  warn "D1 database may already exist. Check Cloudflare dashboard for the ID."
+  error "Could not create or find D1 database '$D1_DATABASE_NAME':"
+  echo "$DB_OUTPUT"
+  exit 1
 fi
 
 # --- R2 Bucket ---
@@ -166,15 +214,24 @@ success "R2 bucket: $R2_BUCKET_NAME"
 # --- KV Namespaces ---
 create_kv() {
   local TITLE="$1"
-  info "Creating KV namespace: $TITLE"
+  # Logs go to stderr: the caller captures stdout, which must stay ID-only
+  info "Creating KV namespace: $TITLE" >&2
   local OUTPUT
   OUTPUT=$($WRANGLER kv namespace create "$TITLE" 2>&1 || true)
   local KV_ID
   KV_ID=$(echo "$OUTPUT" | grep -oE '[0-9a-f]{32}' | head -1)
+  if [[ -z "$KV_ID" ]]; then
+    # Creation failed — reuse the namespace if it already exists
+    KV_ID=$($WRANGLER kv namespace list 2>/dev/null | node -e "
+const namespaces = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+const ns = namespaces.find((n) => n.title === process.argv[1]);
+if (ns) process.stdout.write(ns.id);
+" "$TITLE" 2>/dev/null || true)
+  fi
   if [[ -n "$KV_ID" ]]; then
-    success "KV $TITLE: $KV_ID"
+    success "KV $TITLE: $KV_ID" >&2
   else
-    warn "KV '$TITLE' may already exist. Check dashboard."
+    warn "Could not create or find KV namespace '$TITLE'. Check dashboard." >&2
   fi
   echo "$KV_ID"
 }
@@ -234,12 +291,14 @@ info "Cloning SiliconBeest to temp directory..."
 git clone --depth 1 "$REPOSITORY_CLONE_URL" "$TEMP_DIR" 2>/dev/null
 success "Cloned to $TEMP_DIR"
 
-# Patch wrangler.jsonc with actual DB ID for migrations
-if [[ -n "$DB_ID" ]]; then
-  sed -i.bak "s|YOUR_D1_DATABASE_ID|$DB_ID|g" "$TEMP_DIR/siliconbeest/wrangler.jsonc"
-  sed -i.bak "s|social.example.com|$INSTANCE_DOMAIN|g" "$TEMP_DIR/siliconbeest/wrangler.jsonc"
-  rm -f "$TEMP_DIR/siliconbeest/wrangler.jsonc.bak"
-fi
+# Point the cloned wrangler.jsonc at this instance's database: migrations
+# resolve the CLI name against database_name, so it must match too
+sed -i.bak -E \
+  -e "s|\"database_name\": *\"[^\"]*\"|\"database_name\": \"$D1_DATABASE_NAME\"|" \
+  -e "s|\"database_id\": *\"[^\"]*\"|\"database_id\": \"$DB_ID\"|" \
+  -e "s|social\.example\.com|$INSTANCE_DOMAIN|g" \
+  "$TEMP_DIR/siliconbeest/wrangler.jsonc"
+rm -f "$TEMP_DIR/siliconbeest/wrangler.jsonc.bak"
 
 # Apply migrations
 info "Applying D1 migrations..."
