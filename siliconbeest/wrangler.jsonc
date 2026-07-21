@@ -1,7 +1,7 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "siliconbeest",
-	"preview_urls": true,
+	"preview_urls": false,
 	"compatibility_date": "2026-06-16",
 	// Nuxt emits the production Cloudflare Worker entrypoint during `pnpm run build`.
 	"main": ".output/server/index.mjs",
