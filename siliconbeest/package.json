@@ -10,7 +10,7 @@
 		"build-only": "nuxt build",
 		"type-check": "nuxt typecheck",
 		"deploy": "pnpm run build && pnpm wrangler deploy --config wrangler.jsonc",
-		"deploy:bundle": "wrangler deploy .output/server/index.mjs --assets .output/public --config wrangler.jsonc --dry-run --outdir dist-worker",
+		"deploy:bundle": "pnpm wrangler deploy .output/server/index.mjs --assets .output/public --config wrangler.jsonc --dry-run --outdir dist-worker",
 		"sentry:sourcemaps": "sentry-cli sourcemaps inject dist-worker && sentry-cli sourcemaps upload dist-worker",
 		"cf-typegen": "node ../scripts/generate-main-worker-types.mjs",
 		"test": "vitest run --config vitest.config.ts && vitest run --config vitest.worker.config.ts",
