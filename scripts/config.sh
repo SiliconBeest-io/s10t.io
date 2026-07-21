@@ -82,7 +82,9 @@ read_wrangler_json() {
   node -e "
 const fs = require('fs');
 const content = fs.readFileSync('$FILE', 'utf8');
-const cleaned = content.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+// Strip full-line comments only: a trailing-comment regex would also eat
+// the "//" inside string values like REPOSITORY_URL's https:// URL.
+const cleaned = content.replace(/^[ \t]*\/\/.*$/gm, '');
 try {
   const config = JSON.parse(cleaned);
   const result = $EXPR;
