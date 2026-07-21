@@ -1,0 +1,908 @@
+import { Hono } from 'hono';
+import type { AppVariables } from '../../../../types';
+import { env } from 'cloudflare:workers';
+import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
+import { AppError } from '../../../../middleware/errorHandler';
+import { resolveRemoteAccount } from '../../../../federation/resolveRemoteAccount';
+import { getFedifyContext, sendToFollowers, sendToRecipient } from '../../../../federation/helpers/send';
+import {
+  Create,
+  Article,
+  Note,
+  Question,
+  Mention,
+  Hashtag,
+  Image,
+  Document as APDocument,
+  Source,
+  LanguageString,
+  Emoji as APEmoji,
+  QuoteRequest,
+} from '@fedify/vocab';
+import { Temporal } from '@js-temporal/polyfill';
+import { generateUlid } from '../../../../utils/ulid';
+import { buildArticlePreviewContent } from '../../../../utils/contentParser';
+import type { StatusWithJoinedAccountRow, MediaAttachmentRow } from '../../../../types/db';
+import { createStatus } from '../../../../services/status';
+import { createLocalQuoteAuthorization } from '../../../../federation/helpers/quote';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
+import {
+  canEmbedQuote,
+  parseStatusVisibility,
+  type StatusVisibility,
+} from '../../../../../../../packages/shared/permissions';
+import { canSurfaceStatusToViewer } from '../../../../services/permissions';
+import { recordRecommendationActivity } from '../../../../services/recommendationActivity';
+import { scheduleBackgroundTask } from '../../../../utils/backgroundTask';
+
+type HonoEnv = { Variables: AppVariables };
+
+const app = new Hono<HonoEnv>();
+
+app.post('/', authRequired, requireScope('write:statuses'), async (c) => {
+  const currentUser = c.get('currentUser')!;
+  const currentAccount = c.get('currentAccount')!;
+  const domain = env.INSTANCE_DOMAIN;
+
+  let body: {
+    status?: string;
+    object_type?: string;
+    title?: string;
+    summary?: string;
+    media_ids?: string[];
+    poll?: { options: string[]; expires_in: number; multiple?: boolean };
+    in_reply_to_id?: string;
+    sensitive?: boolean;
+    spoiler_text?: string;
+    visibility?: string;
+    language?: string;
+    /** FEP-e232: ID of the status to quote */
+    quote_id?: string;
+    /** FEP-044f: public | followers | nobody */
+    quote_policy?: string;
+  };
+  try {
+    body = await c.req.json();
+  } catch {
+    throw new AppError(422, 'Validation failed', 'Unable to parse request body');
+  }
+
+  const statusText = (body.status || '').trim();
+  const mediaIds = body.media_ids || [];
+  if (body.object_type !== undefined && body.object_type !== 'Note' && body.object_type !== 'Article') {
+    throw new AppError(422, 'Validation failed', 'Invalid object type');
+  }
+  const objectType = body.object_type === 'Article' ? 'Article' : 'Note';
+
+  if (!statusText && mediaIds.length === 0) {
+    throw new AppError(422, 'Validation failed', 'Status text or media is required');
+  }
+
+  let requestedVisibility: StatusVisibility | undefined;
+  if (body.visibility !== undefined) {
+    const parsedVisibility = parseStatusVisibility(body.visibility);
+    if (!parsedVisibility) {
+      throw new AppError(422, 'Validation failed', 'Invalid status visibility');
+    }
+    requestedVisibility = parsedVisibility;
+  }
+
+  // ============================================================
+  // Call service to handle all DB operations
+  // ============================================================
+  const result = await createStatus(domain, currentUser.account_id, currentAccount.username, {
+    text: statusText,
+    objectType,
+    title: body.title,
+    visibility: requestedVisibility,
+    sensitive: body.sensitive,
+    spoilerText: objectType === 'Article' ? (body.summary ?? body.spoiler_text) : body.spoiler_text,
+    inReplyToId: body.in_reply_to_id,
+    mediaIds,
+    language: body.language,
+    pollOptions: body.poll?.options,
+    pollExpiresIn: body.poll?.expires_in,
+    pollMultiple: body.poll?.multiple,
+    quoteId: body.quote_id,
+    quotePolicy: body.quote_policy ? normalizeQuotePolicy(body.quote_policy) : undefined,
+  });
+
+  const {
+    statusId, statusUri, statusUrl, objectType: storedObjectType, title, content, parsed,
+    localMentions, hashtags, emojiTags: resolvedEmojiTags,
+    pollData, conversationApUri,
+    inReplyToId, inReplyToAccountId,
+    quoteId, quoteUri, quoteUrl,
+    quoteAuthorizationUri: initialQuoteAuthorizationUri,
+    quoteApprovalStatus: initialQuoteApprovalStatus,
+    quoteRequestUri,
+    quotePolicy,
+    visibility, sensitive, spoilerText, language,
+  } = result;
+  const now = new Date().toISOString();
+  if (visibility === 'public') {
+    await scheduleBackgroundTask(
+      () => c.executionCtx,
+      recordRecommendationActivity(currentUser.account_id, 'posted', statusId, now),
+      {
+        operation: 'record_recommendation_activity',
+        activityKind: 'posted',
+        accountId: currentUser.account_id,
+        statusId,
+      },
+    );
+  }
+  let quoteAuthorizationUri = initialQuoteAuthorizationUri;
+  let quoteApprovalStatus = initialQuoteApprovalStatus;
+
+  type QuoteTarget = {
+    id: string;
+    uri: string;
+    account_id: string;
+    account_username: string;
+    account_domain: string | null;
+    account_uri: string;
+    account_inbox_url: string | null;
+    account_shared_inbox_url: string | null;
+  };
+  let quoteTarget: QuoteTarget | null = null;
+
+  if (quoteId) {
+    quoteTarget = await env.DB.prepare(
+      `SELECT s.id, s.uri, s.account_id,
+              a.username AS account_username, a.domain AS account_domain,
+              a.uri AS account_uri, a.inbox_url AS account_inbox_url,
+              a.shared_inbox_url AS account_shared_inbox_url
+       FROM statuses s
+       JOIN accounts a ON a.id = s.account_id
+       WHERE s.id = ?1 AND s.deleted_at IS NULL
+       LIMIT 1`,
+    ).bind(quoteId).first<QuoteTarget>();
+
+    if (quoteTarget) {
+      if (quoteTarget.account_id === currentUser.account_id) {
+        quoteApprovalStatus = 'accepted';
+      } else if (!quoteTarget.account_domain) {
+        quoteAuthorizationUri = await createLocalQuoteAuthorization({
+          attributedToAccountId: quoteTarget.account_id,
+          attributedToUsername: quoteTarget.account_username,
+          interactingObjectUri: statusUri,
+          interactionTargetUri: quoteTarget.uri,
+          quoteStatusId: statusId,
+          quotedStatusId: quoteTarget.id,
+          requestUri: quoteRequestUri,
+        });
+        quoteApprovalStatus = 'accepted';
+      }
+
+      await env.DB.prepare(
+        `UPDATE statuses
+         SET quote_authorization_uri = ?1, quote_approval_status = ?2, quote_request_uri = ?3, updated_at = ?4
+         WHERE id = ?5`,
+      ).bind(quoteAuthorizationUri, quoteApprovalStatus, quoteRequestUri, now, statusId).run();
+    }
+  }
+
+  // Enqueue follower/public streaming (skip DMs until mentions are resolved)
+  if (visibility !== 'direct') {
+    try {
+      await env.QUEUE_INTERNAL.send({
+        type: 'timeline_fanout',
+        statusId,
+        accountId: currentUser.account_id,
+      });
+    } catch {
+      // Queue failure should not block status creation
+    }
+  }
+
+  // Enqueue preview card fetch for the first URL in the status text
+  try {
+    const urlMatch = statusText.match(/https?:\/\/[^\s<>"')\]]+/i);
+    if (urlMatch) {
+      await env.QUEUE_INTERNAL.send({
+        type: 'fetch_preview_card',
+        statusId,
+        url: urlMatch[0],
+      });
+    }
+  } catch {
+    // Queue failure should not block status creation
+  }
+
+  // ============================================================
+  // Handle mentions: resolve remote accounts via WebFinger,
+  // create DB mention rows, and send notifications BEFORE building
+  // the AP note so serializeNote sees the correct mention data.
+  // ============================================================
+  interface ResolvedMention {
+    account_id: string;
+    actor_uri: string;
+    profile_url: string | null;
+    acct: string;
+    inbox_url: string | null;
+    mentionDomain: string | null;
+  }
+
+  // Start with local mentions from service (add mentionDomain: null)
+  const resolvedMentions: ResolvedMention[] = localMentions.map((lm) => ({
+    ...lm,
+    mentionDomain: null,
+  }));
+
+  // Queue notifications for local mentions
+  const notificationsToQueue: Array<{ recipientAccountId: string; mention: string }> = [];
+  for (const lm of localMentions) {
+    if (lm.account_id !== currentUser.account_id) {
+      notificationsToQueue.push({ recipientAccountId: lm.account_id, mention: 'mention' });
+    }
+  }
+
+  if (parsed.mentions.length > 0) {
+    const remoteMentions = parsed.mentions.filter(m => m.domain);
+
+    // Batch-query for known remote accounts
+    const remoteAccountMap = new Map<string, Record<string, unknown>>();
+    if (remoteMentions.length > 0) {
+      const conditions = remoteMentions.map(() => `(username = ? AND domain = ?)`).join(' OR ');
+      const values = remoteMentions.flatMap(m => [m.username, m.domain!]);
+      const query = `SELECT id, uri, url, inbox_url, domain, username FROM accounts WHERE ${conditions}`;
+      const existingRemoteAccounts = await env.DB.prepare(query)
+        .bind(...values)
+        .all<Record<string, unknown>>();
+
+      existingRemoteAccounts.results.forEach(acc => {
+        remoteAccountMap.set(`${acc.username}@${acc.domain}`, acc);
+      });
+    }
+
+    // Parallelize WebFinger lookups for new remote accounts
+    const remoteMentionPromises = remoteMentions.map(async (mention) => {
+      let accountRow = remoteAccountMap.get(`${mention.username}@${mention.domain}`) ?? null;
+
+      // If not found locally, try WebFinger resolution via Fedify
+      if (!accountRow) {
+        try {
+          const fed = c.get('federation');
+          const ctx = getFedifyContext(fed);
+          const wfResult = await ctx.lookupWebFinger(`acct:${mention.username}@${mention.domain}`);
+          if (wfResult) {
+            // Extract actor URI from self link
+            const selfLink = wfResult.links?.find(
+              (link) =>
+                link.rel === 'self' &&
+                (link.type === 'application/activity+json' ||
+                  link.type === 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"') &&
+                link.href,
+            );
+            if (selfLink?.href) {
+              // resolveRemoteAccount will fetch the actor doc and upsert
+              const accountId = await resolveRemoteAccount(selfLink.href, currentAccount.id);
+              if (accountId) {
+                accountRow = await env.DB.prepare(
+                  'SELECT id, uri, url, inbox_url, domain FROM accounts WHERE id = ?1',
+                ).bind(accountId).first();
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`WebFinger resolution failed for ${mention.acct}:`, e);
+        }
+      }
+
+      return { mention, accountRow };
+    });
+
+    const resolvedRemote = await Promise.all(remoteMentionPromises);
+
+    // Prepare remote mentions for batch operations
+    const mentionsToInsert: Array<[string, string, string, string]> = []; // [mentionId, statusId, accountId, now]
+
+    // Process remote mentions
+    for (const { mention, accountRow } of resolvedRemote) {
+      if (!accountRow) continue;
+
+      const mentionedAccountId = accountRow.id as string;
+      const mentionId = generateUlid();
+
+      mentionsToInsert.push([mentionId, statusId, mentionedAccountId, now]);
+
+      resolvedMentions.push({
+        account_id: mentionedAccountId,
+        actor_uri: (accountRow.uri as string) || '',
+        profile_url: (accountRow.url as string) || null,
+        acct: mention.acct,
+        inbox_url: (accountRow.inbox_url as string) || null,
+        mentionDomain: (accountRow.domain as string) || null,
+      });
+
+      if (mentionedAccountId !== currentUser.account_id) {
+        notificationsToQueue.push({ recipientAccountId: mentionedAccountId, mention: 'mention' });
+      }
+    }
+
+    // Batch INSERT all remote mentions at once
+    if (mentionsToInsert.length > 0) {
+      const values: unknown[] = [];
+      let query = 'INSERT OR IGNORE INTO mentions (id, status_id, account_id, created_at) VALUES ';
+      mentionsToInsert.forEach((mention, idx) => {
+        if (idx > 0) query += ', ';
+        query += `(?${idx * 4 + 1}, ?${idx * 4 + 2}, ?${idx * 4 + 3}, ?${idx * 4 + 4})`;
+        values.push(...mention);
+      });
+      await env.DB.prepare(query).bind(...values).run();
+    }
+
+    // Batch queue all notifications (fire and forget, don't block)
+    for (const notification of notificationsToQueue) {
+      await env.QUEUE_INTERNAL.send({
+        type: 'create_notification',
+        recipientAccountId: notification.recipientAccountId,
+        senderAccountId: currentUser.account_id,
+        notificationType: notification.mention,
+        statusId,
+      });
+    }
+  }
+
+  // ============================================================
+  // Fix content HTML: replace local proxy mention hrefs with actual actor URIs
+  // This ensures AP Note content has correct links for remote servers
+  // ============================================================
+  let fixedContent = content;
+  for (const rm of resolvedMentions) {
+    if (rm.mentionDomain && rm.actor_uri) {
+      // Use the profile URL from DB (correct for all server types including Misskey)
+      // Fallback to actor_uri only if profile_url is missing
+      const profileUrl = rm.profile_url || rm.actor_uri;
+      const localProxyUrl = `https://${domain}/@${rm.acct}`;
+      fixedContent = fixedContent.replace(
+        `href="${localProxyUrl}"`,
+        `href="${profileUrl}"`,
+      );
+    }
+  }
+  if (quoteUri) {
+    const fallbackQuoteUrl = quoteUrl || quoteUri;
+    if (!fixedContent.includes(quoteUri) && !fixedContent.includes(fallbackQuoteUrl)) {
+      const escapedHref = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+      const escapedText = fallbackQuoteUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      fixedContent += `<span class="quote-inline"><br/>RE: <a href="${escapedHref}">${escapedText}</a></span>`;
+    }
+  }
+  // Update DB content if changed
+  if (fixedContent !== content) {
+    await env.DB.prepare('UPDATE statuses SET content = ?1 WHERE id = ?2').bind(fixedContent, statusId).run();
+  }
+
+  // ============================================================
+  // DM: streaming for author + mentioned LOCAL users
+  // ============================================================
+  if (visibility === 'direct') {
+    try {
+      const allowedLocalRecipientIds = new Set<string>();
+      for (const mention of resolvedMentions) {
+        if (
+          !mention.mentionDomain
+          && mention.account_id !== currentUser.account_id
+          && await canSurfaceStatusToViewer(statusId, mention.account_id)
+        ) {
+          allowedLocalRecipientIds.add(mention.account_id);
+        }
+      }
+      // Streaming: fetch full status from DB for accurate payload
+      const { sendStreamEvent } = await import('../../../../services/streaming');
+      const dmRow = await env.DB.prepare(
+        `SELECT s.*, a.username AS a_username, a.domain AS a_domain, a.display_name AS a_display_name,
+                a.note AS a_note, a.uri AS a_uri, a.url AS a_url, a.avatar_url AS a_avatar_url,
+                a.avatar_static_url AS a_avatar_static_url, a.header_url AS a_header_url,
+                a.header_static_url AS a_header_static_url, a.locked AS a_locked, a.bot AS a_bot,
+                a.discoverable AS a_discoverable, a.followers_count AS a_followers_count,
+                a.following_count AS a_following_count, a.statuses_count AS a_statuses_count,
+                a.last_status_at AS a_last_status_at, a.created_at AS a_created_at,
+                a.emoji_tags AS a_emoji_tags
+         FROM statuses s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?1`,
+      ).bind(statusId).first<StatusWithJoinedAccountRow>();
+
+      if (dmRow) {
+        const { results: dmMedia } = await env.DB.prepare(
+          'SELECT id, type, file_key, description, blurhash, width, height FROM media_attachments WHERE status_id = ?1',
+        ).bind(statusId).all<Pick<MediaAttachmentRow, 'id' | 'type' | 'file_key' | 'description' | 'blurhash' | 'width' | 'height'>>();
+        const mediaArr = (dmMedia ?? []).map((m) => {
+          const fk = m.file_key;
+          const mUrl = fk.startsWith('http') ? `https://${domain}/proxy?url=${encodeURIComponent(fk)}` : `https://${domain}/media/${fk}`;
+          return { id: m.id, type: m.type || 'image', url: mUrl, preview_url: mUrl, remote_url: fk.startsWith('http') ? fk : null, text_url: null, meta: m.width ? { original: { width: m.width, height: m.height } } : null, description: m.description || null, blurhash: m.blurhash || null };
+        });
+        const dmAcct = dmRow.a_domain ? `${dmRow.a_username}@${dmRow.a_domain}` : dmRow.a_username;
+        const dmPayload = JSON.stringify({
+          id: statusId, uri: statusUri, object_type: pollData ? 'Question' : storedObjectType, title,
+          created_at: now, content: fixedContent, visibility,
+          article_summary: storedObjectType === 'Article' ? spoilerText : '',
+          sensitive: !!sensitive,
+          spoiler_text: storedObjectType === 'Article' ? '' : spoilerText,
+          language, url: statusUrl,
+          in_reply_to_id: inReplyToId, in_reply_to_account_id: inReplyToAccountId,
+          reblogs_count: dmRow.reblogs_count || 0, favourites_count: dmRow.favourites_count || 0,
+          replies_count: dmRow.replies_count || 0, edited_at: dmRow.edited_at || null,
+          media_attachments: mediaArr, mentions: resolvedMentions.map((rm) => ({ id: rm.account_id, username: rm.acct.split('@')[0], url: rm.actor_uri, acct: rm.acct })),
+          tags: parsed.tags.map((t) => ({ name: t, url: `https://${domain}/tags/${t}` })),
+          emojis: resolvedEmojiTags, reblog: null, poll: null, card: null, application: null, text: null, filtered: [],
+          account: {
+            id: currentUser.account_id, username: dmRow.a_username, acct: dmAcct,
+            display_name: dmRow.a_display_name || '', locked: !!dmRow.a_locked,
+            bot: !!dmRow.a_bot, discoverable: !!dmRow.a_discoverable, group: false,
+            created_at: dmRow.a_created_at || now, note: dmRow.a_note || '',
+            url: dmRow.a_url || `https://${domain}/@${currentAccount.username}`,
+            uri: dmRow.a_uri || `https://${domain}/users/${currentAccount.username}`,
+            avatar: dmRow.a_avatar_url || '', avatar_static: dmRow.a_avatar_static_url || dmRow.a_avatar_url || '',
+            header: dmRow.a_header_url || '', header_static: dmRow.a_header_static_url || dmRow.a_header_url || '',
+            followers_count: dmRow.a_followers_count || 0, following_count: dmRow.a_following_count || 0,
+            statuses_count: dmRow.a_statuses_count || 0, last_status_at: dmRow.a_last_status_at || null,
+            emojis: parseCustomEmojiTagsJson(dmRow.a_emoji_tags as string | null, domain), fields: [],
+          },
+        });
+
+        // Stream to author
+        try { await sendStreamEvent(currentUser.id, { event: 'update', payload: dmPayload, stream: ['user', 'direct'] }); } catch {}
+        // Stream to mentioned local users
+        for (const rm of resolvedMentions) {
+          if (allowedLocalRecipientIds.has(rm.account_id)) {
+            const mUser = await env.DB.prepare('SELECT id FROM users WHERE account_id = ?1 LIMIT 1').bind(rm.account_id).first();
+            if (mUser) { try { await sendStreamEvent(mUser.id as string, { event: 'update', payload: dmPayload, stream: ['user', 'direct'] }); } catch {} }
+          }
+        }
+      }
+    } catch { /* DM streaming failure should not block */ }
+  }
+
+  // ============================================================
+  // Federation: deliver Create(Note) activity via Fedify
+  // ============================================================
+  try {
+    const actorUri = `https://${domain}/users/${currentAccount.username}`;
+    const followersUri = `${actorUri}/followers`;
+
+    // -- Addressing: to/cc based on visibility --
+    const AS_PUBLIC = 'https://www.w3.org/ns/activitystreams#Public';
+    const mentionUris = resolvedMentions
+      .filter((rm) => rm.actor_uri)
+      .map((rm) => new URL(rm.actor_uri));
+
+    let toUrls: URL[];
+    let ccUrls: URL[];
+    switch (visibility) {
+      case 'public':
+        toUrls = [new URL(AS_PUBLIC)];
+        ccUrls = [new URL(followersUri), ...mentionUris];
+        break;
+      case 'unlisted':
+        toUrls = [new URL(followersUri)];
+        ccUrls = [new URL(AS_PUBLIC), ...mentionUris];
+        break;
+      case 'private':
+        toUrls = [new URL(followersUri)];
+        ccUrls = [...mentionUris];
+        break;
+      case 'direct':
+        toUrls = [...mentionUris];
+        ccUrls = [];
+        break;
+      default:
+        toUrls = [new URL(AS_PUBLIC)];
+        ccUrls = [new URL(followersUri), ...mentionUris];
+    }
+
+    // -- Resolve inReplyTo URI --
+    let replyTarget: URL | undefined;
+    if (inReplyToId) {
+      const parentUri = await env.DB.prepare(
+        'SELECT uri FROM statuses WHERE id = ?1',
+      ).bind(inReplyToId).first<{ uri: string }>();
+      if (parentUri) {
+        replyTarget = new URL(parentUri.uri);
+      }
+    }
+
+    // -- Build Mention tags --
+    const mentionTags = resolvedMentions.map((rm) =>
+      new Mention({
+        href: rm.actor_uri ? new URL(rm.actor_uri) : undefined,
+        name: `@${rm.acct}`,
+      }),
+    );
+
+    // -- Build Hashtag tags --
+    const hashtagTags = hashtags.map((tag) =>
+      new Hashtag({
+        href: new URL(`https://${domain}/tags/${tag}`),
+        name: `#${tag}`,
+      }),
+    );
+
+    // -- Build media attachments --
+    const { results: apMediaRows } = await env.DB.prepare(
+      'SELECT * FROM media_attachments WHERE status_id = ?1',
+    ).bind(statusId).all();
+    const mediaAttachmentObjects = (apMediaRows ?? []).map((m: any) => {
+      const attUrl = new URL(`https://${domain}/media/${m.file_key}`);
+      const attMediaType = m.file_content_type || 'image/jpeg';
+      const attName = m.description || null;
+      if ((m.type || 'image') === 'image') {
+        return new Image({
+          url: attUrl,
+          mediaType: attMediaType,
+          name: attName,
+        });
+      }
+      return new APDocument({
+        url: attUrl,
+        mediaType: attMediaType,
+        name: attName,
+      });
+    });
+
+    // -- Build Fedify Note --
+    const emojiTagsJson = resolvedEmojiTags.length > 0
+      ? JSON.stringify(resolvedEmojiTags.map(e => ({ shortcode: e.shortcode, url: e.url, static_url: e.static_url })))
+      : null;
+
+    const noteValues: ConstructorParameters<typeof Note>[0] = {
+      id: new URL(statusUri),
+      attribution: new URL(actorUri),
+      content: fixedContent,
+      url: new URL(statusUrl),
+      published: Temporal.Instant.from(now),
+      tos: toUrls,
+      ccs: ccUrls,
+      sensitive: !!sensitive,
+      summary: spoilerText || null,
+    };
+
+    if (replyTarget) {
+      noteValues.replyTarget = replyTarget;
+    }
+
+    // Build custom emoji tags for federation
+    const emojiTagObjects: APEmoji[] = [];
+    if (emojiTagsJson) {
+      try {
+        const parsed = JSON.parse(emojiTagsJson) as Array<{ shortcode: string; url: string }>;
+        for (const et of parsed) {
+          if (!et.shortcode || !et.url) continue;
+          emojiTagObjects.push(new APEmoji({
+            id: new URL(et.url),
+            name: `:${et.shortcode}:`,
+            icon: new Image({ url: new URL(et.url), mediaType: 'image/png' }),
+          }));
+        }
+      } catch { /* ignore */ }
+    }
+
+    const allTags = [...mentionTags, ...hashtagTags, ...emojiTagObjects];
+    if (allTags.length > 0) {
+      noteValues.tags = allTags;
+    }
+
+    if (mediaAttachmentObjects.length > 0) {
+      noteValues.attachments = mediaAttachmentObjects;
+    }
+
+    // Source (raw text) -- standard AP property
+    if (statusText) {
+      noteValues.source = new Source({
+        content: statusText,
+        mediaType: storedObjectType === 'Article' ? 'text/markdown' : 'text/plain',
+      });
+    }
+
+    // FEP-e232: Quote post
+    if (quoteUri && canEmbedQuote({
+      quoteStatusId: quoteId,
+      quoteApprovalStatus,
+    })) {
+      noteValues.quote = new URL(quoteUri);
+      noteValues.quoteUrl = new URL(quoteUri);
+      if (quoteAuthorizationUri) {
+        noteValues.quoteAuthorization = new URL(quoteAuthorizationUri);
+      }
+    }
+
+    // Conversation context
+    if (conversationApUri) {
+      noteValues.contexts = [new URL(conversationApUri)];
+    }
+
+    // Build Note or Question depending on whether this is a poll
+    let fedifyObject: Note | Article | Question;
+
+    if (pollData) {
+      const options: Array<{ title: string; votes_count: number }> = JSON.parse(
+        typeof pollData.options === 'string' ? pollData.options : JSON.stringify(pollData.options),
+      );
+      const optionNotes = options.map((o: { title: string }) => new Note({ name: o.title }));
+
+      const questionValues: ConstructorParameters<typeof Question>[0] = {
+        ...noteValues,
+        actor: new URL(actorUri),
+      };
+
+      if (pollData.multiple) {
+        questionValues.inclusiveOptions = optionNotes;
+      } else {
+        questionValues.exclusiveOptions = optionNotes;
+      }
+
+      if (pollData.expires_at) {
+        questionValues.endTime = Temporal.Instant.from(new Date(pollData.expires_at).toISOString());
+      }
+
+      questionValues.voters = 0;
+      fedifyObject = new Question(questionValues);
+    } else if (storedObjectType === 'Article') {
+      const { content: _content, summary: _summary, ...articleValues } = noteValues;
+      fedifyObject = new Article({
+        ...articleValues,
+        contents: [fixedContent, new LanguageString(fixedContent, language)],
+        names: [title, new LanguageString(title, language)],
+        ...(spoilerText
+          ? { summaries: [spoilerText, new LanguageString(spoilerText, language)] }
+          : {}),
+        mediaType: 'text/html',
+        preview: new Note({
+          attribution: new URL(actorUri),
+          content: buildArticlePreviewContent(title, spoilerText),
+          published: Temporal.Instant.from(now),
+          ...(allTags.length > 0 ? { tags: allTags } : {}),
+          ...(mediaAttachmentObjects.length > 0 ? { attachments: mediaAttachmentObjects } : {}),
+        }),
+      } as ConstructorParameters<typeof Article>[0]);
+    } else {
+      fedifyObject = new Note(noteValues);
+    }
+
+    // -- Build Create activity --
+    const create = new Create({
+      id: new URL(`https://${domain}/activities/${generateUlid()}`),
+      actor: new URL(actorUri),
+      object: fedifyObject,
+      published: Temporal.Instant.from(now),
+      tos: toUrls,
+      ccs: ccUrls,
+    });
+
+    // -- Send via Fedify --
+    const fed = c.get('federation');
+    const deliveredRecipients = new Set<string>();
+
+    if (quoteUri && quoteRequestUri && quoteApprovalStatus === 'pending' && quoteTarget?.account_domain && quoteTarget.account_uri) {
+      const quoteRequest = new QuoteRequest({
+        id: new URL(quoteRequestUri),
+        actor: new URL(actorUri),
+        object: new URL(quoteUri),
+        instrument: fedifyObject,
+        tos: [new URL(quoteTarget.account_uri)],
+        published: Temporal.Instant.from(now),
+      });
+      try {
+        await sendToRecipient(fed, currentAccount.username, quoteTarget.account_uri, quoteRequest);
+      } catch (err) {
+        console.error('QuoteRequest delivery failed:', err);
+      }
+    }
+
+    // Deliver to each mentioned remote user
+    for (const rm of resolvedMentions) {
+      if (rm.mentionDomain && rm.actor_uri) {
+        if (!deliveredRecipients.has(rm.actor_uri)) {
+          deliveredRecipients.add(rm.actor_uri);
+          await sendToRecipient(fed, currentAccount.username, rm.actor_uri, create);
+        }
+      }
+    }
+
+    if (visibility === 'public' || visibility === 'unlisted') {
+      // Fanout to all followers
+      await sendToFollowers(fed, currentAccount.username, create);
+
+      // If this is a reply to a remote user, also deliver directly
+      if (inReplyToAccountId) {
+        const parentAuthor = await env.DB.prepare(
+          'SELECT id, domain, uri FROM accounts WHERE id = ?1',
+        ).bind(inReplyToAccountId).first();
+        if (parentAuthor && parentAuthor.domain && parentAuthor.uri) {
+          const parentActorUri = parentAuthor.uri as string;
+          if (!deliveredRecipients.has(parentActorUri)) {
+            await sendToRecipient(fed, currentAccount.username, parentActorUri, create);
+          }
+        }
+      }
+    } else if (visibility === 'private') {
+      // Private: send to followers only (no public fanout, but followers get it)
+      await sendToFollowers(fed, currentAccount.username, create);
+    }
+    // For 'direct': only the mentioned recipients above get the delivery
+  } catch (e) {
+    console.error('Federation delivery failed for status create:', e);
+  }
+
+  // Fetch full account data for response
+  const accountRow = await env.DB.prepare(
+    'SELECT * FROM accounts WHERE id = ?1',
+  ).bind(currentUser.account_id).first();
+  if (!accountRow) throw new AppError(500, 'Account not found');
+
+  const acct = accountRow.username as string;
+  const accountData = {
+    id: accountRow.id as string,
+    username: accountRow.username as string,
+    acct,
+    display_name: (accountRow.display_name as string) || '',
+    locked: !!(accountRow.locked as number),
+    bot: !!(accountRow.bot as number),
+    discoverable: accountRow.discoverable == null ? null : !!(accountRow.discoverable as number),
+    group: false,
+    created_at: accountRow.created_at as string,
+    note: (accountRow.note as string) || '',
+    url: (accountRow.url as string) || `https://${domain}/@${acct}`,
+    uri: (accountRow.uri as string) || `https://${domain}/users/${acct}`,
+    avatar: (accountRow.avatar_url as string) || null,
+    avatar_static: (accountRow.avatar_static_url as string) || (accountRow.avatar_url as string) || null,
+    header: (accountRow.header_url as string) || null,
+    header_static: (accountRow.header_static_url as string) || (accountRow.header_url as string) || null,
+    followers_count: (accountRow.followers_count as number) || 0,
+    following_count: (accountRow.following_count as number) || 0,
+    statuses_count: (accountRow.statuses_count as number) || 0,
+    last_status_at: (accountRow.last_status_at as string) || null,
+    emojis: parseCustomEmojiTagsJson(accountRow.emoji_tags as string | null, domain),
+    fields: [],
+  };
+
+  // Fetch media attachments for response
+  const { results: mediaResults } = await env.DB.prepare(
+    'SELECT * FROM media_attachments WHERE status_id = ?1',
+  ).bind(statusId).all();
+
+  const mediaAttachments = (mediaResults as Record<string, unknown>[]).map((m) => ({
+    id: m.id as string,
+    type: (m.type as string) || 'image',
+    url: `https://${domain}/media/${m.file_key}`,
+    preview_url: m.thumbnail_key ? `https://${domain}/media/${m.thumbnail_key}` : `https://${domain}/media/${m.file_key}`,
+    remote_url: (m.remote_url as string) || null,
+    text_url: null,
+    meta: null,
+    description: (m.description as string) || null,
+    blurhash: (m.blurhash as string) || null,
+  }));
+
+  // FEP-e232: Resolve quoted status for API response
+  let quoteStatus: Record<string, unknown> | null = null;
+  if (canEmbedQuote({
+    quoteStatusId: quoteId,
+    quoteApprovalStatus,
+  })) {
+    const quotedRow = await env.DB.prepare(
+      `SELECT s.*, a.username AS account_username, a.domain AS account_domain,
+        a.display_name AS account_display_name, a.note AS account_note,
+        a.uri AS account_uri, a.url AS account_url,
+        a.avatar_url AS account_avatar_url, a.avatar_static_url AS account_avatar_static_url,
+        a.header_url AS account_header_url, a.header_static_url AS account_header_static_url,
+        a.locked AS account_locked, a.bot AS account_bot, a.discoverable AS account_discoverable,
+        a.followers_count AS account_followers_count, a.following_count AS account_following_count,
+        a.statuses_count AS account_statuses_count, a.last_status_at AS account_last_status_at,
+        a.created_at AS account_created_at, a.emoji_tags AS account_emoji_tags
+      FROM statuses s JOIN accounts a ON a.id = s.account_id
+      WHERE s.id = ?1 AND s.deleted_at IS NULL`,
+    ).bind(quoteId).first();
+    if (quotedRow) {
+      const qAcct = quotedRow.account_domain
+        ? `${quotedRow.account_username}@${quotedRow.account_domain}`
+        : (quotedRow.account_username as string);
+      quoteStatus = {
+        id: quotedRow.id as string,
+        object_type: quotedRow.poll_id ? 'Question' : quotedRow.object_type === 'Article' ? 'Article' : 'Note',
+        title: (quotedRow.title as string) || '',
+        article_summary: quotedRow.object_type === 'Article' ? (quotedRow.content_warning as string) || '' : '',
+        created_at: quotedRow.created_at as string,
+        in_reply_to_id: (quotedRow.in_reply_to_id as string) || null,
+        in_reply_to_account_id: (quotedRow.in_reply_to_account_id as string) || null,
+        sensitive: !!(quotedRow.sensitive),
+        spoiler_text: quotedRow.object_type === 'Article' ? '' : (quotedRow.content_warning as string) || '',
+        visibility: (quotedRow.visibility as string) || 'public',
+        language: (quotedRow.language as string) || 'en',
+        uri: quotedRow.uri as string,
+        url: (quotedRow.url as string) || null,
+        replies_count: (quotedRow.replies_count as number) || 0,
+        reblogs_count: (quotedRow.reblogs_count as number) || 0,
+        favourites_count: (quotedRow.favourites_count as number) || 0,
+        favourited: false,
+        reblogged: false,
+        muted: false,
+        bookmarked: false,
+        pinned: false,
+        content: (quotedRow.content as string) || '',
+        reblog: null,
+        quote: null,
+        application: null,
+        account: {
+          id: quotedRow.account_id as string,
+          username: quotedRow.account_username as string,
+          acct: qAcct,
+          display_name: (quotedRow.account_display_name as string) || '',
+          locked: !!(quotedRow.account_locked),
+          bot: !!(quotedRow.account_bot),
+          discoverable: !!(quotedRow.account_discoverable),
+          group: false,
+          created_at: quotedRow.account_created_at as string,
+          note: (quotedRow.account_note as string) || '',
+          url: (quotedRow.account_url as string) || `https://${domain}/@${quotedRow.account_username}`,
+          uri: quotedRow.account_uri as string,
+          avatar: (quotedRow.account_avatar_url as string) || null,
+          avatar_static: (quotedRow.account_avatar_static_url as string) || null,
+          header: (quotedRow.account_header_url as string) || null,
+          header_static: (quotedRow.account_header_static_url as string) || null,
+          followers_count: (quotedRow.account_followers_count as number) || 0,
+          following_count: (quotedRow.account_following_count as number) || 0,
+          statuses_count: (quotedRow.account_statuses_count as number) || 0,
+          last_status_at: (quotedRow.account_last_status_at as string) || null,
+          emojis: parseCustomEmojiTagsJson(quotedRow.account_emoji_tags as string | null, domain),
+          fields: [],
+        },
+        media_attachments: [],
+        mentions: [],
+        tags: [],
+        emojis: parseCustomEmojiTagsJson(quotedRow.emoji_tags as string | null, domain),
+        card: null,
+        poll: null,
+        edited_at: (quotedRow.edited_at as string) || null,
+      };
+    }
+  }
+
+  return c.json({
+    id: statusId,
+    object_type: pollData ? 'Question' : storedObjectType,
+    title,
+    article_summary: storedObjectType === 'Article' ? spoilerText : '',
+    created_at: now,
+    in_reply_to_id: inReplyToId,
+    in_reply_to_account_id: inReplyToAccountId,
+    sensitive: !!sensitive,
+    spoiler_text: storedObjectType === 'Article' ? '' : spoilerText,
+    visibility,
+    language,
+    uri: statusUri,
+    url: statusUrl,
+    replies_count: 0,
+    reblogs_count: 0,
+    favourites_count: 0,
+    favourited: false,
+    reblogged: false,
+    muted: false,
+    bookmarked: false,
+    pinned: false,
+    content: fixedContent,
+    reblog: null,
+    quote: quoteStatus,
+    quote_policy: quotePolicy,
+    quote_policy_allows: visibility === 'public' || visibility === 'unlisted',
+    quote_policy_reason: null,
+    application: null,
+    account: accountData,
+    media_attachments: mediaAttachments,
+    mentions: resolvedMentions.map((rm) => ({
+      id: rm.account_id,
+      username: rm.acct.split('@')[0],
+      url: rm.actor_uri,
+      acct: rm.acct,
+    })),
+    tags: hashtags.map((t) => ({ name: t, url: `https://${domain}/tags/${t}` })),
+    emojis: resolvedEmojiTags,
+    card: null,
+    poll: pollData,
+    edited_at: null,
+  });
+});
+
+export default app;

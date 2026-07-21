@@ -1,0 +1,98 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "siliconbeest-queue-consumer",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-16",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"workers_dev": false,
+	// Force all @fedify/* imports (including cross-package from siliconbeest-worker)
+	// to resolve from THIS package's node_modules to avoid dual-package bundling.
+	"alias": {
+		"@fedify/fedify": "./node_modules/@fedify/fedify/dist/mod.js",
+		"@fedify/fedify/vocab": "./node_modules/@fedify/fedify/dist/vocab/mod.js",
+		"@fedify/cfworkers": "./node_modules/@fedify/cfworkers/dist/mod.js"
+	},
+	"placement": {
+		"mode": "smart"
+	},
+	"vars": {
+		"INSTANCE_DOMAIN": "social.example.com",
+		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
+		"SKIP_SIGNATURE_VERIFICATION": false,
+		// Verbose debug logging (full federation request/response payloads).
+		// Ultra-sensitive values (private keys, passwords, tokens) are always
+		// redacted. Off unless exactly true.
+		"DEBUG": false
+	},
+	// D1 Database
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "siliconbeest-db",
+			"database_id": "YOUR_D1_DATABASE_ID"
+		}
+	],
+
+	// R2 Object Storage (media processing)
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "siliconbeest-media"
+		}
+	],
+
+	// KV Namespaces
+	"kv_namespaces": [
+		{
+			"binding": "CACHE",
+			"id": "YOUR_KV_CACHE_ID"
+		},
+		{
+			"binding": "FEDIFY_KV",
+			"id": "YOUR_KV_FEDIFY_ID"
+		}
+	],
+
+	// Queues (consume federation + internal + federation-dlq, produce for re-enqueue/fanout)
+	"queues": {
+		"consumers": [
+			{
+				"queue": "siliconbeest-federation",
+				"max_retries": 5,
+				"dead_letter_queue": "siliconbeest-federation-dlq"
+			},
+			{
+				"queue": "siliconbeest-internal",
+				"max_retries": 3
+			},
+			{
+				// Dead-lettered federation messages: reprocess once more, then
+				// park persistent failures into the federation_dlq_parked table.
+				"queue": "siliconbeest-federation-dlq",
+				"max_retries": 2
+			}
+		],
+		"producers": [
+			{
+				"binding": "QUEUE_FEDERATION",
+				"queue": "siliconbeest-federation"
+			},
+			{
+				"binding": "QUEUE_INTERNAL",
+				"queue": "siliconbeest-internal"
+			}
+		]
+	},
+
+	// Capability-scoped RPC binding to the main Worker's private entrypoint
+	"services": [
+		{
+			"binding": "INTERNAL_CONNECTION_MAIN",
+			"service": "siliconbeest",
+			"entrypoint": "Internal"
+		}
+	]
+}

@@ -1,0 +1,26 @@
+import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
+import type { AppVariables } from '../../../../types';
+import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
+import { AppError } from '../../../../middleware/errorHandler';
+import { removeMute, getRelationship } from '../../../../services/account';
+
+type HonoEnv = { Variables: AppVariables };
+
+const app = new Hono<HonoEnv>();
+
+app.post('/:id/unmute', authRequired, requireScope('write:mutes'), async (c) => {
+  const targetId = c.req.param('id');
+  const currentAccountId = c.get('currentUser')!.account_id;
+
+  const target = await env.DB.prepare('SELECT id FROM accounts WHERE id = ?1').bind(targetId).first();
+  if (!target) throw new AppError(404, 'Record not found');
+
+  const changed = await removeMute(currentAccountId, targetId);
+  c.set('contributionApplied', changed);
+
+  return c.json(await getRelationship(currentAccountId, targetId));
+});
+
+export default app;

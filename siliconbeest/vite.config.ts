@@ -1,0 +1,51 @@
+import { fileURLToPath, URL } from 'node:url';
+import { execSync } from 'node:child_process';
+
+import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue';
+import vueDevTools from 'vite-plugin-vue-devtools';
+import tailwindcss from '@tailwindcss/vite';
+import { cloudflare } from '@cloudflare/vite-plugin';
+
+const BASE_VERSION = '0.1.0';
+
+function getAppVersion(): string {
+  try {
+    const hash = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+    return hash ? `${BASE_VERSION}+${hash}` : BASE_VERSION;
+  } catch {
+    return BASE_VERSION;
+  }
+}
+
+function getGitHash(): string {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+// https://vite.dev/config/
+export default defineConfig({
+  define: {
+    __GIT_HASH__: JSON.stringify(getGitHash()),
+    __APP_VERSION__: JSON.stringify(getAppVersion()),
+  },
+  plugins: [
+    vue(),
+    vueDevTools(),
+    tailwindcss(),
+    cloudflare(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  test: {
+    globals: true,
+    environment: 'happy-dom',
+    include: ['test/**/*.test.ts'],
+  },
+});

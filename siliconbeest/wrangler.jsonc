@@ -1,0 +1,132 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "siliconbeest",
+	"preview_urls": false,
+	"compatibility_date": "2026-06-16",
+	// Nuxt emits the production Cloudflare Worker entrypoint during `pnpm run build`.
+	"main": ".output/server/index.mjs",
+	// Emit source maps in the deploy bundle (Cloudflare-native readable traces;
+	// CI also uploads them to Sentry when SENTRY_AUTH_TOKEN is configured).
+	"upload_source_maps": true,
+	"assets": {
+		"directory": "./.output/public",
+		"not_found_handling": "none",
+		"binding": "ASSETS"
+	},
+	"observability": {
+	  "enabled": false,
+	  "head_sampling_rate": 1,
+	  "logs": {
+	    "enabled": true,
+	    "head_sampling_rate": 1,
+	    "persist": true,
+	    "invocation_logs": true
+	  },
+	  "traces": {
+	    "enabled": true,
+	    "persist": true,
+	    "head_sampling_rate": 1
+	  }
+	},
+  	"compatibility_flags": ["nodejs_compat"],
+	"placement": {
+		"mode": "smart"
+	},
+
+	// Environment Variables (set SETUP_SECRET via `wrangler secret put SETUP_SECRET` before first-run setup;
+	// optional `wrangler secret put SENTRY_DSN` enables Sentry error reporting in the worker)
+	"vars": {
+		"INSTANCE_DOMAIN": "social.example.com",
+		"INSTANCE_TITLE": "My SiliconBeest Instance",
+		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
+		"REGISTRATION_MODE": "open",
+		"SKIP_SIGNATURE_VERIFICATION": false,
+		// Verbose debug logging (full federation request/response payloads,
+		// per-request user activity). Ultra-sensitive values (private keys,
+		// passwords, tokens) are always redacted. Off unless exactly true.
+		"DEBUG": false,
+		"WORKERS_AI_ENABLED": false,
+		"WORKERS_AI_RECOMMENDATION_MODEL": "@cf/baai/bge-m3",
+		"WORKERS_AI_TRANSLATION_MODEL": "@cf/meta/m2m100-1.2b",
+		"WORKERS_AI_IMAGE_CAPTION_MODEL": "@cf/moondream/moondream3.1-9B-A2B",
+		"WORKERS_AI_RATE_LIMITS": true,
+		"WORKERS_AI_RECOMMENDATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_TRANSLATION_RATE_LIMIT_PERIOD_SECONDS": 60,
+		"WORKERS_AI_IMAGE_DESCRIPTION_RATE_LIMIT_PERIOD_SECONDS": 60
+	},
+
+	// D1 Database
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "siliconbeest-db",
+			"database_id": "YOUR_D1_DATABASE_ID"
+		}
+	],
+
+	// R2 Object Storage (media uploads)
+	"r2_buckets": [
+		{
+			"binding": "MEDIA_BUCKET",
+			"bucket_name": "siliconbeest-media"
+		}
+	],
+
+	// KV Namespaces
+	"kv_namespaces": [
+		{
+			"binding": "CACHE",
+			"id": "YOUR_KV_CACHE_ID"
+		},
+		{
+			"binding": "SESSIONS",
+			"id": "YOUR_KV_SESSIONS_ID"
+		},
+		{
+			"binding": "FEDIFY_KV",
+			"id": "YOUR_KV_FEDIFY_ID"
+		}
+	],
+
+	// Queues (producer bindings — worker enqueues jobs)
+	"queues": {
+		"producers": [
+			{
+				"binding": "QUEUE_FEDERATION",
+				"queue": "siliconbeest-federation"
+			},
+			{
+				"binding": "QUEUE_INTERNAL",
+				"queue": "siliconbeest-internal"
+			},
+			{
+				"binding": "QUEUE_EMAIL",
+				"queue": "siliconbeest-email"
+			}
+		]
+	},
+
+	// Durable Objects (WebSocket streaming)
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "STREAMING_DO",
+				"class_name": "StreamingDO"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_classes": ["StreamingDO"]
+		}
+	],
+
+	// Workers Routes (catch-all for custom domain)
+	"routes": [
+		{
+			"custom_domain": true,
+			"pattern": "social.example.com"
+		}
+	]
+}

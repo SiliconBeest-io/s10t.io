@@ -1,0 +1,31 @@
+{
+	"name": "siliconbeest-queue-consumer",
+	"version": "0.0.0",
+	"private": true,
+	"scripts": {
+		"deploy": "pnpm wrangler deploy",
+		"dev": "pnpm wrangler dev",
+		"start": "pnpm wrangler dev",
+		"cf-typegen": "pnpm wrangler types -c wrangler.jsonc -c ../siliconbeest/wrangler.rpc-typegen.jsonc --env-file ../scripts/typegen-consumer.env",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20260701.1",
+		"@js-temporal/polyfill": "^0.5.1",
+		"@types/node": "^25.5.2",
+		"typescript": "^5.5.2",
+		"vitest": "^4.1.9",
+		"wrangler": "4.107.0"
+	},
+	"dependencies": {
+		"@fedify/cfworkers": "^2.3.3",
+		"@fedify/fedify": "^2.3.3",
+		"@fedify/vocab": "^2.3.3",
+		"@logtape/logtape": "^2.2.3",
+		"@sentry/cloudflare": "^10.66.0",
+		"glob": "^13.0.6"
+	},
+	"engines": {
+		"node": ">=25.0.0"
+	}
+}

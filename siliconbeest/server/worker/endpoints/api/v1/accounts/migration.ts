@@ -1,0 +1,122 @@
+/**
+ * Account Migration API
+ *
+ * Initiates an account migration (Move) from the current account to
+ * a target account. The target account must have already added this
+ * account's URI to its alsoKnownAs list.
+ *
+ * POST /api/v1/accounts/migration
+ *   Body: { target_acct: "user@newserver.com" }
+ *
+ * Flow:
+ * 1. WebFinger resolve target_acct to actor URI
+ * 2. Fetch target actor document
+ * 3. Verify target's alsoKnownAs contains our account URI
+ * 4. Update moved_to_account_id + moved_at on local account
+ * 5. Build Move activity and fanout to followers
+ */
+
+import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
+import type { AppVariables } from '../../../../types';
+import { authRequired } from '../../../../middleware/auth';
+import { requireScope } from '../../../../middleware/scopeCheck';
+import { resolveRemoteAccount } from '../../../../federation/resolveRemoteAccount';
+import { sendToFollowers, getFedifyContext } from '../../../../federation/helpers/send';
+import { isActor } from '@fedify/fedify/vocab';
+import { Move } from '@fedify/fedify/vocab';
+import { generateUlid } from '../../../../utils/ulid';
+import { getAccountUri, setMovedTo } from '../../../../services/account';
+
+const app = new Hono<{ Variables: AppVariables }>();
+
+app.post('/migration', authRequired, requireScope('write:accounts'), async (c) => {
+	const currentUser = c.get('currentUser')!;
+	const accountId = currentUser.account_id;
+	const domain = env.INSTANCE_DOMAIN;
+
+	const body = await c.req.json<{ target_acct: string }>().catch(() => null);
+
+	if (!body?.target_acct) {
+		return c.json({ error: 'Missing target_acct parameter' }, 422);
+	}
+
+	const targetAcct = body.target_acct.trim();
+
+	// 1. WebFinger resolve target via Fedify
+	const fed = c.get('federation');
+	const ctx = getFedifyContext(fed);
+	// The domain part of the handle is case-insensitive (RFC 7565) — lowercase
+	// it for the WebFinger resource; strict remotes match it case-sensitively.
+	// Username casing is preserved. Split on the LAST '@' to match Fedify.
+	const cleanedTarget = targetAcct.replace(/^@/, '');
+	const targetAtPos = cleanedTarget.lastIndexOf('@');
+	const targetHandle = targetAtPos === -1
+		? cleanedTarget
+		: `${cleanedTarget.slice(0, targetAtPos)}@${cleanedTarget.slice(targetAtPos + 1).toLowerCase()}`;
+	const wfResult = await ctx.lookupWebFinger(`acct:${targetHandle}`);
+	const selfLink = wfResult?.links?.find(
+		(link) =>
+			link.rel === 'self' &&
+			(link.type === 'application/activity+json' ||
+				link.type === 'application/ld+json; profile="https://www.w3.org/ns/activitystreams"') &&
+			link.href,
+	);
+	if (!selfLink?.href) {
+		return c.json({ error: 'Could not resolve target account via WebFinger' }, 422);
+	}
+
+	const targetActorUri = selfLink.href;
+
+	// 2. Fetch target actor document via Fedify
+	const localAcct = await env.DB.prepare("SELECT username FROM accounts WHERE domain IS NULL LIMIT 1").first<{ username: string }>();
+	const docLoader = await ctx.getDocumentLoader({ identifier: localAcct?.username || 'admin' });
+	const targetActor = await ctx.lookupObject(targetActorUri, { documentLoader: docLoader });
+	if (!targetActor || !isActor(targetActor) || !targetActor.id) {
+		return c.json({ error: 'Could not fetch target actor document' }, 422);
+	}
+
+	// 3. Verify alsoKnownAs bidirectional link
+	const account = await getAccountUri(accountId);
+
+	if (!account) {
+		return c.json({ error: 'Account not found' }, 404);
+	}
+
+	const ourUri = account.uri;
+	const alsoKnownAs: string[] = targetActor.aliasIds
+		? Array.from(targetActor.aliasIds).map((u: URL) => u.href)
+		: [];
+
+	if (!alsoKnownAs.includes(ourUri)) {
+		return c.json(
+			{ error: 'Target account does not list this account in alsoKnownAs. Add an alias on the target account first.' },
+			422,
+		);
+	}
+
+	// 4. Resolve or create the target account in our DB
+	const targetAccountId = await resolveRemoteAccount(targetActorUri, accountId);
+	if (!targetAccountId) {
+		return c.json({ error: 'Could not resolve target account' }, 422);
+	}
+
+	// Update moved_to_account_id + moved_at
+	const changed = await setMovedTo(accountId, targetAccountId);
+	c.set('contributionApplied', changed);
+
+	// 5. Build Move activity and fanout to followers
+	const move = new Move({
+		id: new URL(`${ourUri}#moves/${generateUlid()}`),
+		actor: new URL(ourUri),
+		object: new URL(ourUri),
+		target: new URL(targetActorUri),
+	});
+	await sendToFollowers(fed, account.username, move);
+
+	console.log(`[migration] Account ${ourUri} moved to ${targetActorUri}`);
+
+	return c.json({ message: 'Migration initiated', target: targetActorUri });
+});
+
+export default app;

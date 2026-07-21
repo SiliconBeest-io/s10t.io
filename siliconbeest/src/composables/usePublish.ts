@@ -1,0 +1,109 @@
+import { useAuthStore } from '@/stores/auth';
+import { useComposeStore } from '@/stores/compose';
+import { useStatusesStore } from '@/stores/statuses';
+import { useTimelinesStore } from '@/stores/timelines';
+import { useUiStore } from '@/stores/ui';
+import { useDraftsStore } from '@/stores/drafts';
+import { playComposeSound } from '@/utils/newPostSound';
+import type { StatusVisibility, QuotePolicy } from '@/types/mastodon';
+
+export interface PublishPayload {
+  content: string;
+  object_type?: 'Note' | 'Article';
+  title?: string;
+  summary?: string;
+  visibility?: string;
+  sensitive?: boolean;
+  spoiler_text?: string;
+  language?: string;
+  in_reply_to_id?: string;
+  quote_id?: string;
+  quote_policy?: QuotePolicy;
+  media_ids?: string[];
+  draft_id?: string;
+}
+
+/**
+ * Centralized compose → publish helper.
+ *
+ * Applies the payload to the compose store, publishes, then distributes the
+ * resulting status to caches and timelines.  When `in_reply_to_id` is set the
+ * parent status's visibility is enforced as a ceiling (you can't post more
+ * publicly than the parent).
+ */
+export function usePublish() {
+  const auth = useAuthStore();
+  const compose = useComposeStore();
+  const statusesStore = useStatusesStore();
+  const timelinesStore = useTimelinesStore();
+  const ui = useUiStore();
+  const drafts = useDraftsStore();
+
+  const VISIBILITY_RANK: Record<string, number> = {
+    direct: 0,
+    private: 1,
+    unlisted: 2,
+    public: 3,
+  };
+
+  /** Return the more restrictive of two visibility values. */
+  function clampVisibility(requested: string, ceiling: string): string {
+    const reqRank = VISIBILITY_RANK[requested] ?? 3;
+    const ceilRank = VISIBILITY_RANK[ceiling] ?? 3;
+    return reqRank <= ceilRank ? requested : ceiling;
+  }
+
+  async function publish(payload: PublishPayload) {
+    if (!auth.token) return;
+    const isEditing = compose.editingId !== null;
+
+    compose.text = payload.content;
+    compose.objectType = payload.object_type ?? 'Note';
+    compose.title = payload.title ?? '';
+    compose.articleSummary = payload.summary ?? '';
+
+    // Determine visibility: if replying, clamp to parent visibility
+    if (payload.in_reply_to_id) {
+      const parent = statusesStore.getCached(payload.in_reply_to_id);
+      const parentVisibility = parent?.visibility ?? 'public';
+      const requested = payload.visibility ?? compose.defaultVisibility;
+      compose.visibility = clampVisibility(requested, parentVisibility) as StatusVisibility;
+    } else if (payload.visibility) {
+      compose.visibility = payload.visibility as StatusVisibility;
+    }
+
+    if (payload.sensitive !== undefined) compose.sensitive = payload.sensitive;
+    compose.contentWarning = payload.spoiler_text ?? '';
+    compose.showContentWarning = Boolean(payload.spoiler_text);
+    if (payload.language) compose.language = payload.language;
+    if (payload.in_reply_to_id) compose.inReplyToId = payload.in_reply_to_id;
+    if (payload.quote_id) compose.quoteId = payload.quote_id;
+    if (payload.quote_policy) compose.quotePolicy = payload.quote_policy;
+    if (payload.media_ids?.length) {
+      // Media already uploaded — store IDs are set via the composer's own flow
+    }
+
+    const status = await compose.publish();
+    if (status) {
+      if (!isEditing && payload.draft_id) {
+        void drafts.remove(payload.draft_id);
+      }
+      statusesStore.cacheStatus(status);
+      if (!isEditing) {
+        timelinesStore.prependStatus('home', status.id);
+        if (timelinesStore.timelines.has('social')) {
+          timelinesStore.prependStatus('social', status.id);
+        }
+        if (status.visibility === 'public') {
+          timelinesStore.prependStatus('public', status.id);
+          timelinesStore.prependStatus('local', status.id);
+        }
+        playComposeSound();
+      }
+      ui.closeComposeModal();
+    }
+    return status;
+  }
+
+  return { publish };
+}

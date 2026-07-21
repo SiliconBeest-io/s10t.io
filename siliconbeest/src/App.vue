@@ -1,0 +1,124 @@
+<script setup lang="ts">
+import { onMounted, computed, ref } from 'vue';
+import { RouterView, useRouter } from 'vue-router';
+import { useAuthStore } from '@/stores/auth';
+import { useInstanceStore } from '@/stores/instance';
+import { useUiStore } from '@/stores/ui';
+import { useNotificationsStore } from '@/stores/notifications';
+import { useComposeStore } from '@/stores/compose';
+import { usePublish, type PublishPayload } from '@/composables/usePublish';
+import { applyAccent } from '@/utils/accent';
+import Modal from '@/components/common/Modal.vue';
+import StatusComposer from '@/components/status/StatusComposer.vue';
+
+const auth = useAuthStore();
+const instance = useInstanceStore();
+const ui = useUiStore();
+const notifStore = useNotificationsStore();
+const composeStore = useComposeStore();
+const router = useRouter();
+const { publish } = usePublish();
+const composerRef = ref<InstanceType<typeof StatusComposer> | null>(null);
+
+const composeReplyContext = computed(() => {
+  if (!composeStore.inReplyToStatus) return undefined;
+  const s = composeStore.inReplyToStatus;
+  return {
+    id: s.id,
+    account: s.account,
+    mentions: s.mentions,
+    visibility: s.visibility,
+  };
+});
+
+const modalTitle = computed(() => {
+  if (composeStore.inReplyToStatus) {
+    return undefined; // StatusComposer will show "Replying to @user" internally
+  }
+  return undefined; // Will use default from $t('compose.title')
+});
+
+async function handleGlobalCompose(payload: PublishPayload) {
+  await publish(payload);
+}
+
+function handleModalClose() {
+  composerRef.value?.finishDraftSession();
+  ui.closeComposeModal();
+}
+
+onMounted(async () => {
+  // Load instance info and verify credentials in parallel
+  const promises: Promise<void>[] = [instance.init()];
+  if (auth.isAuthenticated) {
+    promises.push(auth.fetchCurrentUser());
+    promises.push(notifStore.fetch(auth.token!));
+    promises.push(notifStore.loadMarker(auth.token!));
+  }
+  await Promise.allSettled(promises);
+
+  // Apply the instance accent color for the Deck UI (falls back internally)
+  applyAccent(instance.instance?.accent_color);
+
+  // Set dynamic page title
+  if (instance.instance?.title) {
+    document.title = instance.instance.title;
+  }
+
+  // Set dynamic favicon
+  const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
+  if (link) {
+    link.href = '/favicon.ico';
+  }
+
+  // Auto-clear PWA cache on code update (new deploy)
+  const currentVersion = __APP_VERSION__;
+  if (currentVersion) {
+    const storedVersion = localStorage.getItem('siliconbeest_app_version');
+    if (storedVersion && storedVersion !== currentVersion) {
+      caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n))));
+    }
+    localStorage.setItem('siliconbeest_app_version', currentVersion);
+  }
+
+  // Register service worker for PWA + Web Push notifications
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      // Check for updates periodically (every 60 minutes)
+      setInterval(() => registration.update(), 60 * 60 * 1000);
+
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (newWorker) {
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              // New version available — activate it immediately
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        }
+      });
+    }).catch(() => {
+      // SW registration failed
+    });
+
+    // Reload when new SW takes over to ensure fresh assets
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+  }
+});
+</script>
+
+<template>
+  <RouterView />
+
+  <!-- Global compose modal -->
+  <Modal :open="ui.composeModalOpen" :title="composeStore.editingId ? $t('status.editing') : $t('compose.title')" @close="handleModalClose">
+    <StatusComposer v-if="ui.composeModalOpen" ref="composerRef" :reply-to="composeReplyContext" @submit="handleGlobalCompose" />
+  </Modal>
+</template>

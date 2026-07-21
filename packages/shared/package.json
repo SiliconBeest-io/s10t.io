@@ -1,0 +1,9 @@
+{
+  "name": "@siliconbeest/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260701.1"
+  }
+}

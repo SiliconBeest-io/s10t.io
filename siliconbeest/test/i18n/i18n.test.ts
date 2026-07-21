@@ -1,0 +1,170 @@
+import { describe, it, expect } from 'vitest';
+import { createI18n } from 'vue-i18n';
+import en from '@/i18n/locales/en.json';
+import ja from '@/i18n/locales/ja.json';
+import ko from '@/i18n/locales/ko.json';
+import zhCN from '@/i18n/locales/zh-CN.json';
+import zhTW from '@/i18n/locales/zh-TW.json';
+
+function leafKeys(value: unknown, prefix = ''): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return prefix ? [prefix] : [];
+  }
+
+  return Object.entries(value).flatMap(([key, child]) =>
+    leafKeys(child, prefix ? `${prefix}.${key}` : key),
+  );
+}
+
+describe('i18n', () => {
+  function makeI18n() {
+    return createI18n({
+      legacy: false,
+      locale: 'en',
+      fallbackLocale: 'en',
+      messages: { en },
+      missingWarn: false,
+      fallbackWarn: false,
+    });
+  }
+
+  describe('English locale', () => {
+    it('loads English locale successfully', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.availableLocales).toContain('en');
+    });
+
+    it('has common.loading key', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('common.loading')).toBe('Loading...');
+    });
+
+    it('has auth.login key', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('auth.login')).toBe('Log in');
+    });
+
+    it('has auth.logout key', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('auth.logout')).toBe('Log out');
+    });
+
+    it('has timeline section keys', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('timeline.home')).toBe('Home');
+      expect(i18n.global.t('timeline.local')).toBe('Local');
+      expect(i18n.global.t('timeline.federated')).toBe('Federated');
+    });
+
+    it('has status action keys', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('status.reply')).toBe('Reply');
+      expect(i18n.global.t('status.boost')).toBe('Boost');
+      expect(i18n.global.t('status.favourite')).toBe('Favourite');
+      expect(i18n.global.t('status.bookmark')).toBe('Bookmark');
+      expect(i18n.global.t('status.share')).toBe('Share');
+    });
+
+    it('has profile keys', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('profile.follow')).toBe('Follow');
+      expect(i18n.global.t('profile.unfollow')).toBe('Unfollow');
+    });
+
+    it('has settings keys', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('settings.theme')).toBe('Theme');
+      expect(i18n.global.t('settings.themeLight')).toBe('Light');
+      expect(i18n.global.t('settings.themeDark')).toBe('Dark');
+    });
+
+    it('has error keys', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('error.notFound')).toBe('Page not found');
+    });
+
+    it('points an empty deck to the upper-left Columns button', () => {
+      const i18n = makeI18n();
+      expect(i18n.global.t('deck.columns_empty')).toBe(
+        'No columns are selected. Use the Columns button in the upper-left to choose what to load.',
+      );
+    });
+  });
+
+  describe('Locale parity', () => {
+    it('keeps every supported locale aligned with the English keys', () => {
+      const englishKeys = leafKeys(en).sort();
+      for (const messages of [ko, ja, zhCN, zhTW]) {
+        expect(leafKeys(messages).sort()).toEqual(englishKeys);
+      }
+    });
+
+    it('warns about the 24-hour re-registration restriction before cancellation', () => {
+      for (const messages of [en, ko, ja, zhCN, zhTW]) {
+        expect(messages.auth.registration_cancel_confirm).toContain('24');
+      }
+    });
+
+    it('provides the public invitation guide in every supported locale', () => {
+      for (const messages of [en, ko, ja, zhCN, zhTW]) {
+        expect(messages.about.invitation_guide_link).toBeTruthy();
+        expect(messages.invitation_guide.signup_cooldown).toContain('24');
+        expect(messages.invitation_guide.audit_admin).toBeTruthy();
+      }
+    });
+
+    it('renders account handles without treating @ as linked-message syntax', () => {
+      const locales = { en, ko, ja, 'zh-CN': zhCN, 'zh-TW': zhTW };
+      const i18n = createI18n({
+        legacy: false,
+        locale: 'en',
+        fallbackLocale: 'en',
+        messages: locales,
+        missingWarn: false,
+        fallbackWarn: false,
+      });
+
+      for (const locale of Object.keys(locales)) {
+        i18n.global.locale.value = locale;
+        expect(i18n.global.t('auth.registration_confirmation_description', {
+          username: 'alice',
+        })).toContain('@alice');
+        expect(i18n.global.t('admin_invitation_credits.adjust_account', {
+          username: 'alice',
+        })).toContain('@alice');
+      }
+    });
+  });
+
+  describe('Fallback behavior', () => {
+    it('falls back to English for missing locale', () => {
+      const i18n = createI18n({
+        legacy: false,
+        locale: 'fr',
+        fallbackLocale: 'en',
+        messages: { en },
+        missingWarn: false,
+        fallbackWarn: false,
+      });
+      // French locale has no messages loaded, should fall back to English
+      expect(i18n.global.t('common.loading')).toBe('Loading...');
+    });
+
+    it('returns key path for completely missing keys', () => {
+      const i18n = makeI18n();
+      const result = i18n.global.t('nonexistent.key');
+      expect(result).toBe('nonexistent.key');
+    });
+  });
+
+  describe('Dynamic locale', () => {
+    it('can add a new locale at runtime', () => {
+      const i18n = makeI18n();
+      const koMessages = { common: { loading: '로딩 중...' } };
+      i18n.global.setLocaleMessage('ko', koMessages);
+      expect(i18n.global.availableLocales).toContain('ko');
+      i18n.global.locale.value = 'ko';
+      expect(i18n.global.t('common.loading')).toBe('로딩 중...');
+    });
+  });
+});

@@ -1,0 +1,12 @@
+packages:
+  - siliconbeest
+  - siliconbeest-queue-consumer
+  - siliconbeest-email-sender
+  - packages/*
+
+allowBuilds:
+  '@parcel/watcher': false
+  '@sentry/cli': true
+  esbuild: true
+  sharp: true
+  workerd: true

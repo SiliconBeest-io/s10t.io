@@ -1,0 +1,112 @@
+{
+  "confirmation_subject": "이메일 인증 - {title}",
+  "confirmation_heading": "이메일 인증 - {title}",
+  "confirmation_body": "아래 링크를 클릭하여 이메일 주소를 인증해 주세요:",
+  "confirmation_code": "인증 코드: {code}",
+  "confirmation_code_help": "가입 페이지에 이 코드를 입력하거나 아래 링크를 이용하세요.",
+  "confirmation_expiry": "이 코드와 링크는 60분 후에 만료됩니다.",
+  "confirmation_page_title": "이메일 확인",
+  "confirmation_page_body": "계정을 활성화하려면 이메일 주소 확인을 계속하세요.",
+  "confirmation_page_action": "이메일 확인",
+  "confirmation_invalid_title": "만료되었거나 유효하지 않은 토큰",
+  "confirmation_invalid_body": "이 확인 링크는 만료되었거나 이미 사용되었습니다. 확인 이메일을 다시 요청해 주세요.",
+  "confirmation_missing_token": "확인 토큰이 제공되지 않았습니다.",
+
+  "registration_ready_subject": "{title} 가입을 계속해 주세요",
+  "registration_ready_heading": "가입 절차를 계속할 수 있습니다",
+  "registration_ready_body": "로그인한 뒤 가입 내용을 확인하고 절차를 완료해 주세요.",
+  "registration_ready_action": "가입 계속하기",
+
+  "password_reset_subject": "비밀번호 재설정",
+  "password_reset_heading": "비밀번호 재설정",
+  "password_reset_body": "아래 링크를 클릭하여 비밀번호를 재설정해 주세요:",
+  "password_reset_expiry": "이 링크는 1시간 후에 만료됩니다.",
+
+  "welcome_subject": "{title}에 오신 것을 환영합니다!",
+  "welcome_heading": "{title}에 오신 것을 환영합니다!",
+  "welcome_body": "가입이 완료되어 계정이 정상적으로 활성화되었습니다.",
+
+  "rejection_subject": "가입 심사 결과",
+  "rejection_heading": "가입 심사 결과",
+  "rejection_body": "{title} 가입 신청이 현재 승인되지 않았습니다.",
+
+  "reason_label": "사유",
+
+  "warning_warn_subject": "계정 경고",
+  "warning_warn_heading": "계정 경고",
+  "warning_warn_description": "관리자가 회원님의 계정에 경고를 보냈습니다.",
+
+  "warning_disable_subject": "계정 동결",
+  "warning_disable_heading": "계정 동결",
+  "warning_disable_description": "관리자가 회원님의 계정을 동결했습니다. 로그인이 제한됩니다.",
+
+  "warning_silence_subject": "계정 제한",
+  "warning_silence_heading": "계정 제한",
+  "warning_silence_description": "관리자가 회원님의 계정을 제한했습니다. 게시물이 팔로워에게만 표시됩니다.",
+
+  "warning_suspend_subject": "계정 정지",
+  "warning_suspend_heading": "계정 정지",
+  "warning_suspend_description": "관리자가 회원님의 계정을 정지했습니다. 더 이상 이 계정을 사용할 수 없습니다.",
+
+  "warning_sensitive_subject": "미디어 민감 표시",
+  "warning_sensitive_heading": "미디어 민감 표시",
+  "warning_sensitive_description": "관리자가 회원님의 미디어를 민감한 콘텐츠로 표시했습니다.",
+
+  "warning_none_subject": "계정 경고",
+  "warning_none_heading": "계정 경고",
+  "warning_none_description": "관리자가 회원님의 계정에 경고를 보냈습니다.",
+
+  "warning_unsuspend_subject": "계정 정지 해제",
+  "warning_unsuspend_heading": "계정 정지 해제",
+  "warning_unsuspend_description": "회원님의 계정 정지가 해제되었습니다. 다시 계정을 사용하실 수 있습니다.",
+
+  "warning_unsilence_subject": "계정 제한 해제",
+  "warning_unsilence_heading": "계정 제한 해제",
+  "warning_unsilence_description": "회원님의 계정 제한이 해제되었습니다. 게시물이 다시 모든 사람에게 표시됩니다.",
+
+  "warning_enable_subject": "계정 재활성화",
+  "warning_enable_heading": "계정 재활성화",
+  "warning_enable_description": "회원님의 계정이 재활성화되었습니다. 다시 로그인하실 수 있습니다.",
+
+  "warning_unsensitize_subject": "미디어 민감 표시 해제",
+  "warning_unsensitize_heading": "미디어 민감 표시 해제",
+  "warning_unsensitize_description": "회원님의 미디어에 대한 민감 콘텐츠 표시가 해제되었습니다.",
+
+  "login_notification_subject": "새로운 로그인 — {title}",
+  "login_notification_heading": "새로운 로그인 감지",
+  "login_notification_body": "계정에 새로운 로그인이 감지되었습니다.",
+  "login_notification_time": "시각",
+  "login_notification_ip": "IP 주소",
+  "login_notification_device": "기기",
+  "login_notification_warning": "본인이 아닌 경우 즉시 비밀번호를 변경해 주세요.",
+
+  "password_changed_subject": "비밀번호가 변경되었습니다 — {title}",
+  "password_changed_heading": "비밀번호 변경 완료",
+  "password_changed_body": "비밀번호가 성공적으로 변경되었습니다.",
+  "password_changed_sessions": "보안을 위해 다른 모든 활성 세션이 로그아웃되었습니다.",
+  "password_changed_warning": "본인이 변경한 것이 아니라면 즉시 비밀번호를 재설정해 주세요.",
+
+  "username_reminder_subject": "사용자 이름 알림 — {title}",
+  "username_reminder_heading": "사용자 이름 알림",
+  "username_reminder_body": "이 이메일 주소와 연결된 사용자 이름 알림을 요청하셨습니다.",
+  "username_reminder_your_username": "사용자 이름",
+  "username_reminder_your_handle": "전체 핸들",
+  "username_reminder_ignore": "이 요청을 하지 않으셨다면 이 이메일을 무시하셔도 됩니다.",
+
+  "admin_pending_subject": "새 사용자 승인 대기: @{username}",
+  "admin_pending_heading": "새 회원가입 승인 대기",
+  "admin_pending_body": "새 사용자가 가입 후 승인을 기다리고 있습니다:",
+  "admin_pending_username": "사용자 이름",
+  "admin_pending_email": "이메일",
+  "admin_pending_reason": "가입 사유",
+  "admin_pending_review": "대기 중인 계정 검토",
+
+  "admin_report_subject": "새 신고: @{target}",
+  "admin_report_heading": "새 신고 접수",
+  "admin_report_body": "새 신고가 접수되었습니다:",
+  "admin_report_reporter": "신고자",
+  "admin_report_target": "대상",
+  "admin_report_category": "분류",
+  "admin_report_comment": "내용",
+  "admin_report_review": "신고 검토"
+}

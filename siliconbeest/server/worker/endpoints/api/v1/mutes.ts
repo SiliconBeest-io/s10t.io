@@ -1,0 +1,66 @@
+import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
+import type { AppVariables } from '../../../types';
+import { authRequired } from '../../../middleware/auth';
+import { requireScope } from '../../../middleware/scopeCheck';
+import { parsePaginationParams, buildPaginationQuery, buildLinkHeader } from '../../../utils/pagination';
+import { serializeAccount } from '../../../utils/mastodonSerializer';
+import type { AccountRow } from '../../../types/db';
+
+interface MuteJoinRow extends AccountRow {
+  m_id: string;
+}
+
+const app = new Hono<{ Variables: AppVariables }>();
+
+app.get('/', authRequired, requireScope('read:mutes'), async (c) => {
+  const account = c.get('currentAccount')!;
+
+  const pag = parsePaginationParams({
+    max_id: c.req.query('max_id'),
+    since_id: c.req.query('since_id'),
+    min_id: c.req.query('min_id'),
+    limit: c.req.query('limit'),
+  });
+
+  const { whereClause, orderClause, limitValue, params } = buildPaginationQuery(pag, 'm.id');
+
+  const conditions: string[] = ['m.account_id = ?'];
+  const binds: (string | number)[] = [account.id];
+
+  if (whereClause) {
+    conditions.push(whereClause);
+    binds.push(...params);
+  }
+
+  const sql = `
+    SELECT m.id AS m_id, a.*
+    FROM mutes m
+    JOIN accounts a ON a.id = m.target_account_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ${orderClause}
+    LIMIT ?
+  `;
+  binds.push(limitValue);
+
+  const { results } = await env.DB.prepare(sql).bind(...binds).all<MuteJoinRow>();
+
+  // Build link header using mute row IDs
+  const paginationItems = (results ?? []).map((row) => ({ id: row.m_id }));
+  if (pag.minId) paginationItems.reverse();
+
+  const baseUrl = `https://${env.INSTANCE_DOMAIN}/api/v1/mutes`;
+  const link = buildLinkHeader(baseUrl, paginationItems, limitValue);
+  const headers: Record<string, string> = {};
+  if (link) headers['Link'] = link;
+
+  // Restore actual account IDs in the response
+  const serialized = (results ?? []).map((row) => {
+    return serializeAccount(row, { instanceDomain: env.INSTANCE_DOMAIN });
+  });
+  if (pag.minId) serialized.reverse();
+
+  return c.json(serialized, 200, headers);
+});
+
+export default app;

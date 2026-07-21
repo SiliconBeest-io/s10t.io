@@ -1,0 +1,17 @@
+# Logs
+*.log
+pnpm-debug.log*
+
+node_modules/
+dist/
+coverage/
+
+*.tsbuildinfo
+.eslintcache
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example

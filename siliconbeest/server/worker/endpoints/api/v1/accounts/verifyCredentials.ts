@@ -1,0 +1,77 @@
+import { Hono } from 'hono';
+import { env } from 'cloudflare:workers';
+import type { AppVariables } from '../../../../types';
+import { authRequired } from '../../../../middleware/auth';
+import { requireAnyScope } from '../../../../middleware/scopeCheck';
+import { AppError } from '../../../../middleware/errorHandler';
+import { parseCustomEmojiTagsJson } from '../../../../../../../packages/shared/utils/customEmoji';
+import { normalizeQuotePolicy } from '../../../../../../../packages/shared/utils/quotePolicy';
+
+type HonoEnv = { Variables: AppVariables };
+
+function safeJsonParse<T>(val: string | null, fallback: T): T {
+  if (!val) return fallback;
+  return JSON.parse(val);
+}
+
+const app = new Hono<HonoEnv>();
+
+app.get('/verify_credentials', authRequired, requireAnyScope('profile', 'read:accounts'), async (c) => {
+  const user = c.get('currentUser')!;
+  const domain = env.INSTANCE_DOMAIN;
+
+  const row = await env.DB.prepare(
+    `SELECT a.*, u.locale, u.role, u.default_privacy, u.default_quote_policy, u.otp_enabled
+     FROM accounts a
+     JOIN users u ON u.account_id = a.id
+     WHERE a.id = ?1`,
+  ).bind(user.account_id).first();
+
+  if (!row) throw new AppError(404, 'Record not found');
+
+  const acct = row.domain ? `${row.username}@${row.domain}` : (row.username as string);
+
+  return c.json({
+    id: row.id as string,
+    username: row.username as string,
+    acct,
+    display_name: (row.display_name as string) || '',
+    locked: !!(row.locked),
+    bot: !!(row.bot),
+    discoverable: !!(row.discoverable),
+    group: false,
+    created_at: row.created_at as string,
+    note: (row.note as string) || '',
+    url: (row.url as string) || `https://${domain}/@${row.username}`,
+    uri: row.uri as string,
+    avatar: (row.avatar_url as string) || null,
+    avatar_static: (row.avatar_static_url as string) || null,
+    header: (row.header_url as string) || null,
+    header_static: (row.header_static_url as string) || null,
+    followers_count: (row.followers_count as number) || 0,
+    following_count: (row.following_count as number) || 0,
+    statuses_count: (row.statuses_count as number) || 0,
+    last_status_at: (row.last_status_at as string) || null,
+    emojis: parseCustomEmojiTagsJson(row.emoji_tags as string | null, domain),
+    fields: safeJsonParse(row.fields as string | null, []),
+    source: {
+      privacy: (row.default_privacy as string) || 'public',
+      sensitive: false,
+      language: (row.locale as string) || 'en',
+      note: (row.note as string) || '',
+      fields: safeJsonParse(row.fields as string | null, []),
+      follow_requests_count: 0,
+      hide_collections: !!(row.hide_collections),
+      quote_policy: normalizeQuotePolicy(row.default_quote_policy),
+    },
+    role: {
+      id: row.role === 'admin' ? '3' : row.role === 'moderator' ? '2' : '1',
+      name: (row.role as string) || 'user',
+      permissions: row.role === 'admin' ? '1' : '0',
+      highlighted: row.role === 'admin',
+    },
+    otp_enabled: !!(row.otp_enabled),
+  });
+});
+
+export default app;

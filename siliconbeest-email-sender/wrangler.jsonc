@@ -1,0 +1,30 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "siliconbeest-email-sender",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-16",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"workers_dev": false,
+
+	// Consumes from dedicated email queue
+	"queues": {
+		"consumers": [
+			{
+				"queue": "siliconbeest-email",
+				"max_retries": 3
+			}
+		]
+	},
+
+	// D1 for reading SMTP settings from settings table
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "siliconbeest-db",
+			"database_id": "YOUR_D1_DATABASE_ID"
+		}
+	]
+}

@@ -1,0 +1,112 @@
+{
+  "confirmation_subject": "验证您的邮箱 - {title}",
+  "confirmation_heading": "验证您的邮箱 - {title}",
+  "confirmation_body": "请点击以下链接验证您的邮箱地址：",
+  "confirmation_code": "验证码：{code}",
+  "confirmation_code_help": "请在注册页面输入此验证码，或使用下方链接。",
+  "confirmation_expiry": "此验证码和链接将在60分钟后过期。",
+  "confirmation_page_title": "确认电子邮箱",
+  "confirmation_page_body": "请继续验证电子邮箱地址并启用账户。",
+  "confirmation_page_action": "确认电子邮箱",
+  "confirmation_invalid_title": "令牌已过期或无效",
+  "confirmation_invalid_body": "此确认链接已过期或已被使用。请重新请求确认邮件。",
+  "confirmation_missing_token": "未提供确认令牌。",
+
+  "registration_ready_subject": "继续完成您在 {title} 的注册",
+  "registration_ready_heading": "您可以继续注册",
+  "registration_ready_body": "请登录并确认注册信息以完成流程。",
+  "registration_ready_action": "继续注册",
+
+  "password_reset_subject": "重置密码",
+  "password_reset_heading": "重置密码",
+  "password_reset_body": "请点击以下链接重置您的密码：",
+  "password_reset_expiry": "此链接将在1小时后过期。",
+
+  "welcome_subject": "欢迎加入 {title}！",
+  "welcome_heading": "欢迎加入 {title}！",
+  "welcome_body": "注册已完成，您的账号现已启用。",
+
+  "rejection_subject": "注册审核结果",
+  "rejection_heading": "注册审核结果",
+  "rejection_body": "您在 {title} 的注册申请暂未通过审核。",
+
+  "reason_label": "原因",
+
+  "warning_warn_subject": "账号警告",
+  "warning_warn_heading": "账号警告",
+  "warning_warn_description": "管理员向您的账号发送了一条警告。",
+
+  "warning_disable_subject": "账号已冻结",
+  "warning_disable_heading": "账号已冻结",
+  "warning_disable_description": "管理员已冻结您的账号，登录将受到限制。",
+
+  "warning_silence_subject": "账号已限制",
+  "warning_silence_heading": "账号已限制",
+  "warning_silence_description": "管理员已限制您的账号，您的帖子仅对关注者可见。",
+
+  "warning_suspend_subject": "账号已停用",
+  "warning_suspend_heading": "账号已停用",
+  "warning_suspend_description": "管理员已停用您的账号，您将无法再使用此账号。",
+
+  "warning_sensitive_subject": "媒体已标记为敏感内容",
+  "warning_sensitive_heading": "媒体已标记为敏感内容",
+  "warning_sensitive_description": "管理员已将您的媒体标记为敏感内容。",
+
+  "warning_none_subject": "账号警告",
+  "warning_none_heading": "账号警告",
+  "warning_none_description": "管理员向您的账号发送了一条警告。",
+
+  "warning_unsuspend_subject": "账号已恢复",
+  "warning_unsuspend_heading": "账号已恢复",
+  "warning_unsuspend_description": "您的账号封禁已被解除，您可以重新使用账号。",
+
+  "warning_unsilence_subject": "账号限制已解除",
+  "warning_unsilence_heading": "账号限制已解除",
+  "warning_unsilence_description": "您的账号限制已被解除，帖子将重新对所有人可见。",
+
+  "warning_enable_subject": "账号已重新激活",
+  "warning_enable_heading": "账号已重新激活",
+  "warning_enable_description": "您的账号已重新激活，您可以重新登录。",
+
+  "warning_unsensitize_subject": "敏感媒体标记已移除",
+  "warning_unsensitize_heading": "敏感媒体标记已移除",
+  "warning_unsensitize_description": "您的媒体的敏感内容标记已被移除。",
+
+  "login_notification_subject": "新登录 — {title}",
+  "login_notification_heading": "检测到新登录",
+  "login_notification_body": "您的账户检测到新的登录。",
+  "login_notification_time": "时间",
+  "login_notification_ip": "IP 地址",
+  "login_notification_device": "设备",
+  "login_notification_warning": "如果这不是您本人操作，请立即更改密码。",
+
+  "password_changed_subject": "密码已更改 — {title}",
+  "password_changed_heading": "密码更改成功",
+  "password_changed_body": "您的密码已成功更改。",
+  "password_changed_sessions": "为了安全，所有其他活跃会话已被注销。",
+  "password_changed_warning": "如果您没有进行此更改，请立即重置密码。",
+
+  "username_reminder_subject": "用户名提醒 — {title}",
+  "username_reminder_heading": "用户名提醒",
+  "username_reminder_body": "您请求了与此邮箱地址关联的用户名提醒。",
+  "username_reminder_your_username": "您的用户名",
+  "username_reminder_your_handle": "您的完整标识",
+  "username_reminder_ignore": "如果您未请求此邮件，可以安全地忽略它。",
+
+  "admin_pending_subject": "新用户等待审批: @{username}",
+  "admin_pending_heading": "新注册待审批",
+  "admin_pending_body": "一位新用户已注册并等待审批：",
+  "admin_pending_username": "用户名",
+  "admin_pending_email": "邮箱",
+  "admin_pending_reason": "理由",
+  "admin_pending_review": "查看待审账户",
+
+  "admin_report_subject": "新举报: @{target}",
+  "admin_report_heading": "收到新举报",
+  "admin_report_body": "收到一份新的举报：",
+  "admin_report_reporter": "举报者",
+  "admin_report_target": "被举报者",
+  "admin_report_category": "分类",
+  "admin_report_comment": "说明",
+  "admin_report_review": "查看举报"
+}

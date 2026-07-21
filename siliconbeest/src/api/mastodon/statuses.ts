@@ -1,0 +1,206 @@
+import { apiFetch, buildQueryString } from '../client';
+import type { Account, Status, Context } from '@/types/mastodon';
+
+export interface CreateStatusParams {
+  status?: string;
+  object_type?: 'Note' | 'Article';
+  title?: string;
+  summary?: string;
+  media_ids?: string[];
+  poll?: {
+    options: string[];
+    expires_in: number;
+    multiple?: boolean;
+    hide_totals?: boolean;
+  };
+  in_reply_to_id?: string;
+  sensitive?: boolean;
+  spoiler_text?: string;
+  visibility?: 'public' | 'unlisted' | 'private' | 'direct';
+  language?: string;
+  scheduled_at?: string;
+  quote_id?: string;
+  quote_policy?: import('@/types/mastodon').QuotePolicy;
+}
+
+export interface StatusSource {
+  id: string;
+  object_type: 'Note' | 'Article';
+  title: string;
+  article_summary: string;
+  text: string;
+  spoiler_text: string;
+}
+
+/** Mastodon-compatible response returned by the status translation endpoint. */
+export interface StatusTranslation {
+  content: string;
+  spoiler_text: string;
+  detected_source_language: string;
+  provider: string;
+  model: string;
+}
+
+export function getStatus(id: string, token?: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}`, { token });
+}
+
+export function getStatusContext(id: string, token?: string) {
+  return apiFetch<Context>(`/v1/statuses/${id}/context`, { token });
+}
+
+export function getStatusSource(id: string, token: string) {
+  return apiFetch<StatusSource>(`/v1/statuses/${id}/source`, { token });
+}
+
+export function translateStatus(id: string, targetLanguage: string, token: string) {
+  const qs = buildQueryString({ lang: targetLanguage });
+  return apiFetch<StatusTranslation>(`/v1/statuses/${id}/translate${qs}`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function createStatus(params: CreateStatusParams, token: string) {
+  return apiFetch<Status>('/v1/statuses', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(params),
+  });
+}
+
+export function editStatus(id: string, params: CreateStatusParams, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}`, {
+    method: 'PUT',
+    token,
+    body: JSON.stringify(params),
+  });
+}
+
+export function deleteStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
+export function favouriteStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/favourite`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function unfavouriteStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/unfavourite`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function reblogStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/reblog`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function unreblogStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/unreblog`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function bookmarkStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/bookmark`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function unbookmarkStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/unbookmark`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function pinStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/pin`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function unpinStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/unpin`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function muteStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/mute`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export function unmuteStatus(id: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/unmute`, {
+    method: 'POST',
+    token,
+  });
+}
+
+export interface StatusEngagementPagination {
+  maxId?: string;
+  limit?: number;
+}
+
+export function getFavouritedBy(
+  id: string,
+  token: string,
+  pagination?: StatusEngagementPagination,
+) {
+  const qs = buildQueryString({
+    max_id: pagination?.maxId,
+    limit: pagination?.limit,
+  });
+  return apiFetch<Account[]>(`/v1/statuses/${id}/favourited_by${qs}`, { token });
+}
+
+export function getRebloggedBy(
+  id: string,
+  token: string,
+  pagination?: StatusEngagementPagination,
+) {
+  const qs = buildQueryString({
+    max_id: pagination?.maxId,
+    limit: pagination?.limit,
+  });
+  return apiFetch<Account[]>(`/v1/statuses/${id}/reblogged_by${qs}`, { token });
+}
+
+// 이모지 리액션 API
+export function getReactions(id: string, token?: string) {
+  return apiFetch<import('@/types/mastodon').EmojiReaction[]>(
+    `/v1/statuses/${id}/reactions`,
+    { token },
+  );
+}
+
+export function addReaction(id: string, emoji: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/react/${encodeURIComponent(emoji)}`, {
+    method: 'PUT',
+    token,
+  });
+}
+
+export function removeReaction(id: string, emoji: string, token: string) {
+  return apiFetch<Status>(`/v1/statuses/${id}/react/${encodeURIComponent(emoji)}`, {
+    method: 'DELETE',
+    token,
+  });
+}

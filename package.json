@@ -1,0 +1,14 @@
+{
+  "name": "siliconbeest-monorepo",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "deploy": "pnpm --filter siliconbeest-vue deploy && pnpm --filter siliconbeest-queue-consumer deploy && pnpm --filter siliconbeest-email-sender deploy",
+    "test": "pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present lint"
+  },
+  "engines": {
+    "node": ">=25.0.0"
+  },
+  "packageManager": "pnpm@11.15.1"
+}
