@@ -222,6 +222,35 @@ describe('Admin API', () => {
       }
     });
 
+    it('accepts integer settings sent as JSON numbers', async () => {
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({
+          invite_credit_max_per_account: 25,
+          invite_contribution_threshold: 40,
+          invite_contribution_points_status_create: 3,
+          max_toot_chars: 700,
+        }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json<Record<string, string>>()).resolves.toMatchObject({
+        invite_credit_max_per_account: '25',
+        invite_contribution_threshold: '40',
+        invite_contribution_points_status_create: '3',
+        max_toot_chars: '700',
+      });
+    });
+
+    it('rejects non-integer numeric invite_credit_max_per_account', async () => {
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({ invite_credit_max_per_account: 2.5 }),
+      });
+      expect(response.status).toBe(422);
+    });
+
     it.each(['', 'not_a_language'])('rejects malformed instance languages: %s', async (value) => {
       const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
         method: 'PATCH',

@@ -36,7 +36,14 @@ app.get('/', async (c) => {
  * PATCH /api/v1/admin/settings — update settings (key-value pairs).
  */
 app.patch('/', async (c) => {
-	const body = await c.req.json<Record<string, string>>();
+	const rawBody = await c.req.json<Record<string, unknown>>();
+	// Settings are persisted as strings, but the admin UI's number inputs
+	// (and raw JSON clients) send integer settings as JSON numbers —
+	// stringify them so the per-key validators below see one canonical form.
+	const body = Object.fromEntries(Object.entries(rawBody).map(([key, value]) => [
+		key,
+		typeof value === 'number' ? String(value) : value,
+	])) as Record<string, string>;
 
 	// accent_color drives the Deck UI for every visitor — reject anything
 	// that is not a #rrggbb hex so a typo can't break the client-side parser.
