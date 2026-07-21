@@ -8,7 +8,6 @@
 
 import { env } from 'cloudflare:workers';
 import type { StreamEventPayload } from '../internal-contract';
-import type { StreamingDO } from '../durableObjects/streaming';
 
 export type { StreamEventPayload } from '../internal-contract';
 
@@ -16,12 +15,7 @@ export async function sendStreamEventToDurableObject(
   userId: string,
   event: StreamEventPayload,
 ): Promise<void> {
-  // This module is shared with the queue consumer, whose generated Env does
-  // not own this binding. Keep the namespace tied to the source DO class so
-  // Wrangler's built .mjs entrypoint cannot erase its RPC method types.
-  const streamingDo = env.STREAMING_DO as
-    | DurableObjectNamespace<StreamingDO>
-    | undefined;
+  const streamingDo = env.STREAMING_DO;
   if (!streamingDo) {
     throw new Error('Streaming requires the STREAMING_DO binding');
   }
