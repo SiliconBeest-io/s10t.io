@@ -104,6 +104,13 @@ header "Instance Configuration"
 
 read -rp "$(echo -e "${CYAN}Project prefix${NC} [siliconbeest]: ")" PROJECT_PREFIX
 PROJECT_PREFIX="${PROJECT_PREFIX:-siliconbeest}"
+# Cloudflare worker, queue, and R2 names must be lowercase (alphanumeric and
+# dashes) — normalize here so every derived resource name is valid.
+PROJECT_PREFIX=$(printf '%s' "$PROJECT_PREFIX" | tr '[:upper:]' '[:lower:]')
+if [[ ! "$PROJECT_PREFIX" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  error "Project prefix must contain only letters, numbers, and dashes."
+  exit 1
+fi
 
 read -rp "$(echo -e "${CYAN}Instance domain${NC} (e.g. social.example.com): ")" INSTANCE_DOMAIN
 if [[ -z "$INSTANCE_DOMAIN" ]]; then

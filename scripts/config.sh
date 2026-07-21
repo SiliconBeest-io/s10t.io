@@ -22,6 +22,14 @@ _CONFIG_ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/config.env"
 # Change this to rename everything at once (e.g. "myinstance")
 # ---------------------------------------------------------------------------
 PROJECT_PREFIX="${PROJECT_PREFIX:-siliconbeest}"
+# Cloudflare worker, queue, and R2 names must be lowercase (alphanumeric and
+# dashes). Normalize so a mixed-case prefix — e.g. a GitHub Variable set to
+# "SiliconBeest" — resolves to the lowercase names wrangler accepts.
+PROJECT_PREFIX=$(printf '%s' "$PROJECT_PREFIX" | tr '[:upper:]' '[:lower:]')
+if [[ ! "$PROJECT_PREFIX" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  echo "[ERROR] PROJECT_PREFIX must contain only letters, numbers, and dashes, got: $PROJECT_PREFIX" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Cloudflare Worker names (used by wrangler deploy --name)
@@ -83,7 +91,7 @@ read_wrangler_json() {
 const fs = require('fs');
 const content = fs.readFileSync('$FILE', 'utf8');
 // Strip full-line comments only: a trailing-comment regex would also eat
-// the "//" inside string values like REPOSITORY_URL's https:// URL.
+// the slashes inside string values like the REPOSITORY_URL https URL.
 const cleaned = content.replace(/^[ \t]*\/\/.*$/gm, '');
 try {
   const config = JSON.parse(cleaned);
