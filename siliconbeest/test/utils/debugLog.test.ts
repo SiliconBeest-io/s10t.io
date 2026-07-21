@@ -1,0 +1,162 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { env } from 'cloudflare:workers';
+import {
+  DEBUG_LOG_MAX_BODY_LENGTH,
+  debugLog,
+  isDebugEnabled,
+  parseBodyForDebugLog,
+  redactUltraSensitive,
+  truncateForDebugLog,
+} from '../../../packages/shared/utils/debugLog';
+
+// The vitest config aliases `cloudflare:workers` to a mutable mock object.
+const mockEnv = env as Record<string, unknown>;
+
+const PEM_KEY = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKB',
+  '-----END PRIVATE KEY-----',
+].join('\n');
+
+afterEach(() => {
+  delete mockEnv.DEBUG;
+  vi.restoreAllMocks();
+});
+
+describe('isDebugEnabled', () => {
+  it('is disabled when DEBUG is missing', () => {
+    expect(isDebugEnabled()).toBe(false);
+  });
+
+  it('is disabled for false-ish values', () => {
+    for (const value of [false, 'false', '0', '', null, 'yes']) {
+      mockEnv.DEBUG = value;
+      expect(isDebugEnabled()).toBe(false);
+    }
+  });
+
+  it('is enabled for true, "true", and "1"', () => {
+    for (const value of [true, 'true', '1']) {
+      mockEnv.DEBUG = value;
+      expect(isDebugEnabled()).toBe(true);
+    }
+  });
+});
+
+describe('debugLog', () => {
+  it('logs nothing when DEBUG is off', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    debugLog('http', 'request', { path: '/api/v1/apps' });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('logs scope, message, and serialized details when DEBUG is on', () => {
+    mockEnv.DEBUG = true;
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    debugLog('federation.inbox', 'Follow received', { actor: 'https://remote.example/u/a' });
+    expect(spy).toHaveBeenCalledOnce();
+    const line = spy.mock.calls[0][0] as string;
+    expect(line).toContain('[debug][federation.inbox] Follow received');
+    expect(line).toContain('https://remote.example/u/a');
+  });
+
+  it('redacts ultra-sensitive fields but keeps content and public keys', () => {
+    mockEnv.DEBUG = true;
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    debugLog('http', 'login', {
+      body: { username: 'alice', password: 'hunter2' },
+      headers: { authorization: 'Bearer abc123', cookie: 'sid=1', accept: 'application/json' },
+      actor: {
+        private_key: PEM_KEY,
+        ed25519_private_key: 'raw-ed25519-material',
+        publicKeyPem: '-----BEGIN PUBLIC KEY-----abc-----END PUBLIC KEY-----',
+      },
+      activity: { content: '<p>hello fediverse</p>', signature: 'sig-value' },
+    });
+    const line = spy.mock.calls[0][0] as string;
+    expect(line).not.toContain('hunter2');
+    expect(line).not.toContain('Bearer abc123');
+    expect(line).not.toContain('sid=1');
+    expect(line).not.toContain('BEGIN PRIVATE KEY');
+    expect(line).not.toContain('raw-ed25519-material');
+    expect(line).toContain('alice');
+    expect(line).toContain('application/json');
+    expect(line).toContain('BEGIN PUBLIC KEY');
+    expect(line).toContain('hello fediverse');
+    expect(line).toContain('sig-value');
+  });
+});
+
+describe('redactUltraSensitive', () => {
+  it('redacts private JWK members but keeps public ones', () => {
+    const redacted = redactUltraSensitive({
+      kty: 'RSA',
+      n: 'public-modulus',
+      e: 'AQAB',
+      d: 'private-exponent',
+      p: 'prime1',
+    }) as Record<string, unknown>;
+    expect(redacted.kty).toBe('RSA');
+    expect(redacted.n).toBe('public-modulus');
+    expect(redacted.d).toBe('[REDACTED]');
+    expect(redacted.p).toBe('[REDACTED]');
+  });
+
+  it('redacts Fedify queued-message sender keys wholesale', () => {
+    const redacted = redactUltraSensitive({
+      type: 'outbox',
+      keys: [{ keyId: 'https://me.example/u/a#main-key', privateKey: { kty: 'RSA', d: 'x' } }],
+      activity: { type: 'Create', id: 'https://me.example/a/1' },
+    }) as { keys: Array<Record<string, unknown>>; activity: Record<string, unknown> };
+    expect(redacted.keys[0].privateKey).toBe('[REDACTED]');
+    expect(redacted.keys[0].keyId).toBe('https://me.example/u/a#main-key');
+    expect(redacted.activity.id).toBe('https://me.example/a/1');
+  });
+
+  it('scrubs PEM private key blocks inside arbitrary strings', () => {
+    const redacted = redactUltraSensitive({ note: `before\n${PEM_KEY}\nafter` }) as Record<string, string>;
+    expect(redacted.note).not.toContain('BEGIN PRIVATE KEY');
+    expect(redacted.note).toContain('before');
+    expect(redacted.note).toContain('after');
+  });
+
+  it('survives circular structures', () => {
+    const value: Record<string, unknown> = { name: 'loop' };
+    value.self = value;
+    const redacted = redactUltraSensitive(value) as Record<string, unknown>;
+    expect(redacted.name).toBe('loop');
+    expect(redacted.self).toBe('[Circular]');
+  });
+
+  it('flattens Headers instances and redacts sensitive entries', () => {
+    const redacted = redactUltraSensitive(
+      new Headers({ Authorization: 'Bearer secret', 'X-Request-Id': 'rid' }),
+    ) as Record<string, string>;
+    // Header name casing differs between runtimes; compare case-insensitively.
+    const entries = Object.fromEntries(
+      Object.entries(redacted).map(([key, value]) => [key.toLowerCase(), value]),
+    );
+    expect(entries.authorization).toBe('[REDACTED]');
+    expect(entries['x-request-id']).toBe('rid');
+  });
+});
+
+describe('body helpers', () => {
+  it('parses JSON bodies into objects so field redaction applies', () => {
+    expect(parseBodyForDebugLog('{"password":"x"}', 'application/json')).toEqual({ password: 'x' });
+  });
+
+  it('parses form-urlencoded bodies into objects', () => {
+    expect(parseBodyForDebugLog('a=1&password=x', 'application/x-www-form-urlencoded')).toEqual({
+      a: '1',
+      password: 'x',
+    });
+  });
+
+  it('truncates oversized text bodies', () => {
+    const text = 'a'.repeat(DEBUG_LOG_MAX_BODY_LENGTH + 10000);
+    const truncated = truncateForDebugLog(text);
+    expect(truncated.length).toBeLessThan(text.length);
+    expect(truncated).toContain('[truncated 10000 chars]');
+  });
+});

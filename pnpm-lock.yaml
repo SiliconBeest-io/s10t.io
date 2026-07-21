@@ -219,6 +219,9 @@ importers:
       '@fedify/vocab':
         specifier: ^2.3.3
         version: 2.3.3
+      '@logtape/logtape':
+        specifier: ^2.2.3
+        version: 2.2.3
       glob:
         specifier: ^13.0.6
         version: 13.0.6

@@ -41,6 +41,10 @@
 		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
 		"REGISTRATION_MODE": "open",
 		"SKIP_SIGNATURE_VERIFICATION": false,
+		// Verbose debug logging (full federation request/response payloads,
+		// per-request user activity). Ultra-sensitive values (private keys,
+		// passwords, tokens) are always redacted. Off unless exactly true.
+		"DEBUG": false,
 		"WORKERS_AI_ENABLED": false,
 		"WORKERS_AI_RECOMMENDATION_MODEL": "@cf/baai/bge-m3",
 		"WORKERS_AI_TRANSLATION_MODEL": "@cf/meta/m2m100-1.2b",

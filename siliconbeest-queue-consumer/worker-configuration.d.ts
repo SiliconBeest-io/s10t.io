@@ -11,6 +11,7 @@ interface __BaseEnv_Env {
 	INSTANCE_DOMAIN: "social.example.com";
 	REPOSITORY_URL: "https://github.com/SJang1/siliconbeest";
 	SKIP_SIGNATURE_VERIFICATION: false;
+	DEBUG: false;
 	INTERNAL_CONNECTION_MAIN: Service<typeof import("../siliconbeest/server/worker/internal-typegen").Internal>;
 }
 declare namespace Cloudflare {
@@ -24,7 +25,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "INSTANCE_DOMAIN" | "REPOSITORY_URL" | "SKIP_SIGNATURE_VERIFICATION">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "INSTANCE_DOMAIN" | "REPOSITORY_URL" | "SKIP_SIGNATURE_VERIFICATION" | "DEBUG">> {}
 }
 
 // Begin runtime types

@@ -23,6 +23,8 @@ import { createFed } from './fedify';
 import { setupActorDispatcher } from './dispatchers';
 import { WorkersMessageQueue } from '@fedify/cfworkers';
 import { measureAsync, logPerformance } from './observability/performance';
+import { debugLog } from '../../packages/shared/utils/debugLog';
+import { ensureFedifyDebugLogging } from './utils/debugLogtape';
 
 // Consumer-local inbox listeners and collection dispatchers.
 // These files use Fedify vocab types from the consumer's own node_modules,
@@ -180,6 +182,11 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
       // Fedify does not export its queued Message type; the shape has already
       // been narrowed and filtered above using the runtime payload contract.
       const queuedMessage = filtered.message as any;
+      debugLog('federation.fedify', 'processing queued Fedify task', {
+        messageType: queuedMessage.type,
+        droppedTargets: filtered.droppedTargets,
+        message: queuedMessage,
+      });
       await measureAsync(
         'queue.fedify.processQueuedTask',
         () => fed.processQueuedTask({ env }, queuedMessage),
@@ -188,6 +195,9 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
           droppedTargets: filtered.droppedTargets,
         }
       );
+      debugLog('federation.fedify', 'queued Fedify task processed', {
+        messageType: queuedMessage.type,
+      });
     } finally {
       await result.release?.();
     }
@@ -201,6 +211,7 @@ async function processMessageBody(body: Record<string, unknown>): Promise<Proces
   }
   // body has been validated to have a string `type` field — safe to treat as QueueMessage
   const legacyMsg = body as QueueMessage & Record<string, unknown>;
+  debugLog('queue', `processing legacy message ${legacyMsg.type}`, { message: legacyMsg });
   await measureAsync(
     `queue.legacy.${legacyMsg.type}`,
     async () => {
@@ -321,6 +332,11 @@ async function consumeDlqBatch(batch: MessageBatch): Promise<void> {
   for (const msg of batch.messages) {
     const messageStart = performance.now();
     const body = msg.body as Record<string, unknown>;
+    debugLog('queue.dlq', `message received on ${batch.queue}`, {
+      messageId: msg.id,
+      attempt: msg.attempts,
+      body,
+    });
     try {
       const outcome = await processMessageBody(body);
       if (outcome === 'deferred' && msg.attempts < DLQ_MAX_ATTEMPTS) {
@@ -362,6 +378,8 @@ async function consumeDlqBatch(batch: MessageBatch): Promise<void> {
 
 export default {
   async queue(batch: MessageBatch, _env: Env): Promise<void> {
+    await ensureFedifyDebugLogging();
+
     if (batch.queue.endsWith(DLQ_QUEUE_SUFFIX)) {
       await consumeDlqBatch(batch);
       return;
@@ -372,6 +390,11 @@ export default {
     for (const msg of batch.messages) {
       const messageStart = performance.now();
       const body = msg.body as Record<string, unknown>;
+      debugLog('queue', `message received on ${batch.queue}`, {
+        messageId: msg.id,
+        attempt: msg.attempts,
+        body,
+      });
       try {
         const outcome = await processMessageBody(body);
         if (outcome === 'deferred') {
@@ -381,6 +404,10 @@ export default {
           continue;
         }
         msg.ack();
+        debugLog('queue', `message ${msg.id} ${outcome}`, {
+          queue: batch.queue,
+          durationMs: Math.round(performance.now() - messageStart),
+        });
         logPerformance('queue.message.processed', performance.now() - messageStart, {
           messageType: isFedifyMessage(body) ? 'fedify' : 'legacy',
           ...(typeof body?.type === 'string' ? { legacyType: body.type } : {}),

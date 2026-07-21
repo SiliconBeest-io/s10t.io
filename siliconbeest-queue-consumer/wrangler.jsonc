@@ -21,7 +21,11 @@
 	"vars": {
 		"INSTANCE_DOMAIN": "social.example.com",
 		"REPOSITORY_URL": "https://github.com/SJang1/siliconbeest",
-		"SKIP_SIGNATURE_VERIFICATION": false
+		"SKIP_SIGNATURE_VERIFICATION": false,
+		// Verbose debug logging (full federation request/response payloads).
+		// Ultra-sensitive values (private keys, passwords, tokens) are always
+		// redacted. Off unless exactly true.
+		"DEBUG": false
 	},
 	// D1 Database
 	"d1_databases": [

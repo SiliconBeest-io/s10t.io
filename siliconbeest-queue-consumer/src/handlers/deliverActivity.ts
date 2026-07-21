@@ -36,6 +36,41 @@ import {
   getSignaturePreference,
   setSignaturePreference,
 } from '../../../packages/shared/crypto';
+import {
+  debugLog,
+  headersToObject,
+  isDebugEnabled,
+  truncateForDebugLog,
+} from '../../../packages/shared/utils/debugLog';
+
+// ============================================================
+// DEBUG LOGGING
+// ============================================================
+
+/** Log one signed POST + its response in full when DEBUG is enabled. */
+async function debugLogDeliveryExchange(
+  inboxUrl: string,
+  signatureType: 'cavage' | 'rfc9421',
+  attempt: number,
+  requestHeaders: Record<string, string>,
+  response: Response,
+): Promise<void> {
+  if (!isDebugEnabled()) return;
+  let responseBody: string;
+  try {
+    responseBody = truncateForDebugLog(await response.clone().text());
+  } catch (err) {
+    responseBody = `<failed to read body: ${err instanceof Error ? err.message : String(err)}>`;
+  }
+  debugLog('federation.deliver', `POST ${inboxUrl} -> ${response.status}`, {
+    signatureType,
+    attempt,
+    requestHeaders,
+    responseStatus: response.status,
+    responseHeaders: headersToObject(response.headers),
+    responseBody,
+  });
+}
 
 // ============================================================
 // HANDLER
@@ -143,6 +178,12 @@ export async function handleDeliverActivity(
 
   const body = JSON.stringify(activityToDeliver);
 
+  debugLog('federation.deliver', `delivering ${activity.type ?? 'activity'} to ${inboxUrl}`, {
+    actorAccountId,
+    keyId,
+    activity: activityToDeliver,
+  });
+
   // Ensure instance record exists before updating it
   await ensureInstanceRecord(env.DB, targetDomain);
 
@@ -170,6 +211,7 @@ export async function handleDeliverActivity(
       }),
       { targetDomain, signatureType: 'cavage', attempt: 1 }
     );
+    await debugLogDeliveryExchange(inboxUrl, 'cavage', 1, headers, response);
 
     // If cavage fails with 401/403, try RFC 9421 as fallback
     if (response.status === 401 || response.status === 403) {
@@ -193,6 +235,7 @@ export async function handleDeliverActivity(
         }),
         { targetDomain, signatureType: 'rfc9421', attempt: 2, fallback: true }
       );
+      await debugLogDeliveryExchange(inboxUrl, 'rfc9421', 2, rfc9421Headers, response);
 
       if (response.ok || response.status === 202) {
         // RFC 9421 worked — update cached preference
@@ -218,6 +261,7 @@ export async function handleDeliverActivity(
       }),
       { targetDomain, signatureType: 'rfc9421', attempt: 1 }
     );
+    await debugLogDeliveryExchange(inboxUrl, 'rfc9421', 1, rfc9421Headers, response);
 
     if (response.status === 401 || response.status === 403) {
       // RFC 9421 rejected — fall back to draft-cavage
@@ -241,6 +285,7 @@ export async function handleDeliverActivity(
         }),
         { targetDomain, signatureType: 'cavage', attempt: 2, fallback: true }
       );
+      await debugLogDeliveryExchange(inboxUrl, 'cavage', 2, cavageHeaders, response);
 
       if (response.ok || response.status === 202) {
         // Draft-cavage worked — remember this preference

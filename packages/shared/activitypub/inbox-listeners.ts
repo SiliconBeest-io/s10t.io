@@ -24,6 +24,7 @@ import {
 } from '../domain-blocks';
 import { buildActivityFromJsonLd } from './normalize';
 import { pickSignerForRemote } from '../services/signer';
+import { debugLog, isDebugEnabled } from '../utils/debugLog';
 import { env } from 'cloudflare:workers';
 
 // ============================================================
@@ -232,6 +233,16 @@ export function setupInboxListeners<TData>(
 		return buildActivityFromJsonLd(jsonLd as Record<string, unknown>);
 	}
 
+	/** Full JSON-LD of an activity for debug logging; undefined when DEBUG is off. */
+	async function debugActivityJsonLd(activity: any): Promise<unknown> {
+		if (!isDebugEnabled()) return undefined;
+		try {
+			return await activity.toJsonLd();
+		} catch {
+			return undefined;
+		}
+	}
+
 	/**
 	 * Create a standard handler: domain block check -> resolve recipient -> convert -> process.
 	 * Covers the common pattern used by most activity types.
@@ -251,6 +262,12 @@ export function setupInboxListeners<TData>(
 	) {
 		return async (ctx: InboxContextLike<TData>, activity: any) => {
 			await withMeasure(name, activity.actorId?.href, async () => {
+				debugLog('federation.inbox', `${name} activity received`, {
+					recipient: ctx.recipient ?? '(shared inbox)',
+					actor: activity.actorId?.href,
+					activity: await debugActivityJsonLd(activity),
+				});
+
 				if (await isActorDomainSuspended(activity.actorId)) return;
 
 				const localAccountId = await resolveRecipientAccountId(ctx);
@@ -258,6 +275,12 @@ export function setupInboxListeners<TData>(
 
 				const apActivity = await Promise.resolve(convert(activity));
 				const accepted = await processor(apActivity, localAccountId);
+				debugLog('federation.inbox', `${name} activity processed`, {
+					recipient: ctx.recipient ?? '(shared inbox)',
+					actor: activity.actorId?.href,
+					localAccountId,
+					result: accepted === undefined ? 'processed' : accepted,
+				});
 				if (afterProcess && accepted === true) {
 					await afterProcess(ctx, activity, apActivity, localAccountId);
 				}
@@ -429,16 +452,35 @@ export function setupInboxListeners<TData>(
 						raw._misskey_reaction !== '') ||
 					(typeof raw.content === 'string' && raw.content !== '');
 
+				debugLog('federation.inbox', 'Like activity received', {
+					recipient: ctx.recipient ?? '(shared inbox)',
+					actor: like.actorId?.href,
+					emojiReaction: isMisskeyReaction,
+					activity: raw,
+				});
+
 				if (isMisskeyReaction) {
-					await processors.processEmojiReact(
+					const result = await processors.processEmojiReact(
 						activity,
 						localAccountId,
 					);
+					debugLog('federation.inbox', 'Like activity processed as EmojiReact', {
+						recipient: ctx.recipient ?? '(shared inbox)',
+						actor: like.actorId?.href,
+						localAccountId,
+						result: result === undefined ? 'processed' : result,
+					});
 				} else {
 					const accepted = await processors.processLike(
 						activity,
 						localAccountId,
 					);
+					debugLog('federation.inbox', 'Like activity processed', {
+						recipient: ctx.recipient ?? '(shared inbox)',
+						actor: like.actorId?.href,
+						localAccountId,
+						result: accepted === undefined ? 'processed' : accepted,
+					});
 					if (accepted === true) {
 						await forwardActivityForLocalStatus(ctx, activity);
 					}
@@ -485,6 +527,12 @@ export function setupInboxListeners<TData>(
 		// Flag: special domain block handling (also checks rejectReports)
 		.on(vocab.Flag, async (ctx: InboxContextLike<TData>, flag: any) => {
 			await withMeasure('Flag', flag.actorId?.href, async () => {
+				debugLog('federation.inbox', 'Flag activity received', {
+					recipient: ctx.recipient ?? '(shared inbox)',
+					actor: flag.actorId?.href,
+					activity: await debugActivityJsonLd(flag),
+				});
+
 				if (flag.actorId) {
 					const domain = extractDomain(flag.actorId.href);
 					if (domain) {
@@ -513,10 +561,16 @@ export function setupInboxListeners<TData>(
 				if (localAccountId === null) return;
 
 				const activity = await viaJsonLd(flag);
-				await processors.processFlag(
+				const result = await processors.processFlag(
 					activity,
 					localAccountId,
 				);
+				debugLog('federation.inbox', 'Flag activity processed', {
+					recipient: ctx.recipient ?? '(shared inbox)',
+					actor: flag.actorId?.href,
+					localAccountId,
+					result: result === undefined ? 'processed' : result,
+				});
 			});
 		})
 
@@ -529,10 +583,19 @@ export function setupInboxListeners<TData>(
 			),
 		)
 
-		.onUnverifiedActivity(async (_ctx: any, _activity: any, reason: any) => {
+		.onUnverifiedActivity(async (_ctx: any, unverifiedActivity: any, reason: any) => {
 			// Diagnostic logging for signature-verification failures.
 			// Captures the body of the response that failed the keyId fetch
 			// so authorized-fetch / blocking decisions can be debugged.
+			if (isDebugEnabled()) {
+				debugLog('federation.inbox', 'unverified activity rejected', {
+					reason: reason?.type,
+					keyId: reason?.keyId?.href ?? reason?.result?.keyId?.href,
+					activity: typeof unverifiedActivity?.toJsonLd === 'function'
+						? await debugActivityJsonLd(unverifiedActivity)
+						: unverifiedActivity,
+				});
+			}
 			try {
 				const type = reason?.type;
 				const keyId = reason?.keyId?.href ?? reason?.result?.keyId?.href;
