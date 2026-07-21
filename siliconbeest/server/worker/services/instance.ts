@@ -101,6 +101,32 @@ export async function getInstanceTitle(): Promise<string> {
 	return dbTitle || env.INSTANCE_TITLE;
 }
 
+/**
+ * Resolve the languages advertised by the Mastodon instance APIs.
+ * Configure INSTANCE_LANGUAGES as a comma-separated list of BCP 47 tags.
+ */
+export function getInstanceLanguages(): string[] {
+	const languages = (env.INSTANCE_LANGUAGES || '')
+		.split(',')
+		.map((language) => language.trim())
+		.filter(Boolean);
+
+	return [...new Set(languages.length > 0 ? languages : ['en'])];
+}
+
+/**
+ * Resolve the thumbnail URL from admin-managed branding settings.
+ * `thumbnail_url` remains supported for older installations.
+ */
+export function getInstanceThumbnailUrl(
+	settings: Record<string, string>,
+	domain: string = env.INSTANCE_DOMAIN,
+): string {
+	return settings.site_logo_url
+		|| settings.thumbnail_url
+		|| `https://${domain}/thumbnail.png`;
+}
+
 // ----------------------------------------------------------------
 // Rules
 // ----------------------------------------------------------------

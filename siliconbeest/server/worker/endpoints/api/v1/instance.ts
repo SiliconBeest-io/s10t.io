@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { getVapidPublicKey } from '../../../utils/vapid';
 import { MASTODON_V1_VERSION } from '../../../version';
-import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
+import { getSettings, getInstanceTitle, getInstanceLanguages, getInstanceThumbnailUrl, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
 
 const app = new Hono<{ Variables: AppVariables }>();
 
@@ -17,7 +17,7 @@ app.get('/', async (c) => {
   const dbSettings = await getSettings([
     'site_description', 'registration_mode', 'registration_message',
     'site_contact_email', 'site_contact_username', 'web_push_enabled',
-    'require_email_verification',
+    'require_email_verification', 'site_logo_url', 'thumbnail_url',
   ]).catch((): Record<string, string> => ({}));
 
   const title = await getInstanceTitle().catch(() => env.INSTANCE_TITLE);
@@ -81,8 +81,8 @@ app.get('/', async (c) => {
       status_count: stats.statusCount,
       domain_count: stats.domainCount,
     },
-    thumbnail: `https://${domain}/thumbnail.png`,
-    languages: ['en'],
+    thumbnail: getInstanceThumbnailUrl(dbSettings, domain),
+    languages: getInstanceLanguages(),
     registrations: registrationMode === 'open' || registrationMode === 'approval',
     approval_required: registrationMode === 'approval',
     invites_enabled: registrationMode !== 'closed',

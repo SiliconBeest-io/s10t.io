@@ -5,7 +5,7 @@ import type { Status } from '@/types/mastodon'
 import { getStatus, getStatusContext } from '@/api/mastodon/statuses'
 import { useAuthStore } from '@/stores/auth'
 import { useStatusesStore } from '@/stores/statuses'
-import StatusCard from '@/components/status/StatusCard.vue'
+import ThreadConversation from '@/components/timeline/ThreadConversation.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 const { t } = useI18n()
@@ -36,36 +36,6 @@ const ancestors = computed(() =>
 const descendants = computed(() =>
   descendantIds.value.map((id) => statusesStore.cache.get(id)).filter(Boolean) as Status[]
 )
-
-interface ThreadedStatus {
-  status: Status
-  depth: number
-}
-
-const threadedDescendants = computed<ThreadedStatus[]>(() => {
-  if (!status.value || descendants.value.length === 0) return []
-
-  const mainId = status.value.id
-  const childrenMap = new Map<string, Status[]>()
-  for (const s of descendants.value) {
-    const parentId = s.in_reply_to_id ?? mainId
-    const list = childrenMap.get(parentId) ?? []
-    list.push(s)
-    childrenMap.set(parentId, list)
-  }
-
-  const result: ThreadedStatus[] = []
-  function walk(parentId: string, depth: number) {
-    const children = childrenMap.get(parentId)
-    if (!children) return
-    for (const child of children) {
-      result.push({ status: child, depth: Math.min(depth, 4) })
-      walk(child.id, depth + 1)
-    }
-  }
-  walk(mainId, 0)
-  return result
-})
 
 async function loadThread() {
   loading.value = true
@@ -124,28 +94,15 @@ watch(() => props.statusId, () => {
 
     <LoadingSpinner v-if="loading" />
 
-    <template v-else-if="status">
-      <!-- Ancestors -->
-      <div v-if="ancestors.length > 0" class="border-l-2 border-brand-200/80 dark:border-brand-800/60">
-        <StatusCard v-for="s in ancestors" :key="s.id" :status="s" @navigate="handleNavigate" @deleted="handleDeleted" />
-      </div>
-
-      <!-- Main status -->
-      <div class="relative bg-brand-50/40 dark:bg-brand-950/15">
-        <span class="absolute inset-y-0 left-0 w-1 bg-linear-to-b from-brand-500 via-violet-500 to-fuchsia-500" aria-hidden="true"></span>
-        <StatusCard :status="status" @navigate="handleNavigate" @deleted="handleDeleted" />
-      </div>
-
-      <!-- Descendants -->
-      <div
-        v-for="item in threadedDescendants"
-        :key="item.status.id"
-        :style="{ marginLeft: `${item.depth * 24}px` }"
-        :class="item.depth > 0 ? 'border-l-2 border-brand-200/70 dark:border-brand-800/50' : ''"
-      >
-        <StatusCard :status="item.status" @navigate="handleNavigate" @deleted="handleDeleted" />
-      </div>
-    </template>
+    <div v-else-if="status" class="px-3 py-4 sm:px-4">
+      <ThreadConversation
+        :status="status"
+        :ancestors="ancestors"
+        :descendants="descendants"
+        @navigate="handleNavigate"
+        @deleted="handleDeleted"
+      />
+    </div>
 
     <div v-else class="sb-empty px-6">
       {{ error || t('status.not_found') }}

@@ -1683,6 +1683,7 @@ SiliconBeest는 비용을 낮추기 위해 Cloudflare Containers를 사용하지
 |------|--------|------|------|
 | `INSTANCE_DOMAIN` | API | 인스턴스 도메인명 | `social.example.com` |
 | `INSTANCE_TITLE` | API | 인스턴스 표시 이름 | `My Fediverse Server` |
+| `INSTANCE_LANGUAGES` | API | 쉼표로 구분한 BCP 47 언어 태그 | `ko,en` |
 | `REGISTRATION_MODE` | API | open / approval / closed | `open` |
 
 ### 시크릿 (Cloudflare Secrets, 코드에 절대 포함 안 됨)

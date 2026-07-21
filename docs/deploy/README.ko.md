@@ -52,6 +52,7 @@ SiliconBeest는 **GitHub 템플릿 레포지토리**입니다. Cloudflare Worker
 | `PROJECT_PREFIX` | 리소스 이름 접두사 | `myinstance` |
 | `INSTANCE_DOMAIN` | 인스턴스 도메인 | `social.example.com` |
 | `INSTANCE_TITLE` | 인스턴스 표시 이름 | `내 페디버스 서버` |
+| `INSTANCE_LANGUAGES` | 인스턴스 API에 표시할 BCP 47 언어 태그(쉼표로 구분) | `ko,en` |
 | `REGISTRATION_MODE` | `open`, `approval`, `closed` 중 선택 | `open` |
 | `SKIP_SIGNATURE_VERIFICATION` | `true` 또는 `false`; 인바운드 HTTP 서명 검증을 의도적으로 우회해야 하는 경우가 아니면 프로덕션에서는 `false` 유지 | `false` |
 | `D1_DATABASE_ID` | D1 데이터베이스 UUID | `7c66942d-...` |

@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import type { AppVariables } from '../../../types';
 import { getTurnstileSettings } from '../../../utils/turnstile';
 import { MASTODON_V2_VERSION } from '../../../version';
-import { getSettings, getInstanceTitle, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
+import { getSettings, getInstanceTitle, getInstanceLanguages, getInstanceThumbnailUrl, getRules, getStats, getContactAccount, getFirstAdminAccount } from '../../../services/instance';
 import { getRepositoryUrl } from '../../../utils/repository';
 import { serializeAccount } from '../../../utils/mastodonSerializer';
 import { isWorkersAiEnabled } from '../../../services/workersAi';
@@ -23,7 +23,7 @@ app.get('/', async (c) => {
     'site_description', 'registration_mode', 'registration_message',
     'site_contact_email', 'site_contact_username', 'site_landing_markdown',
     'terms_of_service', 'privacy_policy', 'accent_color',
-    'require_email_verification',
+    'require_email_verification', 'site_logo_url', 'thumbnail_url',
     ...Object.values(WORKERS_AI_FEATURE_SETTING_KEYS),
   ]).catch((): Record<string, string> => ({}));
 
@@ -68,11 +68,11 @@ app.get('/', async (c) => {
       },
     },
     thumbnail: {
-      url: `https://${domain}/thumbnail.png`,
+      url: getInstanceThumbnailUrl(dbSettings, domain),
       blurhash: null,
       versions: {},
     },
-    languages: ['en'],
+    languages: getInstanceLanguages(),
     configuration: {
       urls: {
         streaming: `wss://${domain}/api/v1/streaming`,

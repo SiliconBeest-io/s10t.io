@@ -276,7 +276,7 @@ function expectStableWorkerStructure(
 ): void {
   expect(main).toMatchObject({
     preview_urls: true,
-    main: 'server/index.ts',
+    main: '.output/server/index.mjs',
     assets: {
       directory: './.output/public',
       not_found_handling: 'none',
