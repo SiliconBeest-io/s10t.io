@@ -72,7 +72,7 @@ app.get('/', async (c) => {
       blurhash: null,
       versions: {},
     },
-    languages: getInstanceLanguages(),
+    languages: await getInstanceLanguages(),
     configuration: {
       urls: {
         streaming: `wss://${domain}/api/v1/streaming`,

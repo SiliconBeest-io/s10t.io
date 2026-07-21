@@ -103,15 +103,34 @@ export async function getInstanceTitle(): Promise<string> {
 
 /**
  * Resolve the languages advertised by the Mastodon instance APIs.
- * Configure INSTANCE_LANGUAGES as a comma-separated list of BCP 47 tags.
+ * The admin API stores these in KV as a JSON array.
  */
-export function getInstanceLanguages(): string[] {
-	const languages = (env.INSTANCE_LANGUAGES || '')
-		.split(',')
-		.map((language) => language.trim())
-		.filter(Boolean);
+export const INSTANCE_LANGUAGES_KV_KEY = 'settings:instance_languages';
 
-	return [...new Set(languages.length > 0 ? languages : ['en'])];
+export function parseInstanceLanguagesSetting(value: string): string[] | null {
+	const languages = value.split(',').map((language) => language.trim()).filter(Boolean);
+	if (languages.length === 0) return null;
+	try {
+		return Intl.getCanonicalLocales(languages);
+	} catch {
+		return null;
+	}
+}
+
+export async function getInstanceLanguages(): Promise<string[]> {
+	const stored = await env.CACHE.get(INSTANCE_LANGUAGES_KV_KEY, 'json') as unknown;
+	if (!Array.isArray(stored) || stored.length === 0 || stored.some((value) => typeof value !== 'string')) {
+		return ['en'];
+	}
+	try {
+		return Intl.getCanonicalLocales(stored);
+	} catch {
+		return ['en'];
+	}
+}
+
+export async function setInstanceLanguages(languages: string[]): Promise<void> {
+	await env.CACHE.put(INSTANCE_LANGUAGES_KV_KEY, JSON.stringify(languages));
 }
 
 /**

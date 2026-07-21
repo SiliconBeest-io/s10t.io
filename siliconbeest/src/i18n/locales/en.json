@@ -1055,6 +1055,8 @@
     "fields": {
       "site_title": "Site title",
       "site_description": "Site description",
+      "instance_languages": "Instance languages",
+      "instance_languages_desc": "BCP 47 language tags advertised by the server, separated with commas.",
       "contact_email": "Contact email",
       "contact_username": "Contact username",
       "favicon": "Favicon",

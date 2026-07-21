@@ -210,18 +210,6 @@ if [[ -z "$CURRENT_TITLE" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
 fi
 CURRENT_TITLE="${CURRENT_TITLE:-SiliconBeest}"
 
-# --- Instance Languages ---
-CURRENT_LANGUAGES="${INSTANCE_LANGUAGES:-}"
-if [[ -z "$CURRENT_LANGUAGES" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
-  CURRENT_LANGUAGES=$(sed '/^[[:space:]]*\/\//d' "$MAIN_DIR/wrangler.jsonc" | node -e "
-    try {
-      const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
-      if (d.vars?.INSTANCE_LANGUAGES) console.log(d.vars.INSTANCE_LANGUAGES);
-    } catch(e) {}
-  " 2>/dev/null || true)
-fi
-CURRENT_LANGUAGES="${CURRENT_LANGUAGES:-en}"
-
 # --- Registration Mode ---
 CURRENT_REG="${REGISTRATION_MODE:-}"
 if [[ -z "$CURRENT_REG" && -f "$MAIN_DIR/wrangler.jsonc" ]]; then
@@ -530,7 +518,6 @@ ${WRANGLER_COMPATIBILITY_FLAGS_INDENT}"compatibility_flags": ["nodejs_compat"],
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"INSTANCE_TITLE": "${CURRENT_TITLE}",
-		"INSTANCE_LANGUAGES": "${CURRENT_LANGUAGES}",
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"REGISTRATION_MODE": "${CURRENT_REG}",
 		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION},

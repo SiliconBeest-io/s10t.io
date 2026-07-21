@@ -22,7 +22,6 @@ export default defineConfig({
         bindings: {
           INSTANCE_DOMAIN: 'test.siliconbeest.local',
           INSTANCE_TITLE: 'SiliconBeest Test',
-          INSTANCE_LANGUAGES: 'ko, en',
           REGISTRATION_MODE: 'open',
           OTP_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
           SETUP_SECRET: 'test-setup-secret',

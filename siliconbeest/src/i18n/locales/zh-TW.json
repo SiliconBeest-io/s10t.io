@@ -1055,6 +1055,8 @@
     "fields": {
       "site_title": "站台標題",
       "site_description": "站台描述",
+      "instance_languages": "站台語言",
+      "instance_languages_desc": "輸入伺服器公布的 BCP 47 語言標籤，並以逗號分隔。",
       "contact_email": "聯絡電子郵件",
       "contact_username": "聯絡人使用者名稱",
       "favicon": "網站圖示",

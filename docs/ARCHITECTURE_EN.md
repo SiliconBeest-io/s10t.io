@@ -2361,7 +2361,6 @@ SiliconBeest avoids Cloudflare Containers to keep costs low. This means:
 |----------|--------|-------------|---------|
 | `INSTANCE_DOMAIN` | API | Instance domain name | `social.example.com` |
 | `INSTANCE_TITLE` | API | Instance display name | `My Fediverse Server` |
-| `INSTANCE_LANGUAGES` | API | Comma-separated BCP 47 language tags | `en,ko` |
 | `REGISTRATION_MODE` | API | open / approval / closed | `open` |
 
 ### Secrets (Cloudflare Secrets, never in code)

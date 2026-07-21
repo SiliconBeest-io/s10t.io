@@ -1055,6 +1055,8 @@
     "fields": {
       "site_title": "站点标题",
       "site_description": "站点描述",
+      "instance_languages": "实例语言",
+      "instance_languages_desc": "输入服务器公布的 BCP 47 语言标签，并以逗号分隔。",
       "contact_email": "联系邮箱",
       "contact_username": "联系人用户名",
       "favicon": "网站图标",

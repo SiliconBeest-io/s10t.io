@@ -10,6 +10,7 @@ describe('Instance Info', () => {
 
   beforeAll(async () => {
     await applyMigration();
+    await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
     user = await createTestUser('instuser');
   });
 

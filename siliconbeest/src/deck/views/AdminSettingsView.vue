@@ -30,6 +30,7 @@ const smtpTestResult = ref('')
 const settings = ref({
   site_title: '',
   site_description: '',
+  instance_languages: 'en',
   site_contact_email: '',
   site_contact_username: '',
   site_favicon_url: '',
@@ -163,6 +164,11 @@ const toggleClass =
           <div>
             <label :class="labelClass">{{ t('admin_settings.fields.site_description') }}</label>
             <textarea v-model="settings.site_description" rows="3" :class="inputClass" />
+          </div>
+          <div>
+            <label :class="labelClass">{{ t('admin_settings.fields.instance_languages') }}</label>
+            <p class="mb-1 text-xs text-slate-500 dark:text-slate-400">{{ t('admin_settings.fields.instance_languages_desc') }}</p>
+            <input v-model="settings.instance_languages" :class="inputClass" placeholder="ko, en" />
           </div>
           <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>

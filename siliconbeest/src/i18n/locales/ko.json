@@ -1055,6 +1055,8 @@
     "fields": {
       "site_title": "사이트 이름",
       "site_description": "사이트 설명",
+      "instance_languages": "인스턴스 언어",
+      "instance_languages_desc": "서버에서 표시할 BCP 47 언어 태그를 쉼표로 구분해 입력하세요.",
       "contact_email": "연락처 이메일",
       "contact_username": "연락처 사용자명",
       "favicon": "파비콘",

@@ -82,7 +82,7 @@ app.get('/', async (c) => {
       domain_count: stats.domainCount,
     },
     thumbnail: getInstanceThumbnailUrl(dbSettings, domain),
-    languages: getInstanceLanguages(),
+    languages: await getInstanceLanguages(),
     registrations: registrationMode === 'open' || registrationMode === 'approval',
     approval_required: registrationMode === 'approval',
     invites_enabled: registrationMode !== 'closed',

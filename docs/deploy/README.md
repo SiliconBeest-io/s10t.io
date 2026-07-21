@@ -52,7 +52,6 @@ In your repository's **Settings > Secrets and variables > Actions**:
 | `PROJECT_PREFIX` | Resource name prefix | `myinstance` |
 | `INSTANCE_DOMAIN` | Your instance domain | `social.example.com` |
 | `INSTANCE_TITLE` | Display name for your instance | `My Fediverse Server` |
-| `INSTANCE_LANGUAGES` | Comma-separated BCP 47 language tags advertised by the instance APIs | `en,ko` |
 | `REGISTRATION_MODE` | `open`, `approval`, or `closed` | `open` |
 | `SKIP_SIGNATURE_VERIFICATION` | `true` or `false`; keep `false` in production unless you intentionally need to bypass inbound HTTP signature checks | `false` |
 | `D1_DATABASE_ID` | D1 database UUID | `7c66942d-...` |

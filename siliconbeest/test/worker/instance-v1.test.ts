@@ -8,6 +8,7 @@ const DOMAIN = 'test.siliconbeest.local';
 describe('GET /api/v1/instance', () => {
   beforeAll(async () => {
     await applyMigration();
+    await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
     // Create an admin user so contact_account can be populated
     await createTestUser('admin', { role: 'admin' });
   });

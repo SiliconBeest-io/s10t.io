@@ -13,7 +13,6 @@
 #   PROJECT_PREFIX     — Resource name prefix (e.g. "siliconbeest")
 #   INSTANCE_DOMAIN    — Your instance domain (e.g. "social.example.com")
 #   INSTANCE_TITLE     — Display name for your instance
-#   INSTANCE_LANGUAGES — Comma-separated BCP 47 language tags (e.g. "ko,en")
 #   REPOSITORY_URL     — Public source repository URL
 #   REGISTRATION_MODE  — "open", "approval", or "closed"
 #   D1_DATABASE_ID     — D1 database UUID
@@ -211,7 +210,6 @@ jobs:
           V_PROJECT_PREFIX: ${{ vars.PROJECT_PREFIX }}
           V_INSTANCE_DOMAIN: ${{ vars.INSTANCE_DOMAIN }}
           V_INSTANCE_TITLE: ${{ vars.INSTANCE_TITLE }}
-          V_INSTANCE_LANGUAGES: ${{ vars.INSTANCE_LANGUAGES }}
           V_REPOSITORY_URL: ${{ vars.REPOSITORY_URL }}
           V_REGISTRATION_MODE: ${{ vars.REGISTRATION_MODE }}
           V_SKIP_SIGNATURE_VERIFICATION: ${{ vars.SKIP_SIGNATURE_VERIFICATION }}
@@ -238,7 +236,6 @@ jobs:
           PROJECT_PREFIX="${V_PROJECT_PREFIX}"
           INSTANCE_DOMAIN="${V_INSTANCE_DOMAIN}"
           INSTANCE_TITLE="${V_INSTANCE_TITLE}"
-          INSTANCE_LANGUAGES="${V_INSTANCE_LANGUAGES:-en}"
           REPOSITORY_URL="${V_REPOSITORY_URL}"
           REGISTRATION_MODE="${V_REGISTRATION_MODE}"
           SKIP_SIGNATURE_VERIFICATION="${V_SKIP_SIGNATURE_VERIFICATION:-false}"
