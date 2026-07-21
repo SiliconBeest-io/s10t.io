@@ -300,6 +300,9 @@
     "show_less": "閉じる",
     "show_more": "もっと見る",
     "thread": "スレッド",
+    "current_post": "現在表示中の投稿",
+    "earlier_conversation": "前の会話",
+    "replies_count": "返信 {count}件",
     "read_full_article": "記事を全文読む",
     "visibility_public": "公開",
     "visibility_unlisted": "未収載",
@@ -1052,6 +1055,8 @@
     "fields": {
       "site_title": "サイトタイトル",
       "site_description": "サイトの説明",
+      "instance_languages": "インスタンスの言語",
+      "instance_languages_desc": "サーバーが公開するBCP 47言語タグをカンマ区切りで入力します。",
       "contact_email": "連絡先メールアドレス",
       "contact_username": "連絡先ユーザー名",
       "favicon": "ファビコン",

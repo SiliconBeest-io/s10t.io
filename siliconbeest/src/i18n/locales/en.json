@@ -300,6 +300,9 @@
     "show_less": "Show less",
     "show_more": "Show more",
     "thread": "Thread",
+    "current_post": "Post you are viewing",
+    "earlier_conversation": "Earlier conversation",
+    "replies_count": "{count} replies",
     "read_full_article": "Read full article",
     "visibility_public": "Public",
     "visibility_unlisted": "Unlisted",
@@ -1052,6 +1055,8 @@
     "fields": {
       "site_title": "Site title",
       "site_description": "Site description",
+      "instance_languages": "Instance languages",
+      "instance_languages_desc": "BCP 47 language tags advertised by the server, separated with commas.",
       "contact_email": "Contact email",
       "contact_username": "Contact username",
       "favicon": "Favicon",

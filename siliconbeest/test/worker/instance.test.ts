@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { applyMigration, createTestUser, authHeaders } from './helpers';
 
@@ -10,6 +10,7 @@ describe('Instance Info', () => {
 
   beforeAll(async () => {
     await applyMigration();
+    await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
     user = await createTestUser('instuser');
   });
 
@@ -36,6 +37,37 @@ describe('Instance Info', () => {
       expect(typeof body.registrations.enabled).toBe('boolean');
       // REGISTRATION_MODE is 'open' in test config
       expect(body.registrations.enabled).toBe(true);
+    });
+
+    it('includes the server-configured languages', async () => {
+      const res = await SELF.fetch(`${BASE}/api/v2/instance`);
+      const body = await res.json<Record<string, any>>();
+
+      expect(body.languages).toEqual(['ko', 'en']);
+    });
+
+    it('falls back to English when the language KV value is not JSON', async () => {
+      await env.CACHE.put('settings:instance_languages', 'not-json');
+      try {
+        const res = await SELF.fetch(`${BASE}/api/v2/instance`);
+        expect(res.status).toBe(200);
+        const body = await res.json<Record<string, any>>();
+        expect(body.languages).toEqual(['en']);
+      } finally {
+        await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
+      }
+    });
+
+    it('uses the server-configured logo URL as thumbnail', async () => {
+      const thumbnailUrl = 'https://cdn.example.com/instance-logo-v2.png';
+      await env.DB.prepare(
+        `INSERT INTO settings (key, value, updated_at) VALUES ('site_logo_url', ?1, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).bind(thumbnailUrl).run();
+
+      const res = await SELF.fetch(`${BASE}/api/v2/instance`);
+      const body = await res.json<Record<string, any>>();
+      expect(body.thumbnail.url).toBe(thumbnailUrl);
     });
 
     it('includes configuration section', async () => {

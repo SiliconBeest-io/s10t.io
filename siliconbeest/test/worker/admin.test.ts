@@ -171,5 +171,64 @@ describe('Admin API', () => {
       });
       expect(response.status).toBe(422);
     });
+
+    it('stores instance languages in KV and exposes the normalized setting', async () => {
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({ instance_languages: 'ko-kr, EN, ko-KR' }),
+      });
+      expect(response.status).toBe(200);
+      await expect(response.json<Record<string, string>>()).resolves.toMatchObject({
+        instance_languages: 'ko-KR, en',
+      });
+
+      await expect(env.CACHE.get('settings:instance_languages', 'json')).resolves.toEqual([
+        'ko-KR',
+        'en',
+      ]);
+      await expect(env.DB.prepare(
+        "SELECT value FROM settings WHERE key = 'instance_languages'",
+      ).first()).resolves.toBeNull();
+
+      const instanceResponse = await SELF.fetch(`${BASE}/api/v2/instance`);
+      const instance = await instanceResponse.json<{ languages: string[] }>();
+      expect(instance.languages).toEqual(['ko-KR', 'en']);
+    });
+
+    it('falls back to English for admin reads when the language KV value is not JSON', async () => {
+      await env.CACHE.put('settings:instance_languages', 'not-json');
+      try {
+        const getResponse = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+          headers: authHeaders(admin.token),
+        });
+        expect(getResponse.status).toBe(200);
+        const settings = await getResponse.json<Record<string, string>>();
+        expect(settings).toMatchObject({
+          instance_languages: 'en',
+        });
+
+        const patchResponse = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+          method: 'PATCH',
+          headers: authHeaders(admin.token),
+          body: JSON.stringify({}),
+        });
+        expect(patchResponse.status).toBe(200);
+        await expect(patchResponse.json<Record<string, string>>()).resolves.toMatchObject({
+          instance_languages: 'en',
+        });
+      } finally {
+        await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko-KR', 'en']));
+      }
+    });
+
+    it.each(['', 'not_a_language'])('rejects malformed instance languages: %s', async (value) => {
+      const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+        method: 'PATCH',
+        headers: authHeaders(admin.token),
+        body: JSON.stringify({ instance_languages: value }),
+      });
+      expect(response.status).toBe(422);
+    });
   });
 });

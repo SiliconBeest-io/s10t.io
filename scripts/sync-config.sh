@@ -485,12 +485,10 @@ cat > "$MAIN_DIR/wrangler.jsonc" << WRANGLER_EOF
 {
 	"\$schema": "node_modules/wrangler/config-schema.json",
 	"name": "${MAIN_WORKER_NAME}",
-	"preview_urls": true,
+	"preview_urls": false,
 	"compatibility_date": "2026-06-16",
-	// Keep type generation source-based so Durable Object RPC methods are
-	// available before Nuxt creates .output. Deploy/preview override this
-	// with the built .output/server/index.mjs entrypoint.
-	"main": "server/index.ts",
+	// Nuxt emits the production Cloudflare Worker entrypoint during \`pnpm run build\`.
+	"main": ".output/server/index.mjs",
 	"assets": {
 		"directory": "./.output/public",
 		"not_found_handling": "none",

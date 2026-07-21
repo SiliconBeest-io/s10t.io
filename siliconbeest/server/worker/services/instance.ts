@@ -101,6 +101,62 @@ export async function getInstanceTitle(): Promise<string> {
 	return dbTitle || env.INSTANCE_TITLE;
 }
 
+/**
+ * Resolve the languages advertised by the Mastodon instance APIs.
+ * The admin API stores these in KV as a JSON array.
+ */
+export const INSTANCE_LANGUAGES_KV_KEY = 'settings:instance_languages';
+
+export function parseInstanceLanguagesSetting(value: string): string[] | null {
+	const languages = value.split(',').map((language) => language.trim()).filter(Boolean);
+	if (languages.length === 0) return null;
+	try {
+		return Intl.getCanonicalLocales(languages);
+	} catch {
+		return null;
+	}
+}
+
+export async function getInstanceLanguages(): Promise<string[]> {
+	try {
+		const stored = await env.CACHE.get(INSTANCE_LANGUAGES_KV_KEY, 'json');
+		if (!Array.isArray(stored) || stored.length === 0 || stored.some((value) => typeof value !== 'string')) {
+			return ['en'];
+		}
+		return Intl.getCanonicalLocales(stored);
+	} catch {
+		return ['en'];
+	}
+}
+
+export async function setInstanceLanguages(languages: string[]): Promise<void> {
+	await env.CACHE.put(INSTANCE_LANGUAGES_KV_KEY, JSON.stringify(languages));
+}
+
+/**
+ * Resolve the thumbnail URL from admin-managed branding settings.
+ * `thumbnail_url` remains supported for older installations.
+ */
+export function getInstanceThumbnailUrl(
+	settings: Record<string, string>,
+	domain: string = env.INSTANCE_DOMAIN,
+): string {
+	const baseUrl = `https://${domain}/`;
+	const fallbackUrl = new URL('thumbnail.png', baseUrl).href;
+	const hasSiteLogoSetting = Object.prototype.hasOwnProperty.call(settings, 'site_logo_url');
+	const configuredUrl = (hasSiteLogoSetting
+		? settings.site_logo_url
+		: settings.thumbnail_url)?.trim();
+
+	if (!configuredUrl) return fallbackUrl;
+	if (!URL.canParse(configuredUrl, baseUrl)) return fallbackUrl;
+
+	const resolvedUrl = new URL(configuredUrl, baseUrl);
+	return resolvedUrl.protocol === 'http:' || resolvedUrl.protocol === 'https:'
+		? resolvedUrl.href
+		: fallbackUrl;
+}
+
 // ----------------------------------------------------------------
 // Rules
 // ----------------------------------------------------------------

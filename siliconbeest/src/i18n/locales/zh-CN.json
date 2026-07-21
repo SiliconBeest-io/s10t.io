@@ -300,6 +300,9 @@
     "show_less": "收起",
     "show_more": "展开",
     "thread": "话题串",
+    "current_post": "当前查看的帖文",
+    "earlier_conversation": "之前的对话",
+    "replies_count": "{count} 条回复",
     "read_full_article": "阅读全文",
     "visibility_public": "公开",
     "visibility_unlisted": "不列出",
@@ -1052,6 +1055,8 @@
     "fields": {
       "site_title": "站点标题",
       "site_description": "站点描述",
+      "instance_languages": "实例语言",
+      "instance_languages_desc": "输入服务器公布的 BCP 47 语言标签，并以逗号分隔。",
       "contact_email": "联系邮箱",
       "contact_username": "联系人用户名",
       "favicon": "网站图标",

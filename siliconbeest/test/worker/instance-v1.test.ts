@@ -8,6 +8,7 @@ const DOMAIN = 'test.siliconbeest.local';
 describe('GET /api/v1/instance', () => {
   beforeAll(async () => {
     await applyMigration();
+    await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
     // Create an admin user so contact_account can be populated
     await createTestUser('admin', { role: 'admin' });
   });
@@ -82,12 +83,34 @@ describe('GET /api/v1/instance', () => {
     expect(body.thumbnail).toContain(DOMAIN);
   });
 
+  it('uses the server-configured logo URL as thumbnail', async () => {
+    const thumbnailUrl = 'https://cdn.example.com/instance-logo.png';
+    await env.DB.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES ('site_logo_url', ?1, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).bind(thumbnailUrl).run();
+
+    const res = await SELF.fetch(`${BASE}/api/v1/instance`);
+    const body = await res.json<any>();
+    expect(body.thumbnail).toBe(thumbnailUrl);
+  });
+
   it('has languages array', async () => {
     const res = await SELF.fetch(`${BASE}/api/v1/instance`);
     const body = await res.json<any>();
-    expect(body.languages).toBeDefined();
-    expect(Array.isArray(body.languages)).toBe(true);
-    expect(body.languages.length).toBeGreaterThan(0);
+    expect(body.languages).toEqual(['ko', 'en']);
+  });
+
+  it('falls back to English when the language KV value is not JSON', async () => {
+    await env.CACHE.put('settings:instance_languages', 'not-json');
+    try {
+      const res = await SELF.fetch(`${BASE}/api/v1/instance`);
+      expect(res.status).toBe(200);
+      const body = await res.json<any>();
+      expect(body.languages).toEqual(['en']);
+    } finally {
+      await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
+    }
   });
 
   it('has registrations boolean', async () => {

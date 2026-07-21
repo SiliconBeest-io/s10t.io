@@ -33,7 +33,10 @@ describe.each(variants)('$name admin Workers AI settings', ({ component }) => {
     document.cookie = 'siliconbeest_token=; Path=/; Max-Age=0'
     vi.clearAllMocks()
     adminApi.getAdminSettings.mockResolvedValue({
-      data: { workers_ai_translation_enabled: '1' },
+      data: {
+        instance_languages: 'ko, en',
+        workers_ai_translation_enabled: '1',
+      },
     })
     adminApi.updateAdminSettings.mockResolvedValue({ data: {} })
   })
@@ -74,6 +77,7 @@ describe.each(variants)('$name admin Workers AI settings', ({ component }) => {
     expect(adminApi.updateAdminSettings).toHaveBeenCalledWith(
       'admin-ai-token',
       expect.objectContaining({
+        instance_languages: 'ko, en',
         workers_ai_recommendation_enabled: '0',
         workers_ai_translation_enabled: '1',
         workers_ai_image_description_enabled: '0',

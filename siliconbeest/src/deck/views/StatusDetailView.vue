@@ -8,7 +8,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useStatusesStore } from '@/stores/statuses'
 import { useInstanceStore } from '@/stores/instance'
 import DeckPageShell from '@/deck/layout/DeckPageShell.vue'
-import DeckStatusCard from '@/deck/components/DeckStatusCard.vue'
+import ThreadConversation from '@/components/timeline/ThreadConversation.vue'
+import { getThreadSubtreeIds } from '@/components/timeline/threadTree'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 const { t } = useI18n()
@@ -27,36 +28,6 @@ const error = ref<string | null>(null)
 const status = computed(() => statusId.value ? statusesStore.cache.get(statusId.value) ?? null : null)
 const ancestors = computed(() => ancestorIds.value.map((id) => statusesStore.cache.get(id)).filter(Boolean) as Status[])
 const descendants = computed(() => descendantIds.value.map((id) => statusesStore.cache.get(id)).filter(Boolean) as Status[])
-
-interface ThreadedStatus {
-  status: Status
-  depth: number
-}
-
-const threadedDescendants = computed<ThreadedStatus[]>(() => {
-  if (!status.value || descendants.value.length === 0) return []
-
-  const mainId = status.value.id
-  const childrenMap = new Map<string, Status[]>()
-  for (const s of descendants.value) {
-    const parentId = s.in_reply_to_id ?? mainId
-    const list = childrenMap.get(parentId) ?? []
-    list.push(s)
-    childrenMap.set(parentId, list)
-  }
-
-  const result: ThreadedStatus[] = []
-  function walk(parentId: string, depth: number) {
-    const children = childrenMap.get(parentId)
-    if (!children) return
-    for (const child of children) {
-      result.push({ status: child, depth: Math.min(depth, 4) })
-      walk(child.id, depth + 1)
-    }
-  }
-  walk(mainId, 0)
-  return result
-})
 
 async function loadThread() {
   loading.value = true
@@ -94,7 +65,8 @@ async function loadThread() {
 }
 
 function handleDeleted(deletedId: string) {
-  descendantIds.value = descendantIds.value.filter((id) => id !== deletedId)
+  const deletedSubtreeIds = getThreadSubtreeIds(descendants.value, deletedId)
+  descendantIds.value = descendantIds.value.filter((id) => !deletedSubtreeIds.has(id))
   if (statusId.value === deletedId) {
     router.back()
   }
@@ -124,23 +96,14 @@ watch(() => route.params.statusId, (newId) => {
       <LoadingSpinner v-if="loading" />
 
       <div v-else-if="status" class="mx-auto w-full max-w-2xl animate-fade-in px-4 py-4">
-        <!-- Ancestors (quiet) -->
-        <DeckStatusCard v-for="s in ancestors" :key="s.id" :status="s" @navigate="handleNavigate" @deleted="handleDeleted" />
-
-        <!-- Main status (elevated focal card) -->
-        <div class="sb-card my-3 animate-rise-in shadow-lift ring-1 ring-brand-500/20 dark:ring-brand-400/25">
-          <DeckStatusCard class="rounded-2xl" :status="status" expanded @navigate="handleNavigate" @deleted="handleDeleted" />
-        </div>
-
-        <!-- Descendants (threaded with indentation, quiet) -->
-        <div
-          v-for="item in threadedDescendants"
-          :key="item.status.id"
-          :style="{ marginLeft: `${item.depth * 16}px` }"
-          :class="item.depth > 0 ? 'border-l-2 border-outline dark:border-outline-dark' : ''"
-        >
-          <DeckStatusCard :status="item.status" @navigate="handleNavigate" @deleted="handleDeleted" />
-        </div>
+        <ThreadConversation
+          :status="status"
+          :ancestors="ancestors"
+          :descendants="descendants"
+          variant="deck"
+          @navigate="handleNavigate"
+          @deleted="handleDeleted"
+        />
       </div>
 
       <div v-else class="sb-empty px-4">
