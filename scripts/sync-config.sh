@@ -681,7 +681,10 @@ ${WORKERS_AI_BINDING_BLOCK}
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_classes": ["StreamingDO"]
+			// SQLite-backed: new accounts can no longer create KV-backed DO
+			// namespaces (API error 10099). Already-deployed workers keep their
+			// existing backend — applied migration tags are never re-run.
+			"new_sqlite_classes": ["StreamingDO"]
 		}
 	],
 
