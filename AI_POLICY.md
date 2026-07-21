@@ -12,7 +12,7 @@ This document describes the policy governing the use of AI in the development of
 
 Code written with the assistance of AI must be reviewed before it is incorporated into the project.
 
-- At a minimum, the service must be run and the affected functionality must be verified to work as intended.
+- At a minimum, the service must be run locally and the affected functionality must be verified to work as intended.
 - Changes involving issues that can only be reproduced or verified in a federated environment, or improvements that require real-world metrics such as performance data, may be reviewed in an appropriate environment upon a separate request. If you need a federation testing environment, follow the instructions in the [contribution guide](CONTRIBUTING.md#development-environment).
 - Emergency changes, including hotfixes, may be incorporated without a separate prior review. They may be reviewed after incorporation when necessary.
 
