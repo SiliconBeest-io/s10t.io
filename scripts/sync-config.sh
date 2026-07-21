@@ -462,6 +462,44 @@ if [[ "$CURRENT_SKIP_SIGNATURE_VERIFICATION" != "true" \
   exit 1
 fi
 
+# --- Debug Logging Override ---
+# Preserve the checked-in DEBUG var when regenerating wrangler.jsonc; the
+# main worker is canonical. The ambient shell DEBUG variable is deliberately
+# ignored (too many tools set it), unlike SKIP_SIGNATURE_VERIFICATION above.
+read_debug_override() {
+  local config_file="$1"
+  if [[ ! -f "$config_file" ]]; then
+    return
+  fi
+
+  sed '/^[[:space:]]*\/\//d' "$config_file" | node -e "
+    try {
+      const d = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+      const value = d.vars?.DEBUG;
+      if (value !== undefined) {
+        console.log(typeof value === 'boolean' ? String(value) : 'INVALID');
+      }
+    } catch (e) {}
+  " 2>/dev/null || true
+}
+
+MAIN_DEBUG=$(read_debug_override "$MAIN_DIR/wrangler.jsonc")
+CONSUMER_DEBUG=$(read_debug_override "$CONSUMER_DIR/wrangler.jsonc")
+
+if [[ "$MAIN_DEBUG" == "INVALID" ]]; then
+  error "Main wrangler DEBUG must be boolean true or false"
+  exit 1
+fi
+if [[ "$CONSUMER_DEBUG" == "INVALID" ]]; then
+  error "Queue consumer wrangler DEBUG must be boolean true or false"
+  exit 1
+fi
+if [[ -n "$MAIN_DEBUG" && -n "$CONSUMER_DEBUG" && "$MAIN_DEBUG" != "$CONSUMER_DEBUG" ]]; then
+  warn "DEBUG overrides differ; the main worker value is canonical"
+fi
+
+CURRENT_DEBUG="${MAIN_DEBUG:-false}"
+
 # ============================================================================
 # Summary
 # ============================================================================
@@ -563,6 +601,10 @@ ${WRANGLER_COMPATIBILITY_FLAGS_INDENT}"compatibility_flags": ["nodejs_compat"],
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
 		"REGISTRATION_MODE": "${CURRENT_REG}",
 		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION},
+		// Verbose debug logging (full federation request/response payloads,
+		// per-request user activity). Ultra-sensitive values (private keys,
+		// passwords, tokens) are always redacted. Off unless exactly true.
+		"DEBUG": ${CURRENT_DEBUG},
 		"WORKERS_AI_ENABLED": ${CURRENT_WORKERS_AI_ENABLED},
 		"WORKERS_AI_RECOMMENDATION_MODEL": "${CURRENT_WORKERS_AI_RECOMMENDATION_MODEL}",
 		"WORKERS_AI_TRANSLATION_MODEL": "${CURRENT_WORKERS_AI_TRANSLATION_MODEL}",
@@ -677,7 +719,11 @@ cat > "$CONSUMER_DIR/wrangler.jsonc" << WRANGLER_EOF
 	"vars": {
 		"INSTANCE_DOMAIN": "${CURRENT_DOMAIN}",
 		"REPOSITORY_URL": "${CURRENT_REPOSITORY_URL}",
-		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION}
+		"SKIP_SIGNATURE_VERIFICATION": ${CURRENT_SKIP_SIGNATURE_VERIFICATION},
+		// Verbose debug logging (full federation request/response payloads).
+		// Ultra-sensitive values (private keys, passwords, tokens) are always
+		// redacted. Off unless exactly true.
+		"DEBUG": ${CURRENT_DEBUG}
 	},
 	// D1 Database
 	"d1_databases": [

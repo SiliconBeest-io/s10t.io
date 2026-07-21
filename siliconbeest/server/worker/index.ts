@@ -12,6 +12,7 @@ import { federation } from '@fedify/hono';
 
 import type { AppVariables } from './types';
 import { corsMiddleware } from './middleware/cors';
+import { debugLogMiddleware } from './middleware/debugLog';
 import { requestIdMiddleware } from './middleware/requestId';
 import { contentNegotiation } from './middleware/contentNegotiation';
 import { errorHandler } from './middleware/errorHandler';
@@ -144,6 +145,7 @@ const app = new Hono<{ Variables: AppVariables }>();
 
 app.onError(errorHandler);
 app.use('*', requestIdMiddleware);
+app.use('*', debugLogMiddleware);
 app.use('*', corsMiddleware);
 app.use('*', contentNegotiation);
 app.use('*', logger());

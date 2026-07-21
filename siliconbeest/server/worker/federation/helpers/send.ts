@@ -16,6 +16,28 @@ import { env } from 'cloudflare:workers';
 import type { Federation, Context } from '@fedify/fedify';
 import type { Activity, Recipient } from '@fedify/fedify/vocab';
 import type { FedifyContextData } from '../fedify';
+import { debugLog, isDebugEnabled } from '../../../../../packages/shared/utils/debugLog';
+
+/** Log the full outgoing activity JSON-LD when DEBUG is enabled. */
+async function debugLogOutgoingActivity(
+	helper: string,
+	senderUsername: string,
+	activity: Activity,
+	details: Record<string, unknown> = {},
+): Promise<void> {
+	if (!isDebugEnabled()) return;
+	let jsonLd: unknown;
+	try {
+		jsonLd = await activity.toJsonLd();
+	} catch {
+		jsonLd = undefined;
+	}
+	debugLog('federation.send', `${helper} from ${senderUsername}`, {
+		activityType: activity.constructor.name,
+		...details,
+		activity: jsonLd,
+	});
+}
 
 /**
  * Get a Fedify Context from a Federation instance for sending activities.
@@ -57,6 +79,7 @@ export async function sendToFollowers(
 	activity: Activity,
 ): Promise<void> {
 	console.log(`[federation] sendToFollowers: sender=${senderUsername}, activity.type=${activity.constructor.name}`);
+	await debugLogOutgoingActivity('sendToFollowers', senderUsername, activity);
 	try {
 		const ctx = getFedifyContext(federation);
 		await ctx.sendActivity(
@@ -104,6 +127,10 @@ export async function sendToRecipient(
 			? { sharedInbox: new URL(account.shared_inbox_url) }
 			: null,
 	};
+	await debugLogOutgoingActivity('sendToRecipient', senderUsername, activity, {
+		recipientUri,
+		inboxUrl: account.inbox_url,
+	});
 	await ctx.sendActivity(
 		{ identifier: senderUsername },
 		recipient,
@@ -127,6 +154,9 @@ export async function sendToRecipients(
 	if (recipients.length === 0) return;
 
 	console.log(`[federation] sendToRecipients: sender=${senderUsername}, recipients=${recipients.length}, activity.type=${activity.constructor.name}`);
+	await debugLogOutgoingActivity('sendToRecipients', senderUsername, activity, {
+		recipients: recipients.map((r) => r.id?.href),
+	});
 	try {
 		const ctx = getFedifyContext(federation);
 		await ctx.sendActivity(
