@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Status } from '@/types/mastodon'
 import StatusCard from '@/components/status/StatusCard.vue'
@@ -25,6 +25,12 @@ const emit = defineEmits<{
 
 const cardComponent = computed(() => props.variant === 'deck' ? DeckStatusCard : StatusCard)
 const replyTree = computed(() => buildThreadTree(props.descendants))
+const ancestorOverlayId = ref<string | null>(null)
+
+function handleAncestorOverlay(ancestorId: string, open: boolean) {
+  if (open) ancestorOverlayId.value = ancestorId
+  else if (ancestorOverlayId.value === ancestorId) ancestorOverlayId.value = null
+}
 </script>
 
 <template>
@@ -45,7 +51,12 @@ const replyTree = computed(() => buildThreadTree(props.descendants))
       </div>
 
       <div class="thread-ancestor-list">
-        <div v-for="ancestor in ancestors" :key="ancestor.id" class="thread-ancestor">
+        <div
+          v-for="ancestor in ancestors"
+          :key="ancestor.id"
+          class="thread-ancestor"
+          :class="{ 'thread-ancestor--overlay': ancestorOverlayId === ancestor.id }"
+        >
           <span class="thread-ancestor-dot" aria-hidden="true" />
           <div class="thread-ancestor-card">
             <component
@@ -53,6 +64,7 @@ const replyTree = computed(() => buildThreadTree(props.descendants))
               :status="ancestor"
               @navigate="emit('navigate', $event)"
               @deleted="emit('deleted', $event)"
+              @overlay="handleAncestorOverlay(ancestor.id, $event)"
             />
           </div>
         </div>
@@ -161,6 +173,10 @@ const replyTree = computed(() => buildThreadTree(props.descendants))
 
 .thread-ancestor {
   position: relative;
+}
+
+.thread-ancestor--overlay {
+  z-index: 3;
 }
 
 .thread-ancestor + .thread-ancestor {

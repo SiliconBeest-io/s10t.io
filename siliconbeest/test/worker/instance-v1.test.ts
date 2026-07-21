@@ -101,6 +101,18 @@ describe('GET /api/v1/instance', () => {
     expect(body.languages).toEqual(['ko', 'en']);
   });
 
+  it('falls back to English when the language KV value is not JSON', async () => {
+    await env.CACHE.put('settings:instance_languages', 'not-json');
+    try {
+      const res = await SELF.fetch(`${BASE}/api/v1/instance`);
+      expect(res.status).toBe(200);
+      const body = await res.json<any>();
+      expect(body.languages).toEqual(['en']);
+    } finally {
+      await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
+    }
+  });
+
   it('has registrations boolean', async () => {
     const res = await SELF.fetch(`${BASE}/api/v1/instance`);
     const body = await res.json<any>();

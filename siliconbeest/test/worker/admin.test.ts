@@ -196,6 +196,32 @@ describe('Admin API', () => {
       expect(instance.languages).toEqual(['ko-KR', 'en']);
     });
 
+    it('falls back to English for admin reads when the language KV value is not JSON', async () => {
+      await env.CACHE.put('settings:instance_languages', 'not-json');
+      try {
+        const getResponse = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+          headers: authHeaders(admin.token),
+        });
+        expect(getResponse.status).toBe(200);
+        const settings = await getResponse.json<Record<string, string>>();
+        expect(settings).toMatchObject({
+          instance_languages: 'en',
+        });
+
+        const patchResponse = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
+          method: 'PATCH',
+          headers: authHeaders(admin.token),
+          body: JSON.stringify({}),
+        });
+        expect(patchResponse.status).toBe(200);
+        await expect(patchResponse.json<Record<string, string>>()).resolves.toMatchObject({
+          instance_languages: 'en',
+        });
+      } finally {
+        await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko-KR', 'en']));
+      }
+    });
+
     it.each(['', 'not_a_language'])('rejects malformed instance languages: %s', async (value) => {
       const response = await SELF.fetch(`${BASE}/api/v1/admin/settings`, {
         method: 'PATCH',

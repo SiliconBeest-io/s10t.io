@@ -142,4 +142,37 @@ describe('thread conversation', () => {
     await nestedCard.get('.close-overlay').trigger('click')
     expect(wrapper.findAll('.thread-node--overlay')).toHaveLength(0)
   })
+
+  it('raises an ancestor card while its action menu is open', async () => {
+    const wrapper = mount(ThreadConversation, {
+      props: {
+        status: status('current'),
+        ancestors: [status('ancestor-a'), status('ancestor-b')],
+        descendants: [],
+      },
+      global: {
+        plugins: [createTestI18n()],
+        stubs: {
+          StatusCard: {
+            props: { status: { type: Object, required: true } },
+            emits: ['overlay'],
+            template: `
+              <div :data-status-id="status.id">
+                <button class="open-overlay" @click="$emit('overlay', true)" />
+                <button class="close-overlay" @click="$emit('overlay', false)" />
+              </div>
+            `,
+          },
+          DeckStatusCard: true,
+        },
+      },
+    })
+
+    const ancestorCard = wrapper.get('[data-status-id="ancestor-a"]')
+    await ancestorCard.get('.open-overlay').trigger('click')
+    expect(wrapper.get('.thread-ancestor--overlay').find('[data-status-id="ancestor-a"]').exists()).toBe(true)
+
+    await ancestorCard.get('.close-overlay').trigger('click')
+    expect(wrapper.find('.thread-ancestor--overlay').exists()).toBe(false)
+  })
 })

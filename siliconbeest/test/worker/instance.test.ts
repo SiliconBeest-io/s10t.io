@@ -46,6 +46,18 @@ describe('Instance Info', () => {
       expect(body.languages).toEqual(['ko', 'en']);
     });
 
+    it('falls back to English when the language KV value is not JSON', async () => {
+      await env.CACHE.put('settings:instance_languages', 'not-json');
+      try {
+        const res = await SELF.fetch(`${BASE}/api/v2/instance`);
+        expect(res.status).toBe(200);
+        const body = await res.json<Record<string, any>>();
+        expect(body.languages).toEqual(['en']);
+      } finally {
+        await env.CACHE.put('settings:instance_languages', JSON.stringify(['ko', 'en']));
+      }
+    });
+
     it('uses the server-configured logo URL as thumbnail', async () => {
       const thumbnailUrl = 'https://cdn.example.com/instance-logo-v2.png';
       await env.DB.prepare(

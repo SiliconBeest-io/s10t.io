@@ -118,11 +118,11 @@ export function parseInstanceLanguagesSetting(value: string): string[] | null {
 }
 
 export async function getInstanceLanguages(): Promise<string[]> {
-	const stored = await env.CACHE.get(INSTANCE_LANGUAGES_KV_KEY, 'json') as unknown;
-	if (!Array.isArray(stored) || stored.length === 0 || stored.some((value) => typeof value !== 'string')) {
-		return ['en'];
-	}
 	try {
+		const stored = await env.CACHE.get(INSTANCE_LANGUAGES_KV_KEY, 'json');
+		if (!Array.isArray(stored) || stored.length === 0 || stored.some((value) => typeof value !== 'string')) {
+			return ['en'];
+		}
 		return Intl.getCanonicalLocales(stored);
 	} catch {
 		return ['en'];
