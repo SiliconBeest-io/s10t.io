@@ -72,6 +72,11 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'cloudflare_module',
     entry: CLOUDFLARE_ENTRY,
+    esbuild: {
+      options: {
+        target: 'es2022',
+      },
+    },
     prerender: {
       autoSubfolderIndex: false,
     },

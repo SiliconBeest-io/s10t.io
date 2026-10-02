@@ -131,6 +131,8 @@ jobs:
           pnpm --dir siliconbeest exec tsc --noEmit -p tsconfig.worker.json
 
       - name: Build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           echo "VITE_INSTANCE_DOMAIN=${{ vars.INSTANCE_DOMAIN }}" > siliconbeest/.env
           pnpm --dir siliconbeest run build

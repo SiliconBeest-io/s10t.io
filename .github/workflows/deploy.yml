@@ -140,6 +140,8 @@ jobs:
           pnpm --dir siliconbeest exec tsc --noEmit -p tsconfig.worker.json
 
       - name: Build
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           echo "VITE_INSTANCE_DOMAIN=${{ vars.INSTANCE_DOMAIN }}" > siliconbeest/.env
           echo "NUXT_PUBLIC_SENTRY_DSN=${{ vars.SENTRY_CLIENT_DSN }}" >> siliconbeest/.env
