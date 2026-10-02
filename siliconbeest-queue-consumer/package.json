@@ -15,12 +15,12 @@
 		"@types/node": "^25.5.2",
 		"typescript": "^5.5.2",
 		"vitest": "^4.1.9",
-		"wrangler": "4.107.0"
+		"wrangler": "4.136.3"
 	},
 	"dependencies": {
-		"@fedify/cfworkers": "^2.3.3",
-		"@fedify/fedify": "^2.3.3",
-		"@fedify/vocab": "^2.3.3",
+		"@fedify/cfworkers": "^2.4.0",
+		"@fedify/fedify": "^2.4.0",
+		"@fedify/vocab": "^2.4.0",
 		"@logtape/logtape": "^2.2.3",
 		"@sentry/cloudflare": "^10.66.0",
 		"glob": "^13.0.6"
